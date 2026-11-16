@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pull Rate</title>
+<style>
+  :root {
+    --felt: #0f3d2e;
+    --felt-dark: #0a2a20;
+    --felt-line: #1d5a44;
+    --cream: #f6efdc;
+    --ink: #1b1b1b;
+    --muted: #a9c7b8;
+    --gold: #f2c14e;
+    --red: #d64545;
+    --c-common: #e8e8e8;
+    --c-uncommon: #5fd18b;
+    --c-rare: #4fa3ff;
+    --c-mythic: #f2c14e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(ellipse at top, var(--felt) 0%, var(--felt-dark) 75%) fixed;
+    color: var(--cream);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; }
+  h1 { font-size: clamp(44px, 9vw, 84px); line-height: .95; margin: 0; letter-spacing: -2px; }
+  h1 span { color: var(--gold); }
+  h2 { font-size: 28px; margin: 0 0 6px; }
+  h2 small { display: block; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); font-weight: 600; margin-bottom: 4px; }
+  p { margin: 0 0 12px; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 640px; margin-top: 14px; }
+  .tag { display: inline-block; border: 1px solid var(--felt-line); border-radius: 999px; padding: 3px 12px; font-size: 13px; color: var(--muted); margin: 14px 6px 0 0; }
+  section { margin-top: 56px; }
+  .panel { background: rgba(0,0,0,.22); border: 1px solid var(--felt-line); border-radius: 16px; padding: 20px; }
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .g4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .muted { color: var(--muted); }
+
+  /* loop */
+  .loop { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+  .step { background: var(--cream); color: var(--ink); border-radius: 12px; padding: 10px 14px; font-weight: 600; }
+  .step em { display: block; font-style: normal; font-weight: 400; font-size: 13px; color: #555; }
+  .arrow { color: var(--gold); font-size: 22px; }
+
+  /* playing cards */
+  .hand { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .card {
+    width: 62px; height: 88px; border-radius: 8px; background: var(--cream); color: var(--ink);
+    display: flex; flex-direction: column; justify-content: space-between; padding: 6px 7px;
+    font-weight: 700; font-size: 18px; box-shadow: 0 3px 0 rgba(0,0,0,.35); position: relative;
+  }
+  .card .s { align-self: flex-end; font-size: 22px; }
+  .card.red { color: var(--red); }
+  .card.dim { opacity: .35; }
+  .card.forged { background: linear-gradient(135deg, #fff3c4, var(--gold)); outline: 2px solid var(--gold); }
+  .card.forged::after { content: "IV"; position: absolute; top: 6px; right: 7px; font-size: 11px; color: #7a5500; }
+  .vs { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; }
+  .vs .mid { color: var(--gold); font-weight: 800; font-size: 20px; }
+  .label { font-size: 13px; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--felt-line); vertical-align: top; }
+  th { color: var(--gold); font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* packs */
+  .pack {
+    border-radius: 14px; padding: 16px; min-height: 210px; display: flex; flex-direction: column;
+    color: var(--ink); position: relative; overflow: hidden; box-shadow: 0 6px 0 rgba(0,0,0,.35);
+  }
+  .pack::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(115deg, rgba(255,255,255,.18) 0 6px, transparent 6px 18px); pointer-events: none; }
+  .pack h3 { margin: 0; font-size: 22px; position: relative; }
+  .pack .cost { font-weight: 800; font-size: 14px; position: relative; margin: 2px 0 10px; }
+  .pack p { position: relative; font-size: 14px; margin: 0; }
+  .pack .ribbon { position: relative; margin-top: auto; padding-top: 10px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+  .p-free { background: linear-gradient(160deg, #e9e9e9, #b9b9b9); }
+  .p-coll { background: linear-gradient(160deg, #ffe08a, #c98a12); }
+  .p-off  { background: linear-gradient(160deg, #e7a6ff, #6fd3c4); }
+  .p-re   { background: linear-gradient(160deg, #ff9a7a, #c23b5a); color: #fff; outline: 3px solid var(--gold); }
+  .p-re .ribbon { color: var(--gold); }
+
+  /* rip demo */
+  .rip { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .bigpack {
+    width: 150px; height: 210px; border-radius: 12px; cursor: pointer; border: 0;
+    background: linear-gradient(160deg, #ffe08a, #c98a12); color: var(--ink); font: 800 20px system-ui;
+    box-shadow: 0 8px 0 rgba(0,0,0,.4); transition: transform .15s;
+  }
+  .bigpack:hover { transform: rotate(-2deg) scale(1.03); }
+  .bigpack.shake { animation: shake .45s; }
+  @keyframes shake { 20%{transform:rotate(-4deg)} 40%{transform:rotate(4deg)} 60%{transform:rotate(-3deg)} 80%{transform:rotate(2deg)} }
+  .pulls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; min-height: 120px; }
+  .pull { width: 76px; height: 108px; perspective: 600px; cursor: pointer; }
+  .pull .in { width: 100%; height: 100%; position: relative; transition: transform .5s; transform-style: preserve-3d; }
+  .pull.flipped .in { transform: rotateY(180deg); }
+  .pull .face, .pull .back { position: absolute; inset: 0; border-radius: 9px; backface-visibility: hidden; }
+  .pull .back { background: #20313a; border: 3px solid var(--glow); box-shadow: 0 0 18px var(--glow); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 4px var(--glow); } }
+  .pull .face { transform: rotateY(180deg); background: var(--cream); color: var(--ink); display: flex; flex-direction: column; justify-content: space-between; padding: 7px; font-weight: 800; font-size: 20px; border: 3px solid var(--glow); }
+  .pull .face.red { color: var(--red); }
+  .pull .face small { font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #555; }
+  .pull .face.foil { background: linear-gradient(120deg, #fff 0%, #ffd6f5 25%, #d6f3ff 50%, #fff6c9 75%, #fff 100%); }
+  .pull .face.coll { background: linear-gradient(135deg, #2a2140, #4b2e83); color: var(--gold); font-size: 13px; text-align: center; justify-content: center; }
+  .pity { font-size: 13px; color: var(--muted); }
+  .btn { background: var(--gold); color: var(--ink); border: 0; border-radius: 10px; padding: 12px 18px; font: 700 15px system-ui; cursor: pointer; min-height: 44px; }
+  .btn.ghost { background: transparent; color: var(--cream); border: 1px solid var(--felt-line); }
+
+  /* shopkeeper */
+  .keeper { display: grid; grid-template-columns: 110px 1fr; gap: 16px; align-items: start; }
+  .face-k { width: 110px; height: 110px; border-radius: 50%; background: #c98a5a; display: flex; align-items: center; justify-content: center; font-size: 54px; border: 4px solid var(--gold); }
+  .traits { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .trait { background: var(--gold); color: var(--ink); border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 700; }
+  .bubble { background: var(--cream); color: var(--ink); border-radius: 14px; padding: 12px 14px; min-height: 52px; position: relative; }
+  .qs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .q { background: rgba(255,255,255,.08); color: var(--cream); border: 1px solid var(--felt-line); border-radius: 10px; padding: 9px 12px; cursor: pointer; font: 14px system-ui; min-height: 40px; }
+  .q:hover { border-color: var(--gold); }
+  .rapport { height: 8px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; margin-top: 10px; }
+  .rapport div { height: 100%; width: 30%; background: var(--gold); transition: width .3s; }
+
+  /* collectibles */
+  .case { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .item { background: linear-gradient(180deg, #2a2140, #1c1630); border: 1px solid #4b2e83; border-radius: 12px; padding: 12px; }
+  .item b { color: var(--gold); display: block; }
+  .item span { font-size: 13px; color: #d5cde8; display: block; }
+  .item .meta { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-top: 8px; color: #a99bd0; }
+  .item.r-Common { border-color: #6b6b6b; }
+  .item.r-Uncommon { border-color: var(--c-uncommon); }
+  .item.r-Rare { border-color: var(--c-rare); box-shadow: 0 0 12px rgba(79,163,255,.35); }
+  .item.r-Grail { border-color: var(--gold); box-shadow: 0 0 16px rgba(242,193,78,.5); }
+  .item.pop { animation: pop .35s; }
+  @keyframes pop { 0%{transform:scale(.8);opacity:0} 100%{transform:none;opacity:1} }
+  .pill { display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; }
+  .pill.Common { background:#6b6b6b; color:#fff } .pill.Uncommon { background:var(--c-uncommon); color:#000 }
+  .pill.Rare { background:var(--c-rare); color:#000 } .pill.Grail { background:var(--gold); color:#000 }
+
+  .modes .panel h3 { margin: 0 0 4px; }
+  .when { font-size: 12px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 1px; }
+
+  /* feedback */
+  textarea { width: 100%; min-height: 90px; border-radius: 10px; border: 1px solid var(--felt-line); background: rgba(0,0,0,.25); color: var(--cream); padding: 10px; font: 15px system-ui; }
+  .votes { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .votes .q.on { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+  .status { color: var(--gold); font-weight: 600; margin-top: 10px; min-height: 1em; }
+  .reply { margin-top: 12px; background: var(--cream); color: var(--ink); border-radius: 12px; padding: 12px 14px; white-space: pre-wrap; }
+
+  @media (max-width: 560px) {
+    .keeper { grid-template-columns: 1fr; }
+    .face-k { width: 80px; height: 80px; font-size: 40px; }
+    .vs { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>PULL<br><span>RATE</span></h1>
+  <p class="lede">A booster-pack poker roguelike. Rip packs, build a 52-card deck, bet your life on every hand, and decide when to cash in a winning hand or <b>forge</b> it into something stronger.</p>
+  <span class="tag">Working title</span><span class="tag">KSU AI Hackathon · IEEE Game Sprint + Nudox</span><span class="tag">Balatro × Super Auto Pets × pack opening</span>
+</header>
+
+<section>
+  <h2><small>The loop</small>One run, round by round</h2>
+  <div class="loop">
+    <div class="step">Shop<em>buy & rip packs</em></div><div class="arrow">→</div>
+    <div class="step">Draw 8, pick 5<em>from your deck</em></div><div class="arrow">→</div>
+    <div class="step">Bet<em>between min & max</em></div><div class="arrow">→</div>
+    <div class="step">Play or Forge<em>before the reveal</em></div><div class="arrow">→</div>
+    <div class="step">Showdown<em>higher Chips × Mult takes the pot</em></div>
+  </div>
+  <p class="muted" style="margin-top:14px">Your <b>bankroll is your life</b> and your shop money. Min and max bets climb every round, so the squeeze is always on. Bankroll hits 0 and the run is over.</p>
+</section>
+
+<section>
+  <h2><small>The big idea</small>Forging: lose now, win later</h2>
+  <p class="muted">You pulled four Kings. You can play them and almost surely take the pot, or you can forge them into one upgraded card. A forged card is still "in the forge" this hand, so you play with whatever's left. You'll probably lose, but not definitely.</p>
+  <div class="grid g2">
+    <div class="panel">
+      <div class="label">Option A: Play it</div>
+      <div class="hand">
+        <div class="card">K<span class="s">♠</span></div><div class="card red">K<span class="s">♥</span></div><div class="card red">K<span class="s">♦</span></div><div class="card">K<span class="s">♣</span></div><div class="card red">7<span class="s">♥</span></div>
+      </div>
+      <p><b>Four of a kind.</b> Big pot, deck unchanged.</p>
+    </div>
+    <div class="panel">
+      <div class="label">Option B: Forge it</div>
+      <div class="hand">
+        <div class="card forged">K<span class="s">★</span></div><div class="card dim">K<span class="s">♥</span></div><div class="card dim">K<span class="s">♦</span></div><div class="card dim">K<span class="s">♣</span></div><div class="card red">7<span class="s">♥</span></div>
+      </div>
+      <p><b>This hand: high card 7.</b> You lose your bet unless the opponent has nothing. <b>From now on</b>, the forged King counts as three of a kind <i>by itself</i>, and your deck is 3 cards thinner.</p>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:14px">
+    <table>
+      <tr><th>Forge a…</th><th>You get</th></tr>
+      <tr><td>Pair</td><td>A card that counts as a pair on its own</td></tr>
+      <tr><td>Three of a kind</td><td>That rank scores ×2</td></tr>
+      <tr><td>Straight</td><td>A card that counts as two adjacent ranks</td></tr>
+      <tr><td>Flush</td><td>A card that counts as every suit</td></tr>
+      <tr><td>Four of a kind</td><td>A card that counts as three of a kind on its own</td></tr>
+    </table>
+    <p class="muted" style="margin:12px 0 0">Forging early is cheap (low min bet), and forging late is expensive. Bluffing works too: bet big, then forge anyway.</p>
+  </div>
+</section>
+
+<section>
+  <h2><small>Feel it</small>Rip a pack</h2>
+  <p class="muted">Commons come first, then the insert, and the rare slot is last. The card back glows its rarity before you flip it. Click the pack, then click each card.</p>
+  <div class="panel rip">
+    <button class="bigpack" id="bigpack">COLLECTOR<br>PACK</button>
+    <div class="pulls" id="pulls"></div>
+    <div class="pity" id="pity">Packs since last mythic: 0</div>
+  </div>
+</section>
+
+<section>
+  <h2><small>The shop</small>The pack wall</h2>
+  <p class="muted">The <b>Free</b> pack slot is always there. <b>Restock</b> rerolls everything else, costing 1, then 2, then 3… and the cost resets next shop.</p>
+  <div class="grid g4">
+    <div class="pack p-free"><h3>Free</h3><div class="cost">$0</div><p>3 plain cards, small chance of an enhancement.</p><div class="ribbon">Always in stock</div></div>
+    <div class="pack p-coll"><h3>Collector</h3><div class="cost">$$$</div><p>5 cards, guaranteed foil or enhanced, best odds at a collectible.</p><div class="ribbon">The jackpot</div></div>
+    <div class="pack p-off"><h3>Off-Brand</h3><div class="cost">$</div><p>5 chaotic cards: misprints, cursed cards, weird suits. Sometimes a miracle.</p><div class="ribbon">Cheap chaos</div></div>
+    <div class="pack p-re"><h3>Repack</h3><div class="cost">$$</div><p>Made from cards <b>other players sold</b>. In Battle Royale they're your opponents' real cards. Solo, they come from a saved run on the same seed.</p><div class="ribbon">★ Our twist</div></div>
+  </div>
+  <div class="panel" style="margin-top:14px">
+    <table>
+      <tr><th>Station</th><th>What it does</th></tr>
+      <tr><td>Singles case</td><td>2 random collectibles each shop. <b>Anything that has appeared in the shop this run never shows up again</b> unless you own a Back Order Slip</td></tr>
+      <tr><td>Grading desk</td><td>Send a card off for one round and pray. <b>The fresher the pull, the better the odds.</b> See "Grading" below</td></tr>
+      <tr><td>Sell / trade-in</td><td>Sell at this round's market price, or trade 3 cards for 1 pack (your sold cards feed the Repacks)</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><small>The shop</small>The shopkeeper</h2>
+  <p class="muted">Each run rolls a shopkeeper with <b>3 random traits</b> from the seed. You get a few simple questions, and the traits decide how each one goes. Rapport carries over the whole run. Try this one:</p>
+  <div class="panel keeper">
+    <div class="face-k">🧔</div>
+    <div>
+      <b style="font-size:20px">Dusty Ray</b>
+      <div class="traits"><span class="trait">Liar</span><span class="trait">Chatty</span><span class="trait">Nostalgic</span></div>
+      <div class="bubble" id="bubble">"Welcome in! Mind the dust. What can I do ya for?"</div>
+      <div class="qs" id="qs"></div>
+      <div class="label" style="margin-top:10px">Rapport</div>
+      <div class="rapport"><div id="rap"></div></div>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:10px">Other traits: Honest · Greedy · Grumpy · Superstitious · Closing Down · Collector. Combos make each shopkeeper feel different: Honest + Greedy sells tips that are true.</p>
+</section>
+
+<section>
+  <h2><small>Design rules</small>Borrowed from how Balatro was made</h2>
+  <div class="grid g2">
+    <div class="panel"><b>1. The theme does the teaching.</b><p class="muted">Every name is real collector lingo: foil, slab, 1st Edition, code card, misprint. Players already know what "mint" means, so we never invent jargon.</p></div>
+    <div class="panel"><b>2. Numbers go up.</b><p class="muted">Every hand scores <b>Chips × Mult</b>. At the showdown the higher score takes the pot. Poker rank only sets the base, and your build does the rest.</p></div>
+    <div class="panel"><b>3. Hook into broad things.</b><p class="muted">Collectibles care about ranks, suits, hand types, finishes, bets or deck size, never "works with Collectible X." Narrow combos almost never come up, and that feels bad.</p></div>
+    <div class="panel"><b>4. Four lines, max.</b><p class="muted">If an effect needs more text, it isn't broad enough. Cut it.</p></div>
+    <div class="panel"><b>5. Strong means conditional.</b><p class="muted">×3 mult needs a condition you have to build toward. Mix in boring, reliable +4 mult items so builds don't feel forced.</p></div>
+    <div class="panel"><b>6. No new mechanics.</b><p class="muted">Collectibles only bend rules that already exist. Every new item makes the existing synergies richer instead of watering them down.</p></div>
+    <div class="panel"><b>7. Forging is spice, not the spine.</b><p class="muted">LocalThunk's first build was Super Auto Pets-style card leveling, and it wasn't fun until jokers took over. Collectibles carry the run. Forging is a big decision you make a few times per run.</p></div>
+    <div class="panel"><b>8. Seeds visible from day one.</b><p class="muted">Players shared Balatro seeds even though LocalThunk didn't care about them. Our Battle Royale mode is built on seeds, so put the seed on screen.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2><small>What you can pull</small>Four layers, each with one job</h2>
+  <p class="muted">Every pack mirrors a real booster: <b>commons → insert → rare slot</b>. Each layer matches one Balatro system, so nothing overlaps.</p>
+  <div class="grid g2">
+    <div class="panel">
+      <div class="when">Layer 1 · Playing cards (the deck)</div>
+      <p>The standard 52. Each card can carry <b>one Finish</b> and <b>one Stamp</b>.</p>
+      <table>
+        <tr><th>Finish</th><th>Effect</th></tr>
+        <tr><td>Foil</td><td>+50 chips</td></tr>
+        <tr><td>Holo</td><td>+10 mult</td></tr>
+        <tr><td>Prism</td><td>×1.5 mult</td></tr>
+        <tr><td>Misprint</td><td>+0 to +20 mult, rolled each hand</td></tr>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="when">Layer 1 · Stamps</div>
+      <p class="muted">These are Balatro's seals and enhancements, renamed in collector lingo.</p>
+      <table>
+        <tr><th>Stamp</th><th>Effect</th></tr>
+        <tr><td>1st Edition</td><td>Gains +1 mult every time it scores</td></tr>
+        <tr><td>Signed</td><td>Scores twice</td></tr>
+        <tr><td>Gold Border</td><td>+$2 if it's still in hand at round end</td></tr>
+        <tr><td>Damaged</td><td>×2 mult, 1 in 4 chance it tears and is destroyed</td></tr>
+        <tr><td>Graded 1–10</td><td>Only from the grading desk. 1–3: ×0.8 · 4–9: ×(1 + grade/10) · 10 Gem Mint: ×2</td></tr>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="when">Layer 2 · Inserts (one-use, hold 2)</div>
+      <p class="muted">Real packs come with a code card. Ours do too.</p>
+      <table>
+        <tr><th>Insert</th><th>Like Balatro's</th><th>Does</th></tr>
+        <tr><td>Code Card</td><td>Planet</td><td>Levels up one hand type</td></tr>
+        <tr><td>Checklist</td><td>Tarot</td><td>Edits cards: change suits, add a finish, copy, destroy</td></tr>
+        <tr><td>Redemption</td><td>Spectral</td><td>Rare, big and risky: instant forge, add a stamp to the whole hand, summon a Grail at a cost</td></tr>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="when">Layer 3 · Collectibles (display case)</div>
+      <p>Your jokers. They go in <b>5 slots</b>, are scored left to right, and sell for half price.</p>
+      <p class="muted">They come from the Collector pack's rare slot, the singles case (2 random each shop, no repeats per run), and Repacks. <b>Grails</b> only come from Redemption inserts. Some are <b>rolled</b> when pulled. A Playmat gets a random suit and a PSA 10 Slab gets a random rank, so two runs never see the same case.</p>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:14px">
+    <table>
+      <tr><th>Pack</th><th>Slots</th><th>Rare slot odds</th></tr>
+      <tr><td>Free</td><td>3 cards</td><td>None. Small chance a card has a finish</td></tr>
+      <tr><td>Collector</td><td>3 cards · 1 insert · 1 rare</td><td>Collectible 45% · Prism card 35% · Redemption 20%</td></tr>
+      <tr><td>Off-Brand</td><td>5 mixed slots</td><td>Anything can land anywhere. Lots of Damaged and Misprint</td></tr>
+      <tr><td>Repack</td><td>4 sold cards</td><td>The <b>only</b> place to find someone else's forged or graded cards</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><small>Your jokers</small>The display case: a random collectible pool</h2>
+  <p class="muted"><b>v1 pool: 30 + 1 Grail</b>, cut from 58 ideas after a Codex design review. Weighted by rarity: Common 65% · Uncommon 27% · Rare 8% · Grail via Redemption only. <b>Steady</b> items are reliable. <b>Build-around</b> items are strong but conditional.</p>
+  <div class="panel">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <button class="btn" id="rollcase">Roll a display case</button>
+      <span class="label" id="caseseed"></span>
+    </div>
+    <div class="case" id="case"></div>
+  </div>
+  <details style="margin-top:14px">
+    <summary style="cursor:pointer;color:var(--gold);font-weight:700">See the full pool</summary>
+    <div class="panel" style="margin-top:10px"><table id="pool"></table></div>
+  </details>
+</section>
+
+<section>
+  <h2><small>Shop</small>Grading: send it off and pray</h2>
+  <div class="grid g2">
+    <div class="panel">
+      <p>A graded card is gone for <b>one round</b>, then comes back slabbed.</p>
+      <p><b>Grade = 1d10 + freshness</b>, capped at 10.</p>
+      <table>
+        <tr><th>Pulled…</th><th>Freshness</th><th>Gem Mint odds</th></tr>
+        <tr><td>this round</td><td>+3</td><td>40%</td></tr>
+        <tr><td>last round</td><td>+2</td><td>30%</td></tr>
+        <tr><td>2 rounds ago</td><td>+1</td><td>20%</td></tr>
+        <tr><td>older</td><td>+0</td><td>10%</td></tr>
+      </table>
+      <p class="muted" style="margin-top:10px">The desk always shows your odds. Fresh pulls tempt you to grade right away instead of playing them.</p>
+    </div>
+    <div class="panel">
+      <table>
+        <tr><th>Grade</th><th>Result</th></tr>
+        <tr><td>1–3</td><td>"Damaged in shipping": ×0.8</td></tr>
+        <tr><td>4–9</td><td>×(1 + grade/10)</td></tr>
+        <tr><td>10</td><td><b>Gem Mint: ×2</b> and a big reveal</td></tr>
+      </table>
+      <p class="muted" style="margin-top:10px"><b>Cotton Gloves</b> (Uncommon): rolls twice and keeps the higher.</p>
+      <p class="muted"><b>Display limit:</b> 5 collectibles max. Sell one to make room. <b>Display Riser</b> adds a 6th slot.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><small>Rare pulls</small>Joker cards: not wild cards</h2>
+  <p class="muted">The deck is the standard 52. <b>Joker cards</b> are a rare extra card type from the Collector rare slot or Redemptions, max 2 in your deck. None of them change rank; each one bends a <i>different</i> existing system.</p>
+  <div class="case">
+    <div class="item r-Rare"><b>Bound Joker</b><span>Holds one of your collectibles. That effect only works while this card is in your hand, and it frees up a case slot.</span><div class="meta">display case ↔ deck</div></div>
+    <div class="item r-Rare"><b>Double-or-Nothing Joker</b><span>When played, flip a coin: your hand's score ×2 or ×0.</span><div class="meta">pure gamble</div></div>
+    <div class="item r-Rare"><b>Bluffing Joker</b><span>In your hand: after the reveal, you may change your bet once.</span><div class="meta">betting · live BR</div></div>
+    <div class="item r-Rare"><b>Courtier Joker</b><span>Doesn't score when played. Gives +10 mult for every round it stays unplayed in your hand.</span><div class="meta">held cards</div></div>
+    <div class="item r-Rare"><b>Catalyst Joker</b><span>A forge that includes it is free (no ante) and the forged card keeps a Finish.</span><div class="meta">forging</div></div>
+    <div class="item r-Grail"><b>Sticky Fingers Joker</b><span>Win the showdown: steal a random card your opponent played, keeping its Finish and Stamp. Then this Joker goes into <i>their</i> deck.</span><div class="meta">versus · hot potato in BR</div></div>
+    <div class="item r-Rare"><b>Rival's Joker</b><span>Repack only. Copies the best card in the deck of the player who sold it.</span><div class="meta">BR · repacks</div></div>
+  </div>
+</section>
+
+<section>
+  <h2><small>More ideas</small>Features on the table</h2>
+  <div class="panel">
+    <table>
+      <tr><th>Feature</th><th>Why</th><th>Cost</th></tr>
+      <tr><td><b>Tournament rounds</b> (bosses)</td><td>Every 3rd round has a rule twist ("Sealed only", "Face cards don't score", "Ban wave: ♣ score 0"), like Balatro's boss blinds</td><td>Low</td></tr>
+      <tr><td><b>Spectator betting</b></td><td>Knocked-out BR players bet fake chips on the remaining matches, so all 10 people stay involved until the demo ends</td><td>Med</td></tr>
+      <tr><td><b>Collection log</b></td><td>A binder of everything you've ever pulled across runs. Completionist bait for a loot-box game</td><td>Low</td></tr>
+      <tr><td><b>Daily seed + leaderboard</b></td><td>Everyone at the hackathon plays the same pulls each day</td><td>Low</td></tr>
+      <tr><td colspan="3" class="muted">Cut: live trades (players could collude) and the market ticker (replaced by the STONKS collectible).</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="modes">
+  <h2><small>Modes</small>Seeded runs, solo or 10-player</h2>
+  <div class="grid g2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+    <div class="panel"><div class="when">Core · by Wed</div><h3>Seeded solo</h3><p class="muted">Same seed means the same pack order and shopkeeper. Share a seed and compare runs.</p></div>
+    <div class="panel"><div class="when">Next</div><h3>Async Battle Royale</h3><p class="muted">10 players, one seed. Each round you face a saved snapshot of another player's deck from that same round (Super Auto Pets style). The last bankroll standing wins.</p></div>
+    <div class="panel"><div class="when">Stretch · Fri demo</div><h3>Live Battle Royale</h3><p class="muted">The same mode in real time with a lobby. Ten people in the room playing at once.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2><small>Hackathon plan</small>Mon → Fri</h2>
+  <div class="panel">
+    <table>
+      <tr><th>Day</th><th>Goal</th></tr>
+      <tr><td>Mon</td><td>Deck, hand eval, betting, showdown vs simple opponent</td></tr>
+      <tr><td>Tue</td><td>Forging, shop + 4 packs, pack-rip animation</td></tr>
+      <tr><td>Wed</td><td>Collectibles, shopkeeper traits, seeded runs. <b>Playable for judges' check-in</b></td></tr>
+      <tr><td>Thu</td><td>Async BR backend + Repack pool, polish, sound</td></tr>
+      <tr><td>Fri</td><td>Live BR if time, demo</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><small>Your take</small>What do you think?</h2>
+  <div class="panel">
+    <div class="votes" id="votes">
+      <button class="q" data-v="love it">🔥 Love it</button>
+      <button class="q" data-v="into it, some changes">👍 Into it, with changes</button>
+      <button class="q" data-v="not sold">🤔 Not sold</button>
+    </div>
+    <textarea id="note" placeholder="What would you change? Favorite part? Want to team up?"></textarea>
+    <div style="margin-top:10px"><button class="btn" id="send">Send feedback</button></div>
+    <div class="status" data-it-bind="status"></div>
+    <div class="reply" data-it-show="reply" data-it-bind="reply"></div>
+  </div>
+</section>
+
+</main>
+<script>
+/* ---------- rip a pack demo ---------- */
+const RANKS = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+const SUITS = [["♠",0],["♥",1],["♦",1],["♣",0]];
+const RAR = { common:"var(--c-common)", uncommon:"var(--c-uncommon)", rare:"var(--c-rare)", mythic:"var(--c-mythic)" };
+const COLLS = ["Card Sleeves","Lucky Binder","Pack Weigher","Misprint","PSA 10 Slab","Sealed Box"];
+let since = 0;
+function rnd(a){ return a[Math.floor(Math.random()*a.length)]; }
+function roll(slot){
+  if (slot < 3) return Math.random() < .25 ? "uncommon" : "common";
+  if (slot === 3) return Math.random() < .35 ? "rare" : "uncommon";
+  const r = Math.random();
+  return r < .12 ? "mythic" : r < .55 ? "rare" : "uncommon";
+}
+document.getElementById("bigpack").onclick = (e) => {
+  const pack = e.currentTarget, pulls = document.getElementById("pulls");
+  pack.classList.remove("shake"); void pack.offsetWidth; pack.classList.add("shake");
+  pulls.innerHTML = "";
+  let hitMythic = false;
+  for (let i = 0; i < 5; i++) {
+    const rar = roll(i); if (rar === "mythic") hitMythic = true;
+    const [s, red] = rnd(SUITS), r = rnd(RANKS);
+    const el = document.createElement("div");
+    el.className = "pull"; el.style.setProperty("--glow", RAR[rar]);
+    let face;
+    if (i === 3) face = `<div class="face coll" style="background:linear-gradient(135deg,#0d3b66,#1d6fa5);color:#fff">${rnd(["CODE CARD<br>Full House +1","CODE CARD<br>Flush +1","CHECKLIST<br>3 cards → ♥","CHECKLIST<br>Add Foil","REDEMPTION<br>Instant Forge"])}<br><small style="color:#9fd3ff">insert</small></div>`;
+    else if (rar === "mythic") face = `<div class="face coll">★<br>${rnd(COLLS)}<br><small style="color:var(--gold)">collectible</small></div>`;
+    else {
+      const foil = rar === "rare" ? " foil" : "";
+      const tag = rar === "common" ? "" : rar === "uncommon" ? "enhanced" : "foil";
+      face = `<div class="face${red?" red":""}${foil}"><span>${r}</span><small>${tag}</small><span style="align-self:flex-end">${s}</span></div>`;
+    }
+    el.innerHTML = `<div class="in"><div class="back"></div>${face}</div>`;
+    el.onclick = () => el.classList.add("flipped");
+    el.style.opacity = 0; el.style.transform = "translateY(20px)";
+    el.style.transition = "opacity .3s, transform .3s";
+    pulls.appendChild(el);
+    setTimeout(() => { el.style.opacity = 1; el.style.transform = "none"; }, 120 * i + 300);
+  }
+  since = hitMythic ? 0 : since + 1;
+  document.getElementById("pity").textContent = "Packs since last mythic: " + since + (hitMythic ? "  ★ MYTHIC IN THIS PACK" : "");
+};
+
+/* ---------- shopkeeper demo (Liar + Chatty + Nostalgic) ---------- */
+let rap = 30;
+const Q = [
+  ["Got any deals?", () => rap > 50 ? `"For you, friend? Collector pack's 2 off. Don't tell nobody." (rapport paid off)` : `"Deals? Talk to me a while first, I like to know who I'm sellin' to."`],
+  ["Is this pack any good?", () => Math.random() < .5 ? `"That one's heavy. Real heavy." (Liar: true 50% of the time…)` : `"Ehh, I'd skip it. Feels light." (Liar: true 50% of the time…)`],
+  ["What're you buying?", () => `"Forged cards? Old stuff? I'll pay double. Reminds me of the good old days." (Nostalgic)`],
+  ["How's business?", () => { rap = Math.min(100, rap + 20); return `"Oh don't get me started! So last Tuesday this kid comes in…" (Chatty: rapport +20)`; }],
+];
+const qs = document.getElementById("qs");
+Q.forEach(([q, f]) => {
+  const b = document.createElement("button"); b.className = "q"; b.textContent = q;
+  b.onclick = () => { document.getElementById("bubble").textContent = f(); document.getElementById("rap").style.width = rap + "%"; };
+  qs.appendChild(b);
+});
+
+/* ---------- collectible pool ---------- */
+const SUIT_NAMES = ["♠ Spades","♥ Hearts","♦ Diamonds","♣ Clubs"];
+const RANK_NAMES = ["2s","3s","4s","5s","6s","7s","8s","9s","10s","Jacks","Queens","Kings","Aces"];
+const POOL = [
+  // [name, rarity, hook, kind, text]  ({S}=rolled suit, {R}=rolled rank) -- v1, reviewed by Codex
+  ["Penny Sleeve","Common","flat","Steady","+4 mult"],
+  ["Top Loader","Common","flat","Steady","+30 chips"],
+  ["Rubber Band","Common","hand type","Steady","One Pair gives +8 mult"],
+  ["Binder Divider","Common","hand type","Steady","Two Pair gives +10 mult"],
+  ["Card Stack","Common","hand type","Steady","Three of a Kind gives +12 mult"],
+  ["Straight Edge","Common","hand type","Steady","Straights give +80 chips"],
+  ["Color-Sorted Binder","Common","hand type","Steady","Flushes give +10 mult"],
+  ["Draft Chaff","Common","hand type","Steady","High Card hands give +60 chips"],
+  ["Low Ball","Common","rank","Steady","Each scored 2–5 gives +20 chips"],
+  ["Odd Lot","Common","rank","Steady","Scored A, 3, 5, 7, 9 give +3 mult"],
+  ["Even Stack","Common","rank","Steady","Scored 2, 4, 6, 8, 10 give +20 chips"],
+  ["Playmat","Common","suit","Steady","Scored {S} give +3 mult"],
+  ["Deck Box","Common","hand size","Steady","Draw 9 cards instead of 8"],
+  ["Price Guide","Common","fold","Steady","If you Folded or Forged last round, +10 mult this hand"],
+  ["Price Sticker","Common","bankroll","Steady","+$1 each round you win"],
+  ["Gold Leaf","Common","stamp","Steady","Gold Border cards pay $3 instead of $2"],
+  ["Store Credit","Common","shop","Steady","First restock each shop is free"],
+  ["Face Binder","Uncommon","rank","Steady","Scored face cards give +5 mult"],
+  ["Two-Tone Sleeves","Uncommon","suit","Build-around","♥/♦ count as one suit, ♠/♣ as one suit"],
+  ["Suit Sorter","Uncommon","suit","Build-around","×1.5 mult if the hand has all 4 suits"],
+  ["Team Bag","Uncommon","case","Build-around","+3 mult per empty display slot"],
+  ["Black Light","Uncommon","finish","Build-around","×1.5 mult if 3+ scored cards have a Finish"],
+  ["Collector's Guide","Uncommon","finish","Build-around","+2 mult per different Finish among scored cards"],
+  ["Card Sleeves","Uncommon","forge","Build-around","×1.5 mult if the hand contains a forged card"],
+  ["Tournament Badge","Uncommon","bet","Build-around","+15 mult if you bet Max"],
+  ["Checklist Pad","Uncommon","insert","Steady","+1 insert slot"],
+  ["PSA 10 Slab","Rare","rank","Build-around","×2 mult if 2+ scored cards are {R}"],
+  ["Prism Case","Rare","finish","Build-around","×2 mult if scored cards show 3+ different Finishes"],
+  ["Thin Binder","Rare","deck size","Build-around","×2 mult if your deck has 40 or fewer cards"],
+  ["High Roller","Rare","bankroll","Build-around","×3 mult if bankroll is under 3× the ante"],
+  ["Cotton Gloves","Uncommon","grading","Steady","Grading rolls twice and keeps the higher"],
+  ["Back Order Slip","Uncommon","shop","Steady","Collectibles already shown this run can appear again"],
+  ["Sixth Sleeve","Rare","hand size","Build-around","Play 6 cards: best 5 set the hand, all 6 score chips"],
+  ["Display Riser","Rare","case","Steady","+1 display slot"],
+  ["STONKS","Uncommon","bankroll","Build-around","Sell value starts at $5 and moves ×0.5 to ×2 each round. +1 mult per $5 of value"],
+  ["Alpha Ace","Grail","rank","Build-around","×3 mult if 2+ scored cards are Aces"],
+];
+const WEIGHT = { Common: 65, Uncommon: 27, Rare: 8 };
+function rollRarity(){ const r = Math.random()*100; return r < WEIGHT.Common ? "Common" : r < 92 ? "Uncommon" : "Rare"; }
+function fill(t){ return t.replace("{S}", rnd(SUIT_NAMES)).replace("{R}", rnd(RANK_NAMES)); }
+function itemHTML(c, text, cls){
+  return `<div class="item r-${c[1]} ${cls||""}"><b>${c[0]}</b><span>${text}</span><div class="meta">${c[1]} · ${c[3]} · hooks ${c[2]}</div></div>`;
+}
+document.getElementById("rollcase").onclick = () => {
+  const box = document.getElementById("case"); box.innerHTML = "";
+  const used = new Set();
+  for (let i = 0; i < 5; i++) {
+    let c;
+    if (i === 4 && Math.random() < .1) c = rnd(POOL.filter(p => p[1] === "Grail"));
+    else { const rar = rollRarity(); do { c = rnd(POOL.filter(p => p[1] === rar)); } while (used.has(c[0])); }
+    used.add(c[0]);
+    setTimeout(() => box.insertAdjacentHTML("beforeend", itemHTML(c, fill(c[4]), "pop")), 140 * i);
+  }
+  document.getElementById("caseseed").textContent = "Seed " + Math.random().toString(36).slice(2, 8).toUpperCase();
+};
+document.getElementById("pool").innerHTML =
+  "<tr><th>Collectible</th><th>Rarity</th><th>Hooks</th><th>Type</th><th>Effect</th></tr>" +
+  POOL.map(c => `<tr><td><b>${c[0]}</b></td><td><span class="pill ${c[1]}">${c[1]}</span></td><td>${c[2]}</td><td>${c[3]}</td><td>${c[4].replace("{S}","[rolled suit]").replace("{R}","[rolled rank]")}</td></tr>`).join("");
+document.getElementById("rollcase").click();
+
+/* ---------- feedback ---------- */
+let vote = null;
+document.querySelectorAll("#votes .q").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#votes .q").forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); vote = b.dataset.v;
+});
+document.getElementById("send").onclick = async () => {
+  const note = document.getElementById("note").value.trim();
+  if (!vote && !note) return;
+  const st = document.querySelector(".status");
+  st.textContent = "Sending…";
+  try {
+    await It.action("feedback", { vote, note });
+    st.textContent = "Sent. Thanks!";
+  } catch (e) { st.textContent = "Couldn't send. Try again."; }
+};
+</script>
+</body>
+</html>
