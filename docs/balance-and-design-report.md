@@ -1,4 +1,4 @@
-# Pull Rate: balance fix + what makes Balatro stick
+# Flambeur: balance fix + what makes Balatro stick
 
 Nov 16 2026. Part 1 is the cautious-bot problem with sim numbers. Part 2 is the research. Part 3 maps it onto what we haven't built yet.
 
@@ -106,7 +106,7 @@ The genre is crowded: Steam roguelike deckbuilder releases went from 143 to 224 
 3. **The pack rip is our Rube Goldberg moment.**
    - Reveal cards one at a time, with rarity rising through tone and shake.
    - Show the god pull last.
-   - This is Pull Rate's version of Balatro's scoring count-up, and the thing nobody else in the genre has.
+   - This is Flambeur's version of Balatro's scoring count-up, and the thing nobody else in the genre has.
 4. **Visible near-misses.** At showdown, show the margin ("lost by 40").
    - After a fold, flash what the rival had and what you would have scored.
    - It's a near-miss the player controlled, which is exactly the kind that makes them want to retry.

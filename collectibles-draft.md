@@ -1,4 +1,4 @@
-# Pull Rate: display case pool (draft for review)
+# Flambeur: display case pool (draft for review)
 
 ## Game summary
 Booster-pack poker roguelike (Balatro-like) for a 1-week hackathon. Standard 52-card deck.
