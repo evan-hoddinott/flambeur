@@ -162,7 +162,7 @@ test('picked traits still forge after the plan is rebuilt (chooser → finishRou
 
 test('folding grinds the highest card in place, keeping stamp and grade', () => {
   const ace = c(14, 'S', { stamp: 'gold', grade: 9, grind: 2 })
-  const ground = grindOnFold([c(2, 'C'), c(5, 'D'), ace, c(11, 'H'), c(8, 'S')])
+  const ground = grindOnFold([c(2, 'C'), c(5, 'D'), ace, c(11, 'H'), c(8, 'S')])!
   assert.equal(ground, ace)
   assert.equal(ace.grind, 3)
   assert.equal(ace.stamp, 'gold')

@@ -1,25 +1,34 @@
-import type { Card, Trait } from './cards.ts'
+import { sellPrice, type Card, type Trait } from './cards.ts'
 import { OFFERED, autoDraft, draftDeck, draftRows, rulesFor, type Rules, type StarterId } from './starters.ts'
 import { COLLECTIBLES, hasCollectible, rollParam, type Owned } from './collectibles.ts'
 import {
-  HAND_SIZE, HOUSE_BONUS, PAYCHECK, ROUNDS, TOURNAMENT_ROUNDS, blinds, interest, streakBonus,
+  BULK_BIN_PRICE, GOLD_BORDER, GRADING_PRICE, HAND_SIZE, HOUSE_BONUS, MOMENTUM_MAX, PAYCHECK, ROUNDS, SLEEVE_PRICE, TOURNAMENT_ROUNDS,
+  blinds, interest, isTableStart, streakBonus,
 } from './economy.ts'
 import type { HandType } from './hands.ts'
-import { chance, makeRng, pick, shuffled, type Rng } from './rng.ts'
+import { chance, makeRng, pick, randInt, type Rng } from './rng.ts'
 import { appraise, emptyLevels, type Appraisal } from './scoring.ts'
 import { settle, type Betting, type Seat } from './betting.ts'
-import { autoKeep, buildForged, grindOnFold, forgePlan, type ForgePlan } from './forge.ts'
-import { DECK_FLOOR, deckSize, discardPlayed, refillHand, shuffleIn, type Piles } from './deck.ts'
+import { autoKeep, buildForged, grindOnFold, forgePlan } from './forge.ts'
+import { cleanup, dealFresh, deckSize, mulliganHand, shuffleIn, startTable, takeOut, type Piles } from './deck.ts'
 import type { ShopMemory } from './shop.ts'
 import { isTournament, rollTwists, type Twist } from './twists.ts'
+import { sleeveOffer, stonksFor, stonksMult, type SleeveId, type Stonks } from './sleeves.ts'
 
-// hand / draw / discard persist across rounds (deck.ts). the deck is all three together
+// hand / pile / discard make up the deck (deck.ts). the binder is separate: never drawn, it's what you sell from
 export type Player = Piles & {
   bankroll: number
   display: Owned[]
   levels: Record<HandType, number>
   streak: number
   rules: Rules // from the starter box
+  binder: Card[]
+  sleeves: SleeveId[]
+  mulls: number // mulligans this table that cost hand size
+  freeMullsUsed: number // this table
+  tableWins: number // showdowns won earlier this table, for momentum at the boss
+  bulkBinned: number // paid bulk removals this run, each one costs $1 more
+  grading: { card: Card; grade: number; toDeck: boolean; back: number }[] // away at the grading desk until round `back`
 }
 
 // solo is a 1v1 duel against one rival who plays by the same rules you do (own box, draft, shop, forges).
@@ -51,10 +60,13 @@ export type Run = {
   won: boolean
 }
 
-function newPlayer(seed: string, starter: StarterId, picks: number[], rng: Rng): Player {
+// the pile gets shuffled when the first table starts (dealHand)
+function newPlayer(seed: string, starter: StarterId, picks: number[]): Player {
   const rules = rulesFor(starter)
-  const draw = shuffled(rng, draftDeck(seed, starter, picks))
-  return { bankroll: rules.startBankroll, hand: [], draw, discard: [], display: [...rules.startDisplay], levels: emptyLevels(), streak: 0, rules }
+  return {
+    bankroll: rules.startBankroll, hand: [], pile: draftDeck(seed, starter, picks), discard: [], display: [...rules.startDisplay],
+    levels: emptyLevels(), streak: 0, rules, binder: [], sleeves: [], mulls: 0, freeMullsUsed: 0, tableWins: 0, bulkBinned: 0, grading: [],
+  }
 }
 
 function newMemory(rules: Rules): ShopMemory {
@@ -66,18 +78,18 @@ function newMemory(rules: Rules): ShopMemory {
 export function newRun(seed: string, starter: StarterId, picks: number[], difficulty: Difficulty = 'medium'): Run {
   const pileRng = makeRng(`${seed}:1:pile`)
   const rivalPileRng = makeRng(`${seed}:1:rivalpile`)
-  const you = newPlayer(seed, starter, picks, pileRng)
+  const you = newPlayer(seed, starter, picks)
 
   const rivalRng = makeRng(`${seed}:rival`)
   const rivalSeed = `${seed}:rival`
   const rivalStarter = pick(rivalRng, OFFERED)
-  const rival = newPlayer(rivalSeed, rivalStarter, autoDraft(draftRows(rivalSeed, rivalStarter)), rivalPileRng)
+  const rival = newPlayer(rivalSeed, rivalStarter, autoDraft(draftRows(rivalSeed, rivalStarter)))
   const d = DIFFICULTIES[difficulty]
   rival.bankroll += d.bankroll
   if (d.rare) {
     const rares = COLLECTIBLES.filter(c => c.rarity === 'rare' && !hasCollectible(rival.display, c.id))
     const def = pick(rivalRng, rares)
-    if (rival.display.length >= rival.rules.displaySlots) throw new Error('rival case full before the run started')
+    if (rival.display.length >= displaySlots(rival)) throw new Error('rival case full before the run started')
     rival.display.push({ id: def.id, param: rollParam(def, rivalRng) })
   }
 
@@ -109,12 +121,23 @@ export function tableBlinds(run: Run, round = run.round): { ante: number; max: n
   return { ante: twistFor(run, round)?.id === 'highstakes' ? max : b.ante + bonus, max }
 }
 
-export function mulligansFor(run: Run, p: Player): number {
-  return twistFor(run)?.id === 'colddeck' ? 0 : p.rules.mulligans
+export function canMulligan(run: Run, p: Player): boolean {
+  return twistFor(run)?.id !== 'colddeck' && p.hand.length > 0
 }
 
+// next mulligan this table is free (classic's first one), so it won't shrink your hand
+export function freeMulligan(p: Player): boolean {
+  return p.freeMullsUsed < p.rules.freeMulligans
+}
+
+// 8, +1 deck box, +1 big hands, −1 per mulligan this table
 export function handSize(p: Player): number {
-  return hasCollectible(p.display, 'deck_box') ? HAND_SIZE + 1 : HAND_SIZE
+  const extra = (hasCollectible(p.display, 'deck_box') ? 1 : 0) + (p.sleeves.includes('big_hands') ? 1 : 0)
+  return HAND_SIZE + extra - p.mulls
+}
+
+export function displaySlots(p: Player): number {
+  return p.rules.displaySlots + (p.sleeves.includes('riser') ? 1 : 0)
 }
 
 // separate stream per round + purpose, so a restock in your shop doesn't change your draws or the rival's
@@ -122,27 +145,125 @@ export function roundRng(run: Run, purpose: 'pile' | 'rivalpile' | 'rivalshop'):
   return makeRng(`${run.seed}:${run.round}:${purpose}`)
 }
 
-// a hand at the start of a round: carried over cards + top up from the draw pile
-export function dealHand(run: Run, seat: Seat = 0): { drawn: Card[]; reshuffled: boolean } {
+// a fresh hand every round. the first round of a table shuffles everything into one pile first.
+// a short or empty hand is possible when the pile runs dry (empty = you lose the round)
+export function dealHand(run: Run, seat: Seat = 0): Card[] {
   const p = seatOf(run, seat)
-  return refillHand(p, handSize(p), pileRngOf(run, seat))
+  if (isTableStart(run.round)) {
+    startTable(p, pileRngOf(run, seat))
+    p.mulls = 0
+    p.freeMullsUsed = 0
+    p.tableWins = 0
+  }
+  return dealFresh(p, handSize(p))
 }
 
-// pack cards and forged cards get shuffled into the draw pile
+export function mulligan(run: Run, seat: Seat, tossIds: number[]): { drawn: Card[]; free: boolean } {
+  const p = seatOf(run, seat)
+  if (!canMulligan(run, p)) throw new Error('no mulligans right now')
+  const free = freeMulligan(p)
+  if (free) p.freeMullsUsed++
+  else p.mulls++
+  return { drawn: mulliganHand(p, tossIds, pileRngOf(run, seat), free), free }
+}
+
+// deck pulls and forged cards get shuffled into the current pile
 export function addCard(run: Run, card: Card, seat: Seat = 0): void {
   shuffleIn(seatOf(run, seat), card, pileRngOf(run, seat))
 }
 
-// forging needs a forgeable hand and has to leave the deck at DECK_FLOOR or more
-export function forgeCheck(p: Piles, played: Card[]): { plan: ForgePlan | null; thin: boolean } {
-  const plan = forgePlan(played)
-  const thin = plan !== null && deckSize(p) - plan.merged.length + 1 < DECK_FLOOR
-  return { plan, thin }
+// every pull goes to the deck or the binder. you keep everything
+export function takePull(run: Run, card: Card, toDeck: boolean, seat: Seat = 0): void {
+  if (card.bulk) throw new Error('bulk never comes out of a pack')
+  if (toDeck) addCard(run, card, seat)
+  else seatOf(run, seat).binder.push(card)
 }
 
-export function canForgeNow(p: Piles, played: Card[]): boolean {
-  const { plan, thin } = forgeCheck(p, played)
-  return plan !== null && !thin
+// default sort when you rip a pack: special cards to the deck, plain ones to the binder
+export function defaultToDeck(card: Card): boolean {
+  return card.finish !== null || card.stamp !== null || card.tier > 0 || card.grade !== null
+}
+
+export function stonks(run: Run): Stonks {
+  return stonksFor(run.seed, run.round)
+}
+
+export function binderPrice(run: Run, p: Player, card: Card): number {
+  return sellPrice(card) * stonksMult(card, stonks(run), p.sleeves.includes('hot_market'))
+}
+
+// selling only happens from the binder
+export function sellBinder(run: Run, seat: Seat, id: number): number {
+  const p = seatOf(run, seat)
+  const i = p.binder.findIndex(c => c.id === id)
+  if (i < 0) throw new Error(`card ${id} is not in the binder`)
+  const price = binderPrice(run, p, p.binder[i])
+  p.binder.splice(i, 1)
+  p.bankroll += price
+  return price
+}
+
+export function bulkPrice(p: Player): number {
+  return p.sleeves.includes('bulk_deal') ? 1 : BULK_BIN_PRICE + p.bulkBinned
+}
+
+// pay the shop to bin one bulk card for good. between rounds only
+export function binBulk(run: Run, seat: Seat): void {
+  const p = seatOf(run, seat)
+  const bulk = [...p.pile, ...p.discard].find(c => c.bulk)
+  if (!bulk) throw new Error('no bulk to bin')
+  const price = bulkPrice(p)
+  if (p.bankroll - price < 1) throw new Error('can not afford to bin bulk')
+  takeOut(p, bulk.id)
+  p.bankroll -= price
+  p.bulkBinned++
+}
+
+export function freeRestocks(p: Player): number {
+  return (hasCollectible(p.display, 'store_credit') ? 1 : 0) + (p.sleeves.includes('restock') ? 1 : 0)
+}
+
+// this shop's sleeve: only in the shop right before a boss, and only one per table
+export function shopSleeve(run: Run, seat: Seat): SleeveId | null {
+  if (!isTournament(run.round)) return null
+  return sleeveOffer(run.seed, run.round, seatOf(run, seat).sleeves)
+}
+
+export function buySleeve(run: Run, seat: Seat, id: SleeveId): void {
+  const p = seatOf(run, seat)
+  if (p.sleeves.includes(id)) throw new Error(`already own ${id}`)
+  if (p.bankroll - SLEEVE_PRICE < 1) throw new Error('can not afford the sleeve')
+  p.bankroll -= SLEEVE_PRICE
+  p.sleeves.push(id)
+}
+
+// +3 pulled this round, +2 last round, +1 two rounds ago. the starting deck is never fresh
+export function freshness(card: Card, round: number): number {
+  if (card.pulledRound === 0) return 0
+  return Math.max(0, 3 - (round - card.pulledRound))
+}
+
+export function canGrade(card: Card): boolean {
+  return !card.bulk && card.grade === null
+}
+
+// send a deck or binder card off for one round. grade = 1d10 + freshness, cap 10. it comes back next shop
+export function sendToGrading(run: Run, seat: Seat, id: number): void {
+  const p = seatOf(run, seat)
+  if (p.bankroll - GRADING_PRICE < 1) throw new Error('can not afford grading')
+  const bi = p.binder.findIndex(c => c.id === id)
+  const toDeck = bi < 0
+  const card = toDeck ? takeOut(p, id) : p.binder.splice(bi, 1)[0]
+  if (!canGrade(card)) throw new Error(`${card.id} can not be graded`)
+  const rng = seat === 0 ? run.rng : roundRng(run, 'rivalshop')
+  const grade = Math.min(10, randInt(rng, 1, 10) + freshness(card, run.round))
+  p.bankroll -= GRADING_PRICE
+  p.grading.push({ card, grade, toDeck, back: run.round + 1 })
+}
+
+// forging needs at least a pair. there's no deck floor: forging leaves bulk behind instead
+export function canForge(played: Card[]): boolean {
+  return played.length > 0 && forgePlan(played) !== null
 }
 
 export function appraiseFor(run: Run, p: Player, played: Card[], betMax: boolean, rng: Rng | null): Appraisal {
@@ -168,10 +289,11 @@ export function showdownWinner(run: Run, you: number, rival: number): Seat | nul
 }
 
 export type RoundResult = {
-  delta: number // bankroll change from the table
+  delta: number // bankroll change from the table, incl the gold border side bet
   outcome: 'win' | 'loss' | 'tie' | 'fold' | 'forge'
   income: { paycheck: number; house: number; interest: number; streak: number; sticker: number; gold: number }
   forged: Card | null
+  bulk: Card[] // left behind by the forge
   ground: Card | null // the card a fold ground up +1
   torn: Card[]
 }
@@ -181,32 +303,34 @@ function outcomeFor(o: NonNullable<Betting['outcome']>, seat: Seat, winner: Seat
   return o.by === seat ? o.kind : 'win' // they folded
 }
 
-// forge, card growth, discards and streak for one seat. bankroll and income happen after both seats
+// forge, card growth, cleanup and streak for one seat. bankroll and income happen after both seats
 function playOut(run: Run, seat: Seat, o: NonNullable<Betting['outcome']>, outcome: RoundResult['outcome'], played: Card[], scoringIds: number[], keep: Trait[] | null): RoundResult {
   const p = seatOf(run, seat)
   const gone = new Set<number>() // forged away or torn, these leave the deck for good
   let forged: Card | null = null
-  const ground = outcome === 'fold' ? grindOnFold(played) : null
+  let bulk: Card[] = []
+  const ground = outcome === 'fold' && played.length > 0 ? grindOnFold(played) : null
   if (outcome === 'forge') {
-    const { plan, thin } = forgeCheck(p, played)
+    const plan = forgePlan(played)
     if (!plan) throw new Error('forge on a hand that cannot forge')
-    if (thin) throw new Error('forge would take the deck under the floor')
     for (const c of plan.merged) gone.add(c.id)
-    forged = buildForged(plan, keep ?? autoKeep(plan), run.round)
+    ;({ forged, bulk } = buildForged(plan, keep ?? autoKeep(plan), run.round))
   }
 
-  // cards only grow / tear if they actually got appraised. no tearing at the deck floor
+  // cards only grow / tear if they actually got appraised
   const torn: Card[] = []
   if (o.kind === 'showdown') {
     for (const card of played) {
-      if (!scoringIds.includes(card.id)) continue
+      if (!scoringIds.includes(card.id) || card.bulk) continue
       if (card.stamp === 'first') card.bonusHype++
-      if (card.stamp === 'damaged' && chance(run.rng, 0.25) && deckSize(p) - torn.length > DECK_FLOOR) torn.push(card)
+      if (card.stamp === 'damaged' && chance(run.rng, 0.25)) torn.push(card)
     }
     for (const c of torn) gone.add(c.id)
   }
-  discardPlayed(p, played, gone)
+  // fold and forge muck the whole hand, otherwise the unplayed cards go back into the pile
+  cleanup(p, played, gone, outcome === 'fold' || outcome === 'forge', pileRngOf(run, seat))
   if (forged) addCard(run, forged, seat)
+  for (const b of bulk) addCard(run, b, seat)
 
   // folding breaks any streak, otherwise folding every round farms the cold streak bonus
   if (outcome === 'win') p.streak = p.streak > 0 ? p.streak + 1 : 1
@@ -214,22 +338,25 @@ function playOut(run: Run, seat: Seat, o: NonNullable<Betting['outcome']>, outco
   else if (outcome !== 'tie') p.streak = 0
 
   const income = { paycheck: 0, house: 0, interest: 0, streak: 0, sticker: 0, gold: 0 }
-  return { delta: 0, outcome, income, forged, ground, torn }
+  return { delta: 0, outcome, income, forged, bulk, ground, torn }
+}
+
+// the house bonus at the boss: 2× ante + 1× per showdown won earlier this table (momentum), max +2
+export function houseMult(run: Run, p: Player): number {
+  return isTournament(run.round) ? HOUSE_BONUS + Math.min(MOMENTUM_MAX, p.tableWins) : HOUSE_BONUS
 }
 
 // showdown = you played the hand out (win, loss or tie). the house bonus goes to the showdown winner only
-function payIncome(p: Player, r: RoundResult, held: Card[], showdown: boolean, ante: number): void {
+function payIncome(run: Run, p: Player, r: RoundResult, showdown: boolean): void {
   r.income.paycheck = showdown ? PAYCHECK : 0
-  r.income.house = showdown && r.outcome === 'win' ? HOUSE_BONUS * ante : 0
-  r.income.interest = interest(p.bankroll)
+  r.income.house = showdown && r.outcome === 'win' ? houseMult(run, p) * tableBlinds(run).ante : 0
+  r.income.interest = interest(p.bankroll, p.sleeves.includes('deep_pockets') ? 4 : 2)
   r.income.streak = streakBonus(p.streak)
   r.income.sticker = r.outcome === 'win' && hasCollectible(p.display, 'price_sticker') ? 1 : 0
-  r.income.gold = 2 * held.filter(c => c.stamp === 'gold').length
-  p.bankroll += r.income.paycheck + r.income.house + r.income.interest + r.income.streak + r.income.sticker + r.income.gold
+  p.bankroll += r.income.paycheck + r.income.house + r.income.interest + r.income.streak + r.income.sticker
 }
 
-// everything after betting is decided, for both seats: forge, payouts, card growth, income, bust check.
-// played cards go to discard (or vanish if forged/torn), the rest of the hand carries to next round.
+// everything after betting is decided, for both seats: forge, payouts, gold border, card growth, cleanup, income, bust check.
 // keep = traits you chose when your forge goes over the tier cap. null = strongest automatically. the rival always auto-keeps.
 // the run ends when either bankroll hits $0 or after round 9. you win by surviving or busting the rival
 export function finishRound(
@@ -243,12 +370,19 @@ export function finishRound(
   if (o.kind === 'showdown' && winner !== null && twistFor(run)?.id === 'doubledown') delta[winner] += betting.committed[winner]
 
   const seats: Seat[] = [0, 1]
-  const held = seats.map(s => seatOf(run, s).hand.filter(c => !played[s].some(p => p.id === c.id)))
+  // gold border: a side bet on every gold card you played. settles on a showdown win or loss, folds and ties are nothing
+  const gold = seats.map(s => {
+    if (o.kind !== 'showdown' || winner === null) return 0
+    return (winner === s ? 1 : -1) * GOLD_BORDER * played[s].filter(c => c.stamp === 'gold').length
+  })
   const results = seats.map(s => playOut(run, s, o, outcomeFor(o, s, winner), played[s], scoringIds[s], s === 0 ? keep : null)) as [RoundResult, RoundResult]
   for (const s of seats) {
     const p = seatOf(run, s)
-    results[s].delta = delta[s]
-    p.bankroll = Math.max(0, p.bankroll + delta[s])
+    results[s].delta = delta[s] + gold[s]
+    results[s].income.gold = gold[s]
+    p.bankroll = Math.max(0, p.bankroll + delta[s] + gold[s])
+    // momentum only counts the normal rounds of a table
+    if (o.kind === 'showdown' && winner === s && !isTournament(run.round)) p.tableWins++
   }
 
   if (run.you.bankroll === 0 || run.rival.bankroll === 0) {
@@ -256,7 +390,7 @@ export function finishRound(
     run.won = run.you.bankroll > 0
     return results
   }
-  for (const s of seats) payIncome(seatOf(run, s), results[s], held[s], o.kind === 'showdown', tableBlinds(run).ante)
+  for (const s of seats) payIncome(run, seatOf(run, s), results[s], o.kind === 'showdown')
   if (run.round >= ROUNDS) {
     run.over = true
     run.won = true
@@ -269,10 +403,20 @@ export function runScore(run: Run): number {
   return run.won ? Math.round(run.you.bankroll * DIFFICULTIES[run.difficulty].scoreMult) : 0
 }
 
-// separate from finishRound so the result screen still shows the round that was just played
+// separate from finishRound so the result screen still shows the round that was just played.
+// graded cards come back here, before the shop
 export function nextRound(run: Run): void {
   if (run.over) throw new Error('next round on a finished run')
   run.round++
   run.pileRng = roundRng(run, 'pile')
   run.rivalPileRng = roundRng(run, 'rivalpile')
+  for (const seat of [0, 1] as Seat[]) {
+    const p = seatOf(run, seat)
+    for (const g of p.grading.filter(x => x.back <= run.round)) {
+      g.card.grade = g.grade
+      if (g.toDeck) addCard(run, g.card, seat)
+      else p.binder.push(g.card)
+    }
+    p.grading = p.grading.filter(x => x.back > run.round)
+  }
 }

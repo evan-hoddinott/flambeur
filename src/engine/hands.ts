@@ -104,8 +104,11 @@ function bestOf(rank: RankHand, top: number | null, flush: boolean): HandType {
 
 // primary = best hand using forged traits. hands from the other families stack on top as bonus hands,
 // but only when a forged trait made one of the two hands happen. plain cards never get bonus hands.
-export function evaluateHand(cards: Card[]): HandResult {
-  if (cards.length === 0) throw new Error('evaluating an empty hand')
+export function evaluateHand(played: Card[]): HandResult {
+  if (played.length === 0) throw new Error('evaluating an empty hand')
+  // bulk is never part of a poker hand. a hand of only bulk is a high card with nothing scoring
+  const cards = played.filter(c => !c.bulk)
+  if (cards.length === 0) return { type: 'high', bonus: [], scoring: [], mainRanks: [], rankRanks: [] }
 
   const rankWith = rankHand(cards, true)
   const rankPlain = rankHand(cards, false)

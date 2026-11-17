@@ -99,6 +99,12 @@ export function act(b: Betting, action: BetAction): Betting {
   return next
 }
 
+// a seat that got dealt no cards loses the round, same as folding at the ante. both empty = nobody pays
+export function forfeit(b: Betting, by: Seat | null): Betting {
+  if (b.outcome) throw new Error('forfeit after betting is done')
+  return { ...b, outcome: by === null ? { kind: 'showdown' } : { kind: 'fold', by } }
+}
+
 // money each seat gains (negative = loses). winner = null on a showdown tie
 export function settle(b: Betting, winner: Seat | null): [number, number] {
   if (!b.outcome) throw new Error('settling before betting is done')

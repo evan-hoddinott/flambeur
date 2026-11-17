@@ -26,6 +26,7 @@ export type Card = {
   bonusHype: number // grows on 1st Edition cards
   grade: number | null // 1..10 once graded
   pulledRound: number // 0 = starting deck
+  bulk: boolean // stone card a forge leaves behind: no rank or suit, always +5 value when played
 }
 
 export const MAX_TIER = 3
@@ -47,8 +48,16 @@ export function newCard(rank: number, suit: Suit, extra: Partial<Omit<Card, 'id'
     bonusHype: 0,
     grade: null,
     pulledRound: 0,
+    bulk: false,
     ...extra,
   }
+}
+
+// every card a forge eats beyond the first leaves one of these. rank/suit are placeholders, nothing reads them
+export const BULK_VALUE = 5
+
+export function newBulk(round: number): Card {
+  return newCard(2, 'S', { bulk: true, pulledRound: round })
 }
 
 export function standardDeck(): Card[] {
@@ -100,6 +109,7 @@ export function traitName(t: Trait): string {
 }
 
 export function cardName(card: Card): string {
+  if (card.bulk) return 'Bulk'
   const suit = isWild(card) ? '★' : SUIT_GLYPH[card.suit]
   const stars = card.tier > 0 ? ` ${'★'.repeat(card.tier)}` : ''
   return `${rankLabel(card.rank)}${suit}${stars}`
@@ -120,6 +130,7 @@ export function isSpecial(card: Card): boolean {
 }
 
 export function sellPrice(card: Card): number {
+  if (card.bulk) throw new Error('bulk can not be sold')
   if (card.grade !== null) return Math.max(1, Math.floor(card.grade / 2))
   if (isForged(card)) return 1 + card.tier
   if (card.finish !== null || card.stamp !== null) return 2

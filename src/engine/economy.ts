@@ -3,7 +3,8 @@ export const START_BANKROLL = 15
 export const PAYCHECK = 2 // only if you went to showdown: folding and forging don't get paid
 export const HOUSE_BONUS = 2 // the house pays the showdown winner this many antes on top of the pot
 export const HAND_SIZE = 8
-export const PLAY_SIZE = 5
+export const PLAY_SIZE = 5 // lock in 1 to this many
+export const ROUNDS_PER_TABLE = 3
 export const DISPLAY_SLOTS = 5
 export const TOURNAMENT_ROUNDS: readonly number[] = [3, 6, 9]
 
@@ -26,9 +27,25 @@ export function blinds(round: number): { ante: number; max: number } {
   return b
 }
 
-// +$1 per $10 held, max +$2
-export function interest(bankroll: number): number {
-  return Math.min(2, Math.floor(Math.max(0, bankroll) / 10))
+// +$1 per $10 held, max +$2 (Deep Pockets sleeve: +$4)
+export function interest(bankroll: number, cap = 2): number {
+  return Math.min(cap, Math.floor(Math.max(0, bankroll) / 10))
+}
+
+// boss house bonus: 2× ante plus 1× ante per showdown you won earlier in the table, max +2
+export const MOMENTUM_MAX = 2
+export const GOLD_BORDER = 3 // side bet per gold border card played: +$3 on a showdown win, −$3 on a loss
+export const SLEEVE_PRICE = 10
+export const BULK_BIN_PRICE = 2 // then $3, $4... for the rest of the run
+export const STONKS_MULT = { rank: 3, suit: 3, finish: 2 } as const
+
+// which table a round belongs to, 1..3
+export function tableOf(round: number): number {
+  return Math.ceil(round / ROUNDS_PER_TABLE)
+}
+
+export function isTableStart(round: number): boolean {
+  return round % ROUNDS_PER_TABLE === 1
 }
 
 // streak > 0 is wins in a row, < 0 is losses in a row. both pay, max +$3

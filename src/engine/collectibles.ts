@@ -35,7 +35,7 @@ const handIs = (t: HandType) => (ctx: HandCtx) => ctx.hand.type === t
 
 export const COLLECTIBLES: readonly CollectibleDef[] = [
   // flat
-  { id: 'penny_sleeve', name: 'Penny Sleeve', rarity: 'common', text: '+4 Hype', onHand: () => ({ hype: 4 }) },
+  { id: 'penny_sleeve', name: 'Lucky Penny', rarity: 'common', text: '+4 Hype', onHand: () => ({ hype: 4 }) },
   { id: 'top_loader', name: 'Top Loader', rarity: 'common', text: '+30 Value', onHand: () => ({ value: 30 }) },
   // hand types
   { id: 'rubber_band', name: 'Rubber Band', rarity: 'common', text: 'Pair: +8 Hype', onHand: c => (handIs('pair')(c) ? { hype: 8 } : null) },
@@ -57,7 +57,7 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   // collection
   { id: 'team_bag', name: 'Team Bag', rarity: 'uncommon', text: '+3 Hype per empty display slot', onHand: c => (c.emptySlots > 0 ? { hype: 3 * c.emptySlots } : null) },
   { id: 'black_light', name: 'Black Light', rarity: 'uncommon', text: '+1 Grade if 3+ scored cards have a Finish', onHand: c => (c.hand.scoring.filter(x => x.finish).length >= 3 ? { grade: 1 } : null) },
-  { id: 'card_sleeves', name: 'Card Sleeves', rarity: 'uncommon', text: '+1 Grade if you played a forged card', onHand: c => (c.played.some(isForged) ? { grade: 1 } : null) },
+  { id: 'card_sleeves', name: "Smith's Apron", rarity: 'uncommon', text: '+1 Grade if you played a forged card', onHand: c => (c.played.some(isForged) ? { grade: 1 } : null) },
   { id: 'tournament_badge', name: 'Tournament Badge', rarity: 'uncommon', text: '+15 Hype if you bet Max', onHand: c => (c.betMax ? { hype: 15 } : null) },
   { id: 'deck_box', name: 'Deck Box', rarity: 'common', text: 'Draw 9 cards instead of 8' },
   { id: 'price_sticker', name: 'Price Sticker', rarity: 'common', text: '+$1 every round you win' },

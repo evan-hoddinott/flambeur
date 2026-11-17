@@ -1,6 +1,7 @@
 import { SUITS, newCard, type Card, type Finish, type Stamp, type Trait } from './cards.ts'
 import { COLLECTIBLES, RARITY_WEIGHT, rollParam, type CollectibleDef, type Owned, type Rarity } from './collectibles.ts'
-import { COLLECTIBLE_PRICE, PACK_PRICE } from './economy.ts'
+import { COLLECTIBLE_PRICE, PACK_PRICE, SLEEVE_PRICE } from './economy.ts'
+import type { SleeveId } from './sleeves.ts'
 import { HAND_TYPES, type HandType } from './hands.ts'
 import { chance, pick, randInt, type Rng } from './rng.ts'
 
@@ -15,6 +16,7 @@ export type PackContents = {
 export type ShopOffer =
   | { type: 'pack'; kind: PackKind; price: number; sold: boolean }
   | { type: 'collectible'; owned: Owned; price: number; sold: boolean }
+  | { type: 'sleeve'; id: SleeveId; price: number; sold: boolean }
 
 export type Shop = { offers: ShopOffer[]; restocks: number }
 
@@ -119,18 +121,21 @@ export function stockShop(rng: Rng, mem: ShopMemory, owned: Owned[], freeAvailab
   return offers
 }
 
-export function newShop(rng: Rng, mem: ShopMemory, owned: Owned[]): Shop {
-  return { offers: stockShop(rng, mem, owned, true), restocks: 0 }
+// sleeve = this table's sleeve, only offered in the shop right before the boss
+export function newShop(rng: Rng, mem: ShopMemory, owned: Owned[], sleeve: SleeveId | null = null): Shop {
+  const offers = stockShop(rng, mem, owned, true)
+  if (sleeve) offers.push({ type: 'sleeve', id: sleeve, price: SLEEVE_PRICE, sold: false })
+  return { offers, restocks: 0 }
 }
 
-export function restockPrice(shop: Shop, freeRestock: boolean): number {
-  if (freeRestock) return shop.restocks
-  return shop.restocks + 1
+// $1, $2, $3... free = how many restocks this shop cost nothing (store credit, restock sleeve)
+export function restockPrice(shop: Shop, free: number): number {
+  return Math.max(0, shop.restocks + 1 - free)
 }
 
+// rerolls everything except the free pack and the sleeve
 export function restock(shop: Shop, rng: Rng, mem: ShopMemory, owned: Owned[]): Shop {
-  const free = shop.offers.find(o => o.type === 'pack' && o.kind === 'free')
+  const kept = shop.offers.filter(o => (o.type === 'pack' && o.kind === 'free') || o.type === 'sleeve')
   const offers = stockShop(rng, mem, owned, false)
-  if (free) offers.unshift(free)
-  return { offers, restocks: shop.restocks + 1 }
+  return { offers: [...kept.filter(o => o.type === 'pack'), ...offers, ...kept.filter(o => o.type === 'sleeve')], restocks: shop.restocks + 1 }
 }

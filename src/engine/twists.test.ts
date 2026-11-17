@@ -4,9 +4,8 @@ import assert from 'node:assert/strict'
 import { newCard, type Card, type Suit } from './cards.ts'
 import { appraise, emptyLevels } from './scoring.ts'
 import { act, legalActions, startBetting } from './betting.ts'
-import { finishRound, newRun, showdownWinner, tableBlinds, twistFor, mulligansFor } from './run.ts'
+import { canMulligan, dealHand, finishRound, newRun, showdownWinner, tableBlinds, twistFor } from './run.ts'
 import { rollTwists, type Twist } from './twists.ts'
-import { refillHand } from './deck.ts'
 
 const c = (rank: number, suit: Suit, extra: Partial<Card> = {}) => newCard(rank, suit, extra)
 const kings = () => [c(13, 'S'), c(13, 'H'), c(2, 'D'), c(5, 'C'), c(9, 'S')]
@@ -24,7 +23,7 @@ test('forced betting: no fold or forge at any step, min → raise → call goes 
   assert.equal(b.outcome?.kind, 'showdown')
 })
 
-test('sealed only: pair of kings + Penny Sleeve scores (10 + 10 + 10) × 2 = 60, not × 6', () => {
+test('sealed only: pair of kings + Lucky Penny scores (10 + 10 + 10) × 2 = 60, not × 6', () => {
   assert.equal(score(kings(), null).total, 30 * 6)
   assert.equal(score(kings(), { id: 'sealed', suit: null }).total, 60)
 })
@@ -39,7 +38,7 @@ test('ban wave ♠: K♠ K♥ pair scores 10 + 10 (K♥ only) = 20 × 2 = 40', (
   assert.equal(score(kings(), { id: 'banwave', suit: 'S' }, []).total, 40)
 })
 
-test('hype freeze: Penny Sleeve +4 Hype is ignored, holo too: 30 × 2 = 60', () => {
+test('hype freeze: Lucky Penny +4 Hype is ignored, holo too: 30 × 2 = 60', () => {
   const hand = [c(13, 'S', { finish: 'holo' }), c(13, 'H'), c(2, 'D'), c(5, 'C'), c(9, 'S')]
   assert.equal(score(hand, { id: 'hypefreeze', suit: null }).total, 60)
 })
@@ -54,13 +53,13 @@ test('lowball: lower appraisal wins the showdown', () => {
   assert.equal(showdownWinner(run, 100, 500), 1)
 })
 
-test('high stakes: round 3 min becomes the max ($8 / $8), cold deck: 0 mulligans', () => {
+test('high stakes: round 3 min becomes the max ($8 / $8), cold deck: no mulligans', () => {
   const run = newRun('hs', 'classic', [0, 1, 2])
   run.round = 3
   run.twists[0] = { id: 'highstakes', suit: null }
   assert.deepEqual(tableBlinds(run), { ante: 8, max: 8 })
   run.twists[0] = { id: 'colddeck', suit: null }
-  assert.equal(mulligansFor(run, run.you), 0)
+  assert.equal(canMulligan(run, run.you), false)
 })
 
 test('double down: winning a $8 showdown pays +$16, the loser still only pays $8', () => {
@@ -69,8 +68,8 @@ test('double down: winning a $8 showdown pays +$16, the loser still only pays $8
   run.twists[0] = { id: 'doubledown', suit: null }
   run.you.bankroll = 30
   run.rival.bankroll = 30
-  refillHand(run.you, 8, run.pileRng)
-  refillHand(run.rival, 8, run.rivalPileRng)
+  dealHand(run, 0)
+  dealHand(run, 1)
   let b = startBetting(0, 4, 8, [30, 30], [false, false], true)
   b = act(act(b, 'max'), 'call')
   const [you, rival] = finishRound(run, b, 0, [run.you.hand.slice(0, 5), run.rival.hand.slice(0, 5)], [[], []])
@@ -81,8 +80,8 @@ test('double down: winning a $8 showdown pays +$16, the loser still only pays $8
 test('rival bust ends the run as a win, your bust as a loss', () => {
   const run = newRun('bust', 'classic', [0, 1, 2])
   run.rival.bankroll = 2
-  refillHand(run.you, 8, run.pileRng)
-  refillHand(run.rival, 8, run.rivalPileRng)
+  dealHand(run, 0)
+  dealHand(run, 1)
   let b = startBetting(0, 2, 5, [run.you.bankroll, 2], [false, false])
   b = act(act(b, 'min'), 'call')
   finishRound(run, b, 0, [run.you.hand.slice(0, 5), run.rival.hand.slice(0, 5)], [[], []])
@@ -104,8 +103,8 @@ test('income: folding pays no paycheck. a $3 round-2 showdown win: +3 pot, paych
   const run = newRun('pay', 'classic', [0, 1, 2])
   run.you.bankroll = 9 // interest 0 before and after a fold
   run.rival.bankroll = 9
-  refillHand(run.you, 8, run.pileRng)
-  refillHand(run.rival, 8, run.rivalPileRng)
+  dealHand(run, 0)
+  dealHand(run, 1)
   let b = startBetting(0, 2, 5, [9, 9], [false, false])
   const [folded, other] = finishRound(run, act(b, 'fold'), null, [run.you.hand.slice(0, 5), run.rival.hand.slice(0, 5)], [[], []])
   assert.equal(folded.income.paycheck, 0)
@@ -114,8 +113,8 @@ test('income: folding pays no paycheck. a $3 round-2 showdown win: +3 pot, paych
   run.round = 2
   run.you.bankroll = 9
   run.rival.bankroll = 9
-  refillHand(run.you, 8, run.pileRng)
-  refillHand(run.rival, 8, run.rivalPileRng)
+  dealHand(run, 0)
+  dealHand(run, 1)
   b = act(act(startBetting(0, 3, 6, [9, 9], [false, false]), 'min'), 'call')
   const [won, lost] = finishRound(run, b, 0, [run.you.hand.slice(0, 5), run.rival.hand.slice(0, 5)], [[], []])
   assert.equal(won.delta, 3)

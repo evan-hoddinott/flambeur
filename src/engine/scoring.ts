@@ -1,4 +1,4 @@
-import { cardValue, has, type Card } from './cards.ts'
+import { BULK_VALUE, cardValue, has, type Card } from './cards.ts'
 import { getDef, type HandCtx, type Owned } from './collectibles.ts'
 import { HAND_BASE, HAND_NAMES, evaluateHand, type HandType } from './hands.ts'
 import { randInt, type Rng } from './rng.ts'
@@ -99,9 +99,13 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
     }
   }
 
+  // bulk is the one card that scores without being in the hand
+  const bulk = played.filter(c => c.bulk)
+  for (const card of bulk) add('Bulk', card.id, null, { value: BULK_VALUE })
+
   const handCtx: HandCtx = {
     hand,
-    played,
+    played: played.filter(c => !c.bulk),
     deckSize: ctx.deckSize,
     bankroll: ctx.bankroll,
     ante: ctx.ante,
@@ -125,7 +129,7 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
   return {
     hand: hand.type,
     bonus: hand.bonus,
-    scoringIds: hand.scoring.map(c => c.id),
+    scoringIds: [...hand.scoring, ...bulk].map(c => c.id),
     value,
     hype,
     grade,

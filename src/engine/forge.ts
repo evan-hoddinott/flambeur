@@ -1,4 +1,4 @@
-import { MAX_TIER, bestFinish, newCard, type Card, type Trait } from './cards.ts'
+import { MAX_TIER, bestFinish, newBulk, newCard, type Card, type Trait } from './cards.ts'
 import { evaluateHand, type HandType } from './hands.ts'
 
 // forging folds the hand and merges every card that scored into one card.
@@ -55,7 +55,6 @@ function mergeTraits(traits: Trait[], rank: number): Trait[] {
 export function forgePlan(played: Card[]): ForgePlan | null {
   const hand = evaluateHand(played)
   const merged = hand.scoring
-  // a lone forged card (K Twin is already a pair) would just re-make itself
   // high card can't be forged (folding grinds instead). a lone forged card (K Twin is already a pair) would just re-make itself
   if (hand.type === 'high' || merged.length < 2) return null
 
@@ -86,26 +85,32 @@ export function autoKeep(plan: ForgePlan): Trait[] {
     .slice(0, plan.tier)
 }
 
-export function buildForged(plan: ForgePlan, keep: Trait[], round: number): Card {
+// the forged card plus one bulk for every card eaten beyond the first, so forging never shrinks the deck
+export function buildForged(plan: ForgePlan, keep: Trait[], round: number): { forged: Card; bulk: Card[] } {
   if (keep.length > plan.tier) {
     throw new Error(`keeping ${keep.length} traits on a ★${plan.tier} card`)
   }
   const offered = new Set(plan.candidates.map(t => JSON.stringify(t)))
   for (const t of keep) if (!offered.has(JSON.stringify(t))) throw new Error('keeping a trait the plan never offered')
-  return newCard(plan.rank, plan.suit, {
+  const forged = newCard(plan.rank, plan.suit, {
     tier: plan.tier,
     traits: keep,
     grind: plan.grind,
     finish: bestFinish(plan.merged),
     pulledRound: round,
   })
+  const bulk = plan.merged.slice(1).map(() => newBulk(round))
+  return { forged, bulk }
 }
 
 // folding grinds your highest locked card: same card, +1 value forever. the meme build, and the only
 // thing a fold gives back. done in place so the card keeps its stamp, grade and 1st edition growth
-export function grindOnFold(played: Card[]): Card {
+// bulk can't be ground. folding a hand of only bulk grinds nothing
+export function grindOnFold(played: Card[]): Card | null {
   if (played.length === 0) throw new Error('folding with no locked cards')
-  const top = played.reduce((best, c) => (c.rank > best.rank ? c : best))
+  const real = played.filter(c => !c.bulk)
+  if (real.length === 0) return null
+  const top = real.reduce((best, c) => (c.rank > best.rank ? c : best))
   top.grind++
   return top
 }

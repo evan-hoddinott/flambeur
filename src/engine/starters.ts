@@ -10,7 +10,7 @@ import { makeRng, pick, shuffled, type Rng } from './rng.ts'
 export type Rules = {
   startBankroll: number
   displaySlots: number
-  mulligans: number // per round
+  freeMulligans: number // per table, these don't shrink your hand
   anteBonus: number // added to every ante and max
   packDiscount: number // $ off every paid pack
   startDisplay: Owned[] // collectibles already in the case
@@ -20,7 +20,7 @@ export type Rules = {
 export const DEFAULT_RULES: Rules = {
   startBankroll: START_BANKROLL,
   displaySlots: DISPLAY_SLOTS,
-  mulligans: 1,
+  freeMulligans: 0,
   anteBonus: 0,
   packDiscount: 0,
   startDisplay: [],
@@ -48,7 +48,7 @@ export function shortDeck(suits: readonly Suit[] = SUITS, lowest = 7): Card[] {
 export const STARTERS: readonly Starter[] = [
   {
     id: 'classic', name: 'Classic Box', deckText: '7 through A',
-    twist: '2 mulligans per round', rules: { mulligans: 2 },
+    twist: 'First mulligan each Table is free (no hand size cost)', rules: { freeMulligans: 1 },
     deck: () => shortDeck(),
   },
   {
