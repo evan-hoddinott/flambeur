@@ -1,20 +1,23 @@
-import { act, canPeek, firstToAct, legalActions, startBetting, type BetAction, type Betting, type Seat } from './engine/betting.ts'
+import { act, canPeek, firstToAct, forfeit, legalActions, startBetting, type BetAction, type Betting, type Seat } from './engine/betting.ts'
 import { autoKeep, forgePlan, type ForgePlan } from './engine/forge.ts'
 import { botAct, botDeal, botShop, getStyle } from './engine/bot.ts'
-import { SUIT_GLYPH, cardName, isSpecial, isWild, rankLabel, sellPrice, traitName, type Card, type Trait } from './engine/cards.ts'
+import { SUIT_GLYPH, cardName, isWild, rankLabel, sellPrice, traitName, type Card, type Trait } from './engine/cards.ts'
 import { COLLECTIBLES, describe, getDef, hasCollectible, type Owned } from './engine/collectibles.ts'
-import { PLAY_SIZE, ROUNDS, COLLECTIBLE_PRICE, TOURNAMENT_ROUNDS } from './engine/economy.ts'
+import { GRADING_PRICE, PLAY_SIZE, ROUNDS, COLLECTIBLE_PRICE, SLEEVE_PRICE, TOURNAMENT_ROUNDS, isTableStart, tableOf } from './engine/economy.ts'
 import { DRAFT_PICKS, draftRows, getStarter, starterOffer, type StarterId } from './engine/starters.ts'
-import { DECK_FLOOR, allCards, deckSize, mulliganHand } from './engine/deck.ts'
+import { allCards, deckSize, pileView } from './engine/deck.ts'
 import { HAND_NAMES, type HandType } from './engine/hands.ts'
 import { randomSeed } from './engine/rng.ts'
 import {
-  DIFFICULTIES, addCard, appraiseFor, canForgeNow, dealHand, finishRound, forgeCheck, mulligansFor, newRun, nextRound, runScore, showdownWinner, tableBlinds, twistFor,
+  DIFFICULTIES, appraiseFor, binBulk, binderPrice, bulkPrice, buySleeve, canForge, canGrade, canMulligan, dealHand, defaultToDeck, displaySlots, finishRound,
+  freeMulligan, freeRestocks, handSize, houseMult, mulligan, newRun, nextRound, runScore, sellBinder, sendToGrading, shopSleeve, showdownWinner, stonks,
+  tableBlinds, takePull, twistFor,
   type Difficulty, type Player, type RoundResult, type Run,
 } from './engine/run.ts'
 import type { Appraisal, Step } from './engine/scoring.ts'
 import { newShop, openPack, restock, restockPrice, type PackContents, type PackKind, type Shop } from './engine/shop.ts'
 import { isTournament, twistName, twistText, type Twist } from './engine/twists.ts'
+import { getSleeve, type Stonks } from './engine/sleeves.ts'
 import * as sfx from './ui/sound.ts'
 
 const app = document.getElementById('app') as HTMLElement
@@ -25,7 +28,7 @@ type Table = {
   oppPlayed: Card[]
   oppEst: number
   selected: Set<number>
-  mulligansLeft: number
+  oppMulls: number
   locked: Card[] | null
   peek: Card | null
   betting: Betting | null
@@ -35,7 +38,7 @@ type Table = {
   rivalResult: RoundResult | null
   forgeKeep: Trait[] | null // traits picked when the forge goes over the cap
 }
-type PackView = { kind: PackKind; contents: PackContents; ripped: boolean; flipped: Set<number>; keep: Set<number>; then: () => void }
+type PackView = { kind: PackKind; contents: PackContents; ripped: boolean; flipped: Set<number>; toDeck: Set<number>; then: () => void }
 
 let run: Run
 let table: Table | null = null
@@ -51,6 +54,7 @@ const fmt = (n: number) => n.toLocaleString('en-US')
 
 // ---------- small render helpers ----------
 function cardHtml(card: Card, cls = ''): string {
+  if (card.bulk) return `<div class="card bulk ${cls}" data-id="${card.id}"><span>▦</span><span class="tag">bulk +5</span><span class="s"></span></div>`
   const red = !isWild(card) && (card.suit === 'H' || card.suit === 'D')
   const suit = isWild(card) ? '✦' : SUIT_GLYPH[card.suit]
   const tags: string[] = []
@@ -78,27 +82,38 @@ function caseHtml(sellable: boolean): string {
     const sell = sellable ? `<button class="ghost" data-sell="${i}">Sell $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}</button>` : ''
     slots.push(`<div class="item ${def.rarity}" data-slot="${i}"><b>${def.name}</b><span>${describe(o)}</span><div class="rar">${def.rarity}</div>${sell}</div>`)
   })
-  for (let i = run.you.display.length; i < run.you.rules.displaySlots; i++) slots.push('<div class="item empty">empty slot</div>')
+  for (let i = run.you.display.length; i < displaySlots(run.you); i++) slots.push('<div class="item empty">empty slot</div>')
   return `<div class="panel"><h3 style="margin-bottom:10px">Display case</h3><div class="case">${slots.join('')}</div></div>`
 }
 
 function levelsHtml(): string {
   const lv = Object.entries(run.you.levels).filter(([, n]) => n > 0)
-  if (lv.length === 0) return ''
-  return `<div class="panel" style="margin-top:12px"><h3 style="margin-bottom:6px">Code cards</h3>${lv.map(([h, n]) => `<div class="muted">${HAND_NAMES[h as HandType]} lv${n + 1}</div>`).join('')}</div>`
+  const parts: string[] = []
+  if (run.you.sleeves.length) parts.push(`<h3 style="margin-bottom:6px">Sleeves</h3>${run.you.sleeves.map(id => `<div class="muted"><b class="gold">${getSleeve(id).name}</b> · ${getSleeve(id).text}</div>`).join('')}`)
+  if (lv.length) parts.push(`<h3 style="margin:8px 0 6px">Code cards</h3>${lv.map(([h, n]) => `<div class="muted">${HAND_NAMES[h as HandType]} lv${n + 1}</div>`).join('')}`)
+  if (run.you.grading.length) parts.push(`<h3 style="margin:8px 0 6px">Grading desk</h3>${run.you.grading.map(g => `<div class="muted">${cardName(g.card)} is out, back round ${g.back}</div>`).join('')}`)
+  if (!parts.length) return ''
+  return `<div class="panel" style="margin-top:12px">${parts.join('')}</div>`
+}
+
+function stonksText(st: Stonks): string {
+  if (st.kind === 'rank') return `${rankLabel(st.rank)}s ×3`
+  if (st.kind === 'suit') return `${SUIT_GLYPH[st.suit]} ×3`
+  return `${st.finish} ×2`
 }
 
 function topHtml(extra = ''): string {
   const { ante, max } = tableBlinds(run)
   const streak = run.you.streak > 0 ? `🔥 ${run.you.streak}` : run.you.streak < 0 ? `🧊 ${-run.you.streak}` : '—'
   return `<div class="top">
-    <h2>PULL <span class="gold">RATE</span></h2>
+    <h2>FLAM<span class="gold">BEUR</span></h2>
     <div class="chips">
-      <span class="chip">Round <b>${run.round}/${ROUNDS}</b></span>
+      <span class="chip">Round <b>${run.round}/${ROUNDS}</b> · Table <b>${tableOf(run.round)}</b></span>
       <span class="chip">Bankroll <b>$${run.you.bankroll}</b></span>
       <span class="chip">Ante/Max <b>$${ante}/$${max}</b></span>
       <span class="chip">Streak <b>${streak}</b></span>
-      <span class="chip">Deck <b>${run.you.draw.length}</b> draw / <b>${run.you.discard.length}</b> discard</span>
+      <button class="chip" id="deckview" style="cursor:pointer;color:inherit;min-height:0">Deck <b>${run.you.pile.length}</b> pile / <b>${run.you.discard.length}</b> discard · Binder <b>${run.you.binder.length}</b></button>
+      <span class="chip">STONKS <b class="hot">${stonksText(stonks(run))}</b></span>
       <span class="chip">Seed <b>${run.seed}</b></span>
       <span class="chip">Box <b>${getStarter(run.starter).name}</b></span>
       <span class="chip">Rival <b>$${run.rival.bankroll}</b> · ${DIFFICULTIES[run.difficulty].name}</span>
@@ -120,6 +135,29 @@ function twistBanner(t: Twist): string {
   return `<div class="banner bad" style="font-size:16px">Tournament round · ${twistName(t)}<div class="muted" style="font-size:13px">${twistText(t)}. No folding, no forging.</div></div>`
 }
 
+// pile, discard and binder. the pile is sorted so it doesn't leak the draw order
+function showDeckViewer(): void {
+  const overlay = document.createElement('div')
+  overlay.className = 'overlay'
+  const section = (title: string, cards: Card[]) => {
+    const v = pileView(cards)
+    const ranks = [...v.byRank.entries()].sort((a, b) => b[0] - a[0]).map(([r, n]) => `${rankLabel(r)}×${n}`).join(' ')
+    const suits = [...v.bySuit.entries()].map(([su, n]) => `${SUIT_GLYPH[su]}${n}`).join(' ')
+    return `<div class="panel" style="margin-top:10px;text-align:left"><b>${title} · ${cards.length}</b> <span class="muted" style="font-size:12px">${ranks} · ${suits}${v.bulk ? ` · bulk ${v.bulk}` : ''}</span>
+      <div class="binder" style="margin-top:8px">${v.cards.map(c => cardHtml(c, 'mini')).join('')}</div></div>`
+  }
+  overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>Your deck · ${deckSize(run.you)} cards</h2>
+    ${section('Pile', run.you.pile)}${section('Discard (back next Table)', run.you.discard)}${section('Binder (never drawn, sell it at the shop)', run.you.binder)}
+    <div class="row" style="justify-content:center;margin-top:12px"><button id="closeview">Close</button></div></div>`
+  document.body.appendChild(overlay)
+  document.getElementById('closeview')!.onclick = () => overlay.remove()
+}
+
+function bindDeckViewer(): void {
+  const el = document.getElementById('deckview')
+  if (el) el.onclick = () => showDeckViewer()
+}
+
 // ---------- title ----------
 function today(): string {
   const d = new Date()
@@ -130,7 +168,7 @@ type Score = { score: number; bankroll: number; won: boolean; best: number }
 
 function leaderboard(seed: string, diff: Difficulty): Score[] {
   try {
-    return JSON.parse(localStorage.getItem(`pullrate:lb:${seed}:${diff}`) ?? '[]')
+    return JSON.parse(localStorage.getItem(`flambeur:lb:${seed}:${diff}`) ?? '[]')
   } catch {
     return []
   }
@@ -141,7 +179,7 @@ function saveScore(): void {
     const lb = leaderboard(run.seed, run.difficulty)
     lb.push({ score: runScore(run), bankroll: run.you.bankroll, won: run.won, best: best.total })
     lb.sort((a, b) => b.score - a.score)
-    localStorage.setItem(`pullrate:lb:${run.seed}:${run.difficulty}`, JSON.stringify(lb.slice(0, 10)))
+    localStorage.setItem(`flambeur:lb:${run.seed}:${run.difficulty}`, JSON.stringify(lb.slice(0, 10)))
   } catch {
     // private window etc, leaderboard just doesn't persist
   }
@@ -156,7 +194,7 @@ function renderTitle(): void {
   const daily = today()
   const lb = leaderboard(daily, difficulty)
   app.innerHTML = `<div class="title"><div>
-    <h1>PULL<br><span>RATE</span></h1>
+    <h1>FLAM<br><span>BEUR</span></h1>
     <p class="muted" style="max-width:460px;margin:14px auto">Rip packs. Build a deck. Bet your bankroll against one rival, every hand, or forge it into something better.</p>
     <div class="row" style="justify-content:center;margin-top:16px">
       ${(Object.keys(DIFFICULTIES) as Difficulty[]).map(d => `<button class="${d === difficulty ? '' : 'ghost'}" data-diff="${d}" title="${DIFFICULTIES[d].text}">${DIFFICULTIES[d].name} ×${DIFFICULTIES[d].scoreMult}</button>`).join('')}
@@ -269,9 +307,9 @@ function glowFor(card: Card): string {
 
 function showPack(kind: PackKind, then: () => void): void {
   const contents = openPack(kind, run.rng, run.round, run.mem, run.you.display)
-  // default: keep anything special, sell plain cards (free pack is all plain = sell maxxing)
-  const keep = new Set(contents.cards.filter(c => isSpecial(c)).map(c => c.id))
-  pack = { kind, contents, ripped: false, flipped: new Set(), keep, then }
+  // every pull goes to the deck or the binder. default: special cards to the deck, plain ones to the binder
+  const toDeck = new Set(contents.cards.filter(defaultToDeck).map(c => c.id))
+  pack = { kind, contents, ripped: false, flipped: new Set(), toDeck, then }
   renderPack()
 }
 
@@ -287,13 +325,13 @@ function renderPack(): void {
   } else {
     const pulls = p.contents.cards.map(c => {
       if (!p.flipped.has(c.id)) return `<div class="pull"><div class="glowback" style="--glow:${glowFor(c)}" data-flip="${c.id}"></div><span class="muted" style="font-size:12px">?</span></div>`
-      const kept = p.keep.has(c.id)
-      return `<div class="pull reveal">${cardHtml(c)}<label><input type="checkbox" data-keep="${c.id}" ${kept ? 'checked' : ''}> ${kept ? 'keep' : `sell $${sellPrice(c)}`}</label></div>`
+      const deck = p.toDeck.has(c.id)
+      return `<div class="pull reveal">${cardHtml(c)}<button class="${deck ? '' : 'ghost'}" data-sort="${c.id}" style="padding:4px 10px;min-height:28px;font-size:12px">${deck ? 'Deck' : 'Binder'}</button></div>`
     })
     if (allFlipped && p.contents.codeCard) pulls.push(`<div class="pull reveal"><div class="extra code">CODE CARD<br>${HAND_NAMES[p.contents.codeCard]} +1 level</div><span class="muted" style="font-size:12px">auto-applied</span></div>`)
     if (allFlipped && p.contents.collectible) {
       const def = getDef(p.contents.collectible.id)
-      const room = run.you.display.length < run.you.rules.displaySlots
+      const room = run.you.display.length < displaySlots(run.you)
       pulls.push(`<div class="pull reveal"><div class="extra col">★ ${def.name}<br><span style="font-weight:400;font-size:11px;color:#d5cde8">${describe(p.contents.collectible)}</span></div><span class="muted" style="font-size:12px">${room ? 'goes in your case' : `case full, sells for $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}`}</span></div>`)
     }
     body = `<div class="pulls">${pulls.join('')}</div>
@@ -321,11 +359,11 @@ function renderPack(): void {
   overlay.querySelectorAll<HTMLElement>('[data-flip]').forEach(el => {
     el.onclick = () => flipCard(Number(el.dataset.flip))
   })
-  overlay.querySelectorAll<HTMLInputElement>('[data-keep]').forEach(el => {
-    el.onchange = () => {
-      const id = Number(el.dataset.keep)
-      if (el.checked) p.keep.add(id)
-      else p.keep.delete(id)
+  overlay.querySelectorAll<HTMLElement>('[data-sort]').forEach(el => {
+    el.onclick = () => {
+      const id = Number(el.dataset.sort)
+      if (p.toDeck.has(id)) p.toDeck.delete(id)
+      else p.toDeck.add(id)
       renderPack()
     }
   })
@@ -353,13 +391,10 @@ function flipCard(id: number): void {
 function finishPack(): void {
   if (!pack) return
   const p = pack
-  for (const c of p.contents.cards) {
-    if (p.keep.has(c.id)) addCard(run, c)
-    else run.you.bankroll += sellPrice(c)
-  }
+  for (const c of p.contents.cards) takePull(run, c, p.toDeck.has(c.id))
   if (p.contents.codeCard) run.you.levels[p.contents.codeCard]++
   if (p.contents.collectible) {
-    if (run.you.display.length < run.you.rules.displaySlots) run.you.display.push(p.contents.collectible)
+    if (run.you.display.length < displaySlots(run.you)) run.you.display.push(p.contents.collectible)
     else run.you.bankroll += Math.floor(COLLECTIBLE_PRICE[getDef(p.contents.collectible.id).rarity] / 2)
   }
   sfx.coin()
@@ -370,32 +405,56 @@ function finishPack(): void {
 
 // ---------- shop ----------
 const PACK_TEXT: Record<PackKind, string> = {
-  free: '3 plain cards. One per shop. Sell them all for $1 each.',
+  free: '3 plain cards. One per shop. Binder them and sell when STONKS is hot.',
   offbrand: '5 cheap cards. Lots of stamps, some damaged.',
   repack: '4 cards other collectors sold. Some come pre-forged.',
   collector: '3 cards, a Code Card, and a rare slot: collectible or Prism.',
 }
 
 function enterShop(): void {
-  shop = newShop(run.rng, run.mem, run.you.display)
+  shop = newShop(run.rng, run.mem, run.you.display, shopSleeve(run, 0))
   renderShop()
+}
+
+// the binder: sell (STONKS hot cards pay more), send to grading, bin bulk
+function binderHtml(): string {
+  const bulkCount = [...run.you.pile, ...run.you.discard].filter(c => c.bulk).length
+  const gradeOk = run.you.bankroll - GRADING_PRICE >= 1
+  const cards = run.you.binder.map(c => {
+    const price = binderPrice(run, run.you, c)
+    const hot = price > sellPrice(c)
+    return `<div class="slot">${cardHtml(c, 'mini')}<button data-sellcard="${c.id}" class="${hot ? '' : 'ghost'}">Sell $${price}${hot ? ' 🔥' : ''}</button>${canGrade(c) ? `<button class="ghost" data-grade="${c.id}" ${gradeOk ? '' : 'disabled'}>Grade $${GRADING_PRICE}</button>` : ''}</div>`
+  })
+  return `<div class="panel" style="margin-top:14px">
+    <h3 style="margin-bottom:8px">Binder · STONKS today: <span class="hot">${stonksText(stonks(run))}</span></h3>
+    ${cards.length ? `<div class="binder">${cards.join('')}</div>` : '<p class="muted" style="font-size:13px">Empty. Pulls you send to the binder land here. It\'s the only place you can sell from.</p>'}
+    <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
+      <button class="ghost" id="binbulk" ${bulkCount === 0 || run.you.bankroll - bulkPrice(run.you) < 1 ? 'disabled' : ''}>Bin a Bulk for good · $${bulkPrice(run.you)} (${bulkCount} in deck)</button>
+      <button class="ghost" id="gradedeck" ${gradeOk ? '' : 'disabled'}>Grade a deck card · $${GRADING_PRICE}</button>
+    </div>
+  </div>`
 }
 
 function renderShop(): void {
   if (!shop) return
   const s = shop
-  const restockCost = restockPrice(s, hasCollectible(run.you.display, 'store_credit'))
+  const restockCost = restockPrice(s, freeRestocks(run.you))
   const line = run.mem.rolledOver
     ? '"What, you too good for my stuff? Fine. Prices are up."'
-    : '"Fresh stock came in this morning. Take a look."'
+    : isTournament(run.round) ? '"Big game next round. Got something special in the back."' : '"Fresh stock came in this morning. Take a look."'
   const offers = s.offers.map((o, i) => {
     const afford = run.you.bankroll - o.price >= 1 // keep $1 to sit at the table
     if (o.type === 'pack') {
       return `<div class="offer p-${o.kind} ${o.sold ? 'sold' : ''}"><h3>${PACK_NAMES[o.kind]}</h3><b>${o.price ? `$${o.price}` : 'FREE'}</b><p>${PACK_TEXT[o.kind]}</p>
         <button data-buy="${i}" ${o.sold || !afford ? 'disabled' : ''}>${o.sold ? 'Opened' : 'Open'}</button></div>`
     }
+    if (o.type === 'sleeve') {
+      const sl = getSleeve(o.id)
+      return `<div class="offer o-col ${o.sold ? 'sold' : ''}" style="outline:2px solid var(--gold)"><h3>Sleeve · ${sl.name}</h3><b>$${o.price} · run-wide</b><p>${sl.text}</p>
+        <button data-buy="${i}" ${o.sold || !afford ? 'disabled' : ''}>${o.sold ? 'Bought' : 'Buy'}</button></div>`
+    }
     const def = getDef(o.owned.id)
-    const full = run.you.display.length >= run.you.rules.displaySlots
+    const full = run.you.display.length >= displaySlots(run.you)
     return `<div class="offer o-col ${o.sold ? 'sold' : ''}"><h3>${def.name}</h3><b>$${o.price} · ${def.rarity}</b><p>${describe(o.owned)}</p>
       <button data-buy="${i}" ${o.sold || !afford || full ? 'disabled' : ''}>${o.sold ? 'Bought' : full ? 'Case full' : 'Buy'}</button></div>`
   })
@@ -408,16 +467,38 @@ function renderShop(): void {
           <button class="ghost" id="restock" ${run.you.bankroll - restockCost < 1 ? 'disabled' : ''}>Restock · ${restockCost ? `$${restockCost}` : 'free'}</button>
           <button id="next">To the table · round ${run.round}</button>
         </div>
+        ${binderHtml()}
       </div>
       <div>${caseHtml(true)}${levelsHtml()}</div>
     </div>`
 
+  bindDeckViewer()
   app.querySelectorAll<HTMLElement>('[data-buy]').forEach(el => {
     el.onclick = () => buy(Number(el.dataset.buy))
   })
   app.querySelectorAll<HTMLElement>('[data-sell]').forEach(el => {
     el.onclick = () => sellCollectible(Number(el.dataset.sell), renderShop)
   })
+  app.querySelectorAll<HTMLElement>('[data-sellcard]').forEach(el => {
+    el.onclick = () => {
+      sellBinder(run, 0, Number(el.dataset.sellcard))
+      sfx.coin()
+      renderShop()
+    }
+  })
+  app.querySelectorAll<HTMLElement>('[data-grade]').forEach(el => {
+    el.onclick = () => {
+      sendToGrading(run, 0, Number(el.dataset.grade))
+      sfx.coin()
+      renderShop()
+    }
+  })
+  document.getElementById('binbulk')!.onclick = () => {
+    binBulk(run, 0)
+    sfx.coin()
+    renderShop()
+  }
+  document.getElementById('gradedeck')!.onclick = () => pickDeckCardToGrade()
   document.getElementById('restock')!.onclick = () => {
     if (run.you.bankroll - restockCost < 1) return
     run.you.bankroll -= restockCost
@@ -428,14 +509,43 @@ function renderShop(): void {
   document.getElementById('next')!.onclick = () => startRound()
 }
 
+// grading a deck card takes it out of your deck for a round
+function pickDeckCardToGrade(): void {
+  const cards = pileView([...run.you.pile, ...run.you.discard].filter(canGrade)).cards
+  const overlay = document.createElement('div')
+  overlay.className = 'overlay'
+  overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>Grading desk · $${GRADING_PRICE}</h2>
+    <p class="muted">Pick a card. It's gone for a round and comes back graded 1–10. Fresh pulls grade higher.</p>
+    <div class="binder" style="justify-content:center">${cards.map(c => `<div class="slot" data-pickgrade="${c.id}" style="cursor:pointer">${cardHtml(c, 'mini')}</div>`).join('')}</div>
+    <div class="row" style="justify-content:center;margin-top:12px"><button class="ghost" id="cancelgrade">Cancel</button></div></div>`
+  document.body.appendChild(overlay)
+  document.getElementById('cancelgrade')!.onclick = () => overlay.remove()
+  overlay.querySelectorAll<HTMLElement>('[data-pickgrade]').forEach(el => {
+    el.onclick = () => {
+      sendToGrading(run, 0, Number(el.dataset.pickgrade))
+      overlay.remove()
+      sfx.coin()
+      renderShop()
+    }
+  })
+}
+
 function buy(i: number): void {
   if (!shop) return
   const o = shop.offers[i]
   if (o.sold || run.you.bankroll - o.price < 1) return
+  if (o.type === 'sleeve') {
+    if (o.price !== SLEEVE_PRICE) throw new Error('sleeve price drifted from the engine')
+    buySleeve(run, 0, o.id)
+    o.sold = true
+    sfx.gradeUp()
+    renderShop()
+    return
+  }
   run.you.bankroll -= o.price
   o.sold = true
   if (o.type === 'collectible') {
-    if (run.you.display.length >= run.you.rules.displaySlots) throw new Error('bought a collectible with a full case')
+    if (run.you.display.length >= displaySlots(run.you)) throw new Error('bought a collectible with a full case')
     run.you.display.push(o.owned)
     sfx.coin()
     renderShop()
@@ -458,19 +568,32 @@ function startRound(): void {
   if (run.you.bankroll <= 0) throw new Error('sat down at the table with no bankroll')
   // the rival shops and draws at the same time you do, off its own rng streams
   const spent = botShop(run, 1, rivalStyle())
-  const carried = run.you.hand.length
+  const full = handSize(run.you)
   const yours = dealHand(run)
   const oBest = botDeal(run, 1)
   const opp = run.rival
   const log = [run.round === 1
     ? `Your rival opens a <b>${getStarter(run.rivalStarter).name}</b> and sits down with <b>$${opp.bankroll}</b>.`
     : `Your rival ${spent > 0 ? `spent $${spent} in the shop` : 'skipped the shop'} and has <b>$${opp.bankroll}</b>.`]
-  if (carried) log.push(`You kept ${carried} cards from last round, drew ${yours.drawn.length}.`)
-  if (yours.reshuffled) log.push('Draw pile ran out: <b>discard reshuffled</b> into it.')
+  if (isTableStart(run.round)) log.push(`<b>Table ${tableOf(run.round)}</b>: everything shuffled back into one pile.`)
+  if (yours.length < full) log.push(`The pile ran low: you only got <b>${yours.length}</b> cards.`)
   table = {
-    opp, oppPlayed: oBest.played, oppEst: oBest.est.total,
-    selected: new Set(), mulligansLeft: mulligansFor(run, run.you), locked: null, peek: null, betting: null,
+    opp, oppPlayed: oBest.played, oppEst: oBest.est?.total ?? 0,
+    selected: new Set(), oppMulls: oBest.mulls, locked: null, peek: null, betting: null,
     log, duel: null, result: null, rivalResult: null, forgeKeep: null,
+  }
+  // an empty pile loses the round on the spot
+  if (yours.length === 0 || oBest.played.length === 0) {
+    const t = table
+    t.locked = []
+    const { ante, max } = tableBlinds(run)
+    const bankrolls: [number, number] = [run.you.bankroll, opp.bankroll]
+    const who: Seat | null = yours.length === 0 && oBest.played.length === 0 ? null : yours.length === 0 ? 0 : 1
+    t.log.push(who === 0 ? 'Your pile is empty. <b>You lose the round.</b>' : who === 1 ? 'Rival\'s pile is empty. <b>They lose the round.</b>' : 'Both piles are empty.')
+    t.betting = forfeit(startBetting(firstToAct(bankrolls, run.round), ante, max, bankrolls, [false, false], isTournament(run.round)), who)
+    renderTable()
+    void resolveRound()
+    return
   }
   renderTable()
 }
@@ -487,15 +610,12 @@ function renderTable(): void {
   const { ante, max } = tableBlinds(run)
   const lockedIds = new Set((t.locked ?? []).map(c => c.id))
 
-  // opponent row: face down until showdown
+  // rival: you see their hand size, never how many they locked. face up at showdown
   const showOpp = t.duel !== null
   const oppCards = showOpp
     ? t.oppPlayed.map(c => cardHtml(c, t.duel!.opp.scoringIds.includes(c.id) ? 'scoring' : 'dim')).join('')
-    : t.locked
-      ? t.oppPlayed.map(c => (t.peek && c.id === t.peek.id ? cardHtml(c) : backHtml())).join('')
-      : Array.from({ length: 5 }, backHtml).join('')
+    : run.rival.hand.map((_, i) => (t.peek && i === 0 ? cardHtml(t.peek) : backHtml())).join('')
 
-  // your row
   const yourCards = t.locked
     ? t.locked.map(c => cardHtml(c, t.duel ? (t.duel.you.scoringIds.includes(c.id) ? 'scoring' : 'dim') : '')).join('') +
       run.you.hand.filter(c => !lockedIds.has(c.id)).map(c => cardHtml(c, 'dim')).join('')
@@ -504,10 +624,12 @@ function renderTable(): void {
   let controls = ''
   if (!t.locked) {
     const n = t.selected.size
+    const mullOk = canMulligan(run, run.you) && n > 0
+    const mullCost = freeMulligan(run.you) ? 'free' : 'hand −1 this Table'
     controls = `<div class="bets">
-      <button class="ghost" id="mull" ${t.mulligansLeft === 0 || n === 0 ? 'disabled' : ''}>Mulligan ${n || ''} (${t.mulligansLeft} left)</button>
-      <button id="lock" ${n !== PLAY_SIZE ? 'disabled' : ''}>Lock in ${n}/${PLAY_SIZE}</button>
-    </div><p class="center muted" style="font-size:13px">Pick ${PLAY_SIZE} cards to play. Or pick the ones you want to toss and Mulligan.</p>`
+      <button class="ghost" id="mull" ${mullOk ? '' : 'disabled'}>Mulligan ${n || ''} (${twistFor(run)?.id === 'colddeck' ? 'cold deck' : mullCost})</button>
+      <button id="lock" ${n < 1 || n > PLAY_SIZE ? 'disabled' : ''}>Lock in ${n}</button>
+    </div><p class="center muted" style="font-size:13px">Pick 1–${PLAY_SIZE} cards to play. Played cards are out until the next Table, the rest go back into the pile. Fold or forge mucks the whole hand.</p>`
   } else if (t.betting && !t.betting.outcome && t.betting.toAct === 0) {
     const legal = legalActions(t.betting)
     const amount = (a: BetAction) => {
@@ -522,8 +644,6 @@ function renderTable(): void {
     if (legal.includes('forge') && t.locked) {
       const plan = forgePlan(t.locked)
       if (plan) controls += `<p class="center muted" style="font-size:13px">${forgePreview(plan)}</p>`
-    } else if (t.locked && forgeCheck(run.you, t.locked).thin) {
-      controls += `<p class="center muted" style="font-size:13px">Deck too thin to forge (min ${DECK_FLOOR} cards).</p>`
     }
   } else if (t.result) {
     controls = `<div class="bets"><button id="cont">${run.over ? 'See results' : 'Continue to shop'}</button></div>`
@@ -540,18 +660,19 @@ function renderTable(): void {
     <div class="main">
       <div class="panel">
         ${twist ? twistBanner(twist) : ''}
-        <div class="muted" style="font-size:12px;letter-spacing:2px;text-transform:uppercase">Rival · ${getStarter(run.rivalStarter).name} · ${t.opp.display.length} collectibles · ${deckSize(t.opp)} cards</div>
+        <div class="muted" style="font-size:12px;letter-spacing:2px;text-transform:uppercase">Rival · ${getStarter(run.rivalStarter).name} · ${t.opp.display.length} collectibles · ${deckSize(t.opp)} cards · hand ${run.rival.hand.length} · ${t.oppMulls} mulligan${t.oppMulls === 1 ? '' : 's'}</div>
         <div class="hand" style="margin:8px 0 4px">${oppCards}</div>
         ${duel}
         <div class="log">${t.log.slice(-3).map(l => `<div>${l}</div>`).join('')}</div>
         ${resultHtml}
         <div class="hand" style="margin-top:14px" id="yourhand">${yourCards}</div>
         ${controls}
-        <p class="center muted" style="font-size:12px;margin-top:8px">Ante $${ante} · Max $${max} · lower bankroll acts second · showdowns pay your paycheck, the winner gets a house bonus</p>
+        <p class="center muted" style="font-size:12px;margin-top:8px">Ante $${ante} · Max $${max} · hand size ${handSize(run.you)} · lower bankroll acts second · showdowns pay your paycheck, the winner gets a house bonus${isTournament(run.round) ? ` (${houseMult(run, run.you)}× ante for you with momentum)` : ''}</p>
       </div>
       <div>${caseHtml(false)}${levelsHtml()}</div>
     </div>`
 
+  bindDeckViewer()
   if (!t.locked) {
     app.querySelectorAll<HTMLElement>('#yourhand .card').forEach(el => {
       el.onclick = () => {
@@ -599,44 +720,43 @@ function resultBanner(r: RoundResult): string {
   }[r.outcome]
   const inc = r.income
   const incomeParts = [inc.paycheck ? `paycheck +$${inc.paycheck}` : 'no paycheck (no showdown)']
-  if (inc.house) incomeParts.push(`house bonus +$${inc.house}`)
+  if (inc.house) incomeParts.push(`house bonus +$${inc.house}${isTournament(run.round) ? ` (${houseMult(run, run.you)}× ante with momentum)` : ''}`)
   if (inc.interest) incomeParts.push(`interest +$${inc.interest}`)
   if (inc.streak) incomeParts.push(`streak +$${inc.streak}`)
   if (inc.sticker) incomeParts.push(`price sticker +$${inc.sticker}`)
-  if (inc.gold) incomeParts.push(`gold border +$${inc.gold}`)
+  if (inc.gold) incomeParts.push(`gold border ${inc.gold > 0 ? '+' : '−'}$${Math.abs(inc.gold)}`)
   const forged = r.forged ? `<div class="center" style="margin-top:6px">New card in your deck: ${cardHtml(r.forged).replace('class="card', 'style="display:inline-flex;vertical-align:middle" class="card')}</div>` : ''
   const ground = r.ground ? `<div class="center muted">Folding ground your <b class="gold">${cardName(r.ground)}</b> up to +${r.ground.grind} Value. That's it. That's the build.</div>` : ''
+  const bulk = r.bulk.length ? `<div class="center muted">The forge left <b>${r.bulk.length} Bulk</b> in your deck (+5 Value each when played).</div>` : ''
   const torn = r.torn.length ? `<div class="center muted">Torn up: ${r.torn.map(cardName).join(', ')}</div>` : ''
   const income = run.over ? '' : `<div class="center muted">${incomeParts.join(' · ')}</div>`
   const bust = run.over && run.rival.bankroll === 0 ? `<div class="banner good">Your rival is busted. The table is yours.</div>` : ''
-  return `${bust}<div class="banner ${text[1]}">${text[0]} ${r.delta > 0 ? `+$${r.delta}` : r.delta < 0 ? `−$${-r.delta}` : ''}</div>${income}${forged}${ground}${torn}`
+  return `${bust}<div class="banner ${text[1]}">${text[0]} ${r.delta > 0 ? `+$${r.delta}` : r.delta < 0 ? `−$${-r.delta}` : ''}</div>${income}${forged}${bulk}${ground}${torn}`
 }
 
 function doMulligan(): void {
-  if (!table || table.mulligansLeft === 0 || table.selected.size === 0) return
+  if (!table || table.selected.size === 0 || !canMulligan(run, run.you)) return
   const tossed = table.selected.size
-  const res = mulliganHand(run.you, [...table.selected], run.pileRng)
-  table.mulligansLeft--
+  const res = mulligan(run, 0, [...table.selected])
   table.selected.clear()
-  table.log.push(`Mulliganed ${tossed} cards.`)
-  if (res.reshuffled) table.log.push('Draw pile ran out: <b>discard reshuffled</b> into it.')
+  table.log.push(`Mulliganed ${tossed}, drew ${res.drawn.length}${res.free ? ' (free)' : `. Hand size is ${handSize(run.you)} for the rest of this Table`}.`)
   sfx.flip(false)
   renderTable()
 }
 
 function lockIn(): void {
-  if (!table || table.selected.size !== PLAY_SIZE) return
+  if (!table || table.selected.size < 1 || table.selected.size > PLAY_SIZE) return
   const t = table
   t.locked = run.you.hand.filter(c => t.selected.has(c.id))
   const bankrolls: [number, number] = [run.you.bankroll, t.opp.bankroll]
   if (canPeek(0, bankrolls)) {
     t.peek = t.oppPlayed[Math.floor(run.rng() * t.oppPlayed.length)]
-    t.log.push(`You're the underdog: you <b>peek</b> at one of their cards.`)
+    t.log.push(`You're the underdog: you <b>peek</b> at one of their locked cards.`)
   }
   const { ante, max } = tableBlinds(run)
-  const canForge: [boolean, boolean] = [canForgeNow(run.you, t.locked), canForgeNow(run.rival, t.oppPlayed)]
+  const forgeable: [boolean, boolean] = [canForge(t.locked), canForge(t.oppPlayed)]
   const first = firstToAct(bankrolls, run.round)
-  t.betting = startBetting(first, ante, max, bankrolls, canForge, isTournament(run.round))
+  t.betting = startBetting(first, ante, max, bankrolls, forgeable, isTournament(run.round))
   t.log.push(first === 0 ? 'You act first.' : 'Rival acts first, you see their bet.')
   renderTable()
   void botTurns()
@@ -732,7 +852,7 @@ async function resolveRound(): Promise<void> {
   const b = t.betting!
   let winner: Seat | null = null
   let scoring: [number[], number[]] = [[], []]
-  if (b.outcome!.kind === 'showdown') {
+  if (b.outcome!.kind === 'showdown' && t.locked!.length && t.oppPlayed.length) {
     const betMax = (s: Seat) => b.maxStake > b.minStake && b.committed[s] === b.maxStake
     const you = appraiseFor(run, run.you, t.locked!, betMax(0), run.rng)
     const opp = appraiseFor(run, t.opp, t.oppPlayed, betMax(1), run.rng)

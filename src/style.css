@@ -147,3 +147,11 @@ h1, h2, h3 { margin: 0; }
 .card.forged.t2 { outline: 3px solid #ff5d8f; box-shadow: 0 0 12px rgba(255,93,143,.5), 0 4px 0 rgba(0,0,0,.35); }
 .card.forged.t3 { outline: 3px solid var(--gold); box-shadow: 0 0 18px rgba(242,193,78,.7), 0 4px 0 rgba(0,0,0,.35); }
 .card .tag { max-width: 58px; line-height: 1.15; white-space: normal; }
+.card.bulk { background: repeating-linear-gradient(135deg, #8a8478 0 6px, #7a7468 6px 12px); color: #2a2620; }
+.card.mini { width: 46px; height: 64px; font-size: 14px; padding: 4px; }
+.card.mini .s { font-size: 14px; }
+.card.mini .tag { display: none; }
+.binder { display: flex; flex-wrap: wrap; gap: 8px; }
+.binder .slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.binder .slot button { padding: 2px 8px; min-height: 24px; font-size: 11px; }
+.hot { color: var(--green); font-weight: 800; }
