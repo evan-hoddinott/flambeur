@@ -1,11 +1,11 @@
 // headless economy sim: plays N full solo duels (your policy vs the rival difficulty) and prints where runs end.
 // usage: node sim/econ.ts --runs 1000 --seed sim --policy greedy|cautious|random --difficulty easy|medium|hard --starter classic
-import { act, firstToAct, legalActions, startBetting } from '../src/engine/betting.ts'
+import { act, firstToAct, forfeit, legalActions, startBetting } from '../src/engine/betting.ts'
 import { botAct, botDeal, botShop, getStyle } from '../src/engine/bot.ts'
 import { ROUNDS } from '../src/engine/economy.ts'
 import { STARTERS, autoDraft, draftRows, type StarterId } from '../src/engine/starters.ts'
 import { HAND_TYPES } from '../src/engine/hands.ts'
-import { DIFFICULTIES, appraiseFor, canForgeNow, finishRound, forgeCheck, newRun, nextRound, showdownWinner, tableBlinds, twistFor, type Difficulty } from '../src/engine/run.ts'
+import { DIFFICULTIES, appraiseFor, canForge, finishRound, newRun, nextRound, showdownWinner, tableBlinds, twistFor, type Difficulty } from '../src/engine/run.ts'
 import { deckSize } from '../src/engine/deck.ts'
 import { isTournament } from '../src/engine/twists.ts'
 import type { Seat } from '../src/engine/betting.ts'
@@ -27,11 +27,14 @@ if (!Number.isInteger(RUNS) || RUNS <= 0) throw new Error(`--runs must be a posi
 const you = getStyle(POLICY)
 const rivalStyle = getStyle(DIFFICULTIES[DIFFICULTY].style)
 
-type RoundStat = { bankrolls: number[]; rivalBanks: number[]; youTotals: number[]; rivalTotals: number[]; spend: number[]; actions: Record<string, number>; hands: Record<string, number> }
-const stats: RoundStat[] = Array.from({ length: ROUNDS }, () => ({ bankrolls: [], rivalBanks: [], youTotals: [], rivalTotals: [], spend: [], actions: {}, hands: {} }))
+type RoundStat = { bankrolls: number[]; rivalBanks: number[]; youTotals: number[]; rivalTotals: number[]; rivalDealt: number[]; spend: number[]; actions: Record<string, number>; hands: Record<string, number> }
+const stats: RoundStat[] = Array.from({ length: ROUNDS }, () => ({ bankrolls: [], rivalBanks: [], youTotals: [], rivalTotals: [], rivalDealt: [], spend: [], actions: {}, hands: {} }))
 const ends = { youBust: new Array<number>(ROUNDS + 1).fill(0), rivalBust: new Array<number>(ROUNDS + 1).fill(0), survived: 0 }
-let reshuffles = 0
-let thinBlocks = 0 // rounds where you had a forgeable hand but the deck was at the floor
+let mulls = 0
+let forfeits = 0 // rounds you lost because the pile couldn't deal you a card
+let bulkMade = 0
+let binned = 0
+let sleeves = 0
 const finalDeck: number[] = []
 const rivalDeck: number[] = []
 
@@ -59,20 +62,24 @@ for (let i = 0; i < RUNS; i++) {
 
     const y = botDeal(run, 0)
     const o = botDeal(run, 1)
-    reshuffles += y.reshuffles
+    mulls += y.mulls
+    if (o.est && !isTournament(r)) st.rivalDealt.push(o.est.total)
 
     const { ante, max } = tableBlinds(run)
-    if (forgeCheck(run.you, y.played).thin) thinBlocks++
-    const canForge: [boolean, boolean] = [canForgeNow(run.you, y.played), canForgeNow(run.rival, o.played)]
-    let b = startBetting(firstToAct([run.you.bankroll, run.rival.bankroll], r), ante, max, [run.you.bankroll, run.rival.bankroll], canForge, isTournament(r))
+    const forgeable: [boolean, boolean] = [canForge(y.played), canForge(o.played)]
+    let b = startBetting(firstToAct([run.you.bankroll, run.rival.bankroll], r), ante, max, [run.you.bankroll, run.rival.bankroll], forgeable, isTournament(r))
+    if (!y.est || !o.est) {
+      if (!y.est) forfeits++
+      b = forfeit(b, !y.est && !o.est ? null : !y.est ? 0 : 1)
+    }
     while (!b.outcome) {
       const seat = b.toAct
-      b = act(b, botAct(b, legalActions(b), (seat === 0 ? y : o).est.total, run, seat === 0 ? you : rivalStyle, run.rng))
+      b = act(b, botAct(b, legalActions(b), (seat === 0 ? y : o).est!.total, run, seat === 0 ? you : rivalStyle, run.rng))
     }
 
     let winner: Seat | null = null
     let scoring: [number[], number[]] = [[], []]
-    if (b.outcome.kind === 'showdown') {
+    if (b.outcome.kind === 'showdown' && y.played.length && o.played.length) {
       const betMax = (s: Seat) => b.maxStake > b.minStake && b.committed[s] === b.maxStake
       const ya = appraiseFor(run, run.you, y.played, betMax(0), run.rng)
       const oa = appraiseFor(run, run.rival, o.played, betMax(1), run.rng)
@@ -85,6 +92,7 @@ for (let i = 0; i < RUNS; i++) {
       st.hands[ya.hand] = (st.hands[ya.hand] ?? 0) + 1
     }
     const [res] = finishRound(run, b, winner, [y.played, o.played], scoring)
+    bulkMade += res.bulk.length
     st.actions[res.outcome] = (st.actions[res.outcome] ?? 0) + 1
     st.bankrolls.push(run.you.bankroll)
     st.rivalBanks.push(run.rival.bankroll)
@@ -94,12 +102,14 @@ for (let i = 0; i < RUNS; i++) {
       else ends.survived++
     } else nextRound(run)
   }
+  binned += run.you.bulkBinned
+  sleeves += run.you.sleeves.length
   finalDeck.push(deckSize(run.you))
   rivalDeck.push(deckSize(run.rival))
 }
 const ms = Date.now() - t0
 
-console.log(`pull rate duel sim · ${RUNS} runs · you ${POLICY} · rival ${DIFFICULTY} · starter ${STARTER} · seed ${SEED} · ${ms}ms\n`)
+console.log(`flambeur duel sim · ${RUNS} runs · you ${POLICY} · rival ${DIFFICULTY} · starter ${STARTER} · seed ${SEED} · ${ms}ms\n`)
 console.log('rnd  alive%  bank p10/p50/p90   rival p50  spend  you p50  riv p50   win  loss  tie  fold forge  you✗  riv✗')
 for (let r = 1; r <= ROUNDS; r++) {
   const st = stats[r - 1]
@@ -120,6 +130,7 @@ console.log(`\nwin rate: ${((100 * wins) / RUNS).toFixed(1)}% (survived 9: ${end
 const handTotals: Record<string, number> = {}
 for (const st of stats) for (const [h, n] of Object.entries(st.hands)) handTotals[h] = (handTotals[h] ?? 0) + n
 console.log(`your showdown hands: ${HAND_TYPES.filter(h => handTotals[h]).map(h => `${h} ${handTotals[h]}`).join(' · ')}`)
-console.log(`reshuffles per run ${(reshuffles / RUNS).toFixed(2)} · forges blocked by the deck floor ${thinBlocks}`)
+console.log(`per run: mulligans ${(mulls / RUNS).toFixed(2)} · rounds lost to an empty pile ${(forfeits / RUNS).toFixed(2)} · bulk made ${(bulkMade / RUNS).toFixed(2)} · bulk binned ${(binned / RUNS).toFixed(2)} · sleeves ${(sleeves / RUNS).toFixed(2)}`)
 console.log(`final deck p10/p50/p90 you ${pct(finalDeck, 0.1)}/${median(finalDeck)}/${pct(finalDeck, 0.9)} · rival ${pct(rivalDeck, 0.1)}/${median(rivalDeck)}/${pct(rivalDeck, 0.9)}`)
-console.log(`REF_SCORE (rival p50 per normal round): [${stats.map(s => median(s.rivalTotals)).join(', ')}]`)
+// every hand the rival was dealt, not just the ones it took to showdown (those skew high, it folds the weak ones)
+console.log(`REF_SCORE (rival p50 of every dealt hand, normal rounds): [${stats.map(s => median(s.rivalDealt)).join(', ')}]`)
