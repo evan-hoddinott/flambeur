@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flambeur logo preview</title>
+<style>
+  html, body { margin:0; height:100%; background:#0b2318; color:#f6ecd2; font:14px/1.4 ui-monospace,Menlo,Consolas,monospace }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+         background:radial-gradient(ellipse at 50% 40%,#1f513a,#0b2318 70%) }
+  canvas { image-rendering:pixelated; max-width:100% }
+  button { font:inherit; background:#7a1a2c; color:#f6ecd2; border:2px solid #f2c14e; border-radius:8px; padding:10px 18px; cursor:pointer }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="replay">Replay intro</button>
+<script>
+// plays intro.png once, then loops idle.png. 256x144 frames, 10 per row, 50ms each
+const FW = 256, FH = 144, COLS = 10, MS = 50
+const sheets = { intro: { src: 'intro.png', n: 90 }, idle: { src: 'idle.png', n: 40 } }
+const c = document.getElementById('c'), ctx = c.getContext('2d')
+let scale = 4, start = performance.now()
+
+for (const s of Object.values(sheets)) { s.img = new Image(); s.img.src = s.src }
+
+function fit() {
+  scale = Math.max(1, Math.min(Math.floor(innerWidth * 0.95 / FW), Math.floor(innerHeight * 0.8 / FH)))
+  c.width = FW * scale; c.height = FH * scale
+}
+addEventListener('resize', fit); fit()
+document.getElementById('replay').onclick = () => { start = performance.now() }
+
+function frame(now) {
+  const f = Math.floor((now - start) / MS)
+  const s = f < sheets.intro.n ? sheets.intro : sheets.idle
+  const i = f < sheets.intro.n ? f : (f - sheets.intro.n) % sheets.idle.n
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, c.width, c.height)
+  ctx.imageSmoothingEnabled = false
+  // balatro-style: crisp pixels, smooth sub-pixel sway on the whole logo once it settles
+  const t = now / 1000, settle = Math.min(1, Math.max(0, (f - 80) / 20))
+  ctx.translate(c.width / 2, c.height / 2 + Math.sin(t * 1.3) * scale * 1.2 * settle)
+  ctx.rotate(Math.sin(t * 0.9) * 0.006 * settle)
+  ctx.translate(-c.width / 2, -c.height / 2)
+  if (s.img.complete) ctx.drawImage(s.img, (i % COLS) * FW, Math.floor(i / COLS) * FH, FW, FH, 0, 0, FW * scale, FH * scale)
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
+</script>
+</body>
+</html>

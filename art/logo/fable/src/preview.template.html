@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flambeur logo preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #061a14; overflow: hidden; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  #felt { position: fixed; inset: 0; width: 100%; height: 100%; }
+  #glow {
+    position: fixed; left: 50%; top: 50%; width: 120vmin; height: 70vmin;
+    transform: translate(-50%, -50%); pointer-events: none; opacity: 0;
+    background: radial-gradient(closest-side, rgba(255, 150, 40, .34), rgba(220, 62, 26, .12) 55%, rgba(0, 0, 0, 0) 100%);
+    mix-blend-mode: screen;
+  }
+  #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  #logo { will-change: transform; cursor: pointer; }
+  #bar {
+    position: fixed; left: 0; right: 0; bottom: 18px; display: flex; gap: 14px; justify-content: center; align-items: center;
+    font: 13px/1 ui-monospace, Menlo, Consolas, monospace; color: #dfcba3;
+  }
+  button {
+    font: inherit; color: #1a0a12; background: #f2b830; border: 2px solid #1a0a12; padding: 7px 14px;
+    box-shadow: 3px 3px 0 #6e1b2c; cursor: pointer;
+  }
+  button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #6e1b2c; }
+  label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="felt"></canvas>
+<div id="glow"></div>
+<div id="stage"><canvas id="logo" width="384" height="216" title="click to replay"></canvas></div>
+<div id="bar">
+  <button id="replay">Rien ne va plus (replay)</button>
+  <button id="skip">skip to idle</button>
+  <label><input type="checkbox" id="sway" checked> smooth sway</label>
+  <span id="info"></span>
+</div>
+<img id="intro" src="intro.png" hidden>
+<img id="idle" src="idle.png" hidden>
+<script>
+// frames are [x, y, w, h, ms] straight from the aseprite atlas
+const ATLAS = /*ATLAS*/;
+const W = 384, H = 216;
+const logo = document.getElementById('logo');
+const ctx = logo.getContext('2d');
+const felt = document.getElementById('felt');
+const glow = document.getElementById('glow');
+const info = document.getElementById('info');
+const sheets = { intro: document.getElementById('intro'), idle: document.getElementById('idle') };
+let scale = 3, tag = 'intro', frame = 0, left = 0, last = 0, t0 = 0;
+
+// the same dithered felt as the still, redrawn at the logo's pixel size so the page is one pixel grid
+function drawFelt() {
+  const w = Math.ceil(innerWidth / scale), h = Math.ceil(innerHeight / scale);
+  felt.width = w; felt.height = h;
+  const c = felt.getContext('2d');
+  const img = c.createImageData(w, h);
+  const ramp = [[6, 26, 20], [10, 42, 31], [14, 58, 42], [20, 80, 58]];
+  const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = (x - w / 2) / (w * 0.62), dy = (y - h * 0.48) / (h * 0.7);
+    let v = 2.75 - 2.4 * Math.pow(dx * dx + dy * dy, 0.75) + (bayer[(y % 4) * 4 + (x % 4)] / 16 - 0.5) * 0.9;
+    const col = ramp[Math.max(0, Math.min(3, Math.floor(v + 0.5)))];
+    const i = (y * w + x) * 4;
+    img.data[i] = col[0]; img.data[i + 1] = col[1]; img.data[i + 2] = col[2]; img.data[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+
+function resize() {
+  scale = Math.max(1, Math.floor(Math.min((innerWidth - 24) / W, (innerHeight - 90) / H)));
+  // backing store at the integer scale, nearest neighbour, so css transforms move whole crisp pixels smoothly
+  logo.width = W * scale; logo.height = H * scale;
+  logo.style.width = W * scale + 'px'; logo.style.height = H * scale + 'px';
+  ctx.imageSmoothingEnabled = false;
+  drawFelt();
+  draw();
+}
+
+function draw() {
+  const f = ATLAS[tag][frame];
+  ctx.clearRect(0, 0, logo.width, logo.height);
+  ctx.drawImage(sheets[tag], f[0], f[1], f[2], f[3], 0, 0, W * scale, H * scale);
+  info.textContent = tag + ' ' + String(frame + 1).padStart(2, '0') + '/' + ATLAS[tag].length + '  ' + scale + 'x';
+}
+
+// firelight on the table, roughly following the flames
+function glowAt() {
+  if (tag === 'idle') return 0.6 + 0.06 * Math.sin(frame / 48 * Math.PI * 6);
+  if (frame < 15) return 0;
+  if (frame < 58) return Math.min(8, Math.floor((frame - 10) / 5)) * 0.04;
+  return 0.6 + 0.9 * Math.exp(-(frame - 60) / 6);
+}
+
+function play(which) {
+  tag = which; frame = 0; left = ATLAS[tag][0][4]; draw();
+}
+
+function tick(now) {
+  const dt = Math.min(100, now - last); last = now;
+  left -= dt;
+  while (left <= 0) {
+    frame++;
+    if (frame >= ATLAS[tag].length) { tag = 'idle'; frame = 0; }
+    left += ATLAS[tag][frame][4];
+    draw();
+  }
+  glow.style.opacity = glowAt();
+  // balatro-style: the pixels stay crisp, the whole sprite drifts and tilts at full display resolution
+  if (document.getElementById('sway').checked) {
+    const t = (now - t0) / 1000;
+    const r = Math.sin(t * 0.9) * 0.55, y = Math.sin(t * 1.3 + 1) * 0.9 * scale, x = Math.sin(t * 0.7) * 0.5 * scale;
+    logo.style.transform = `translate(${x}px, ${y}px) rotate(${r}deg)`;
+  } else {
+    logo.style.transform = '';
+  }
+  requestAnimationFrame(tick);
+}
+
+document.getElementById('replay').onclick = () => play('intro');
+document.getElementById('skip').onclick = () => play('idle');
+logo.onclick = () => play('intro');
+addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); play('intro'); } });
+addEventListener('resize', resize);
+Promise.all(Object.values(sheets).map(i => i.decode ? i.decode().catch(() => {}) : null)).then(() => {
+  resize(); play('intro'); t0 = last = performance.now(); requestAnimationFrame(tick);
+});
+</script>
+</body>
+</html>
