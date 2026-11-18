@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flambeur · card tilt proof</title>
+<style>
+:root {color-scheme:dark;font-family:system-ui,sans-serif;background:#101715;color:#f6ecd2}
+* {box-sizing:border-box}
+body {margin:0;min-height:100vh}
+main {max-width:940px;margin:auto;padding:clamp(20px,5vw,54px)}
+h1 {font:normal clamp(28px,4vw,44px)/1.1 Georgia,serif;margin:0 0 24px}
+.views {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+figure {margin:0}
+canvas {display:block;width:100%;aspect-ratio:96/120;background:#174034;border-radius:5px}
+figcaption {margin:10px 0 0;font-size:clamp(13px,2vw,17px)}
+.controls {margin:24px 0;display:grid;grid-template-columns:auto minmax(90px,320px) 5ch;align-items:center;gap:14px}
+input {width:100%;accent-color:#e8c260}
+output {text-align:right;font-variant-numeric:tabular-nums}
+p {line-height:1.5;max-width:60ch;color:#ccbfa8}
+@media (max-width:420px) {main {padding:16px}.views {gap:8px}}
+</style>
+<main>
+<h1>King of spades tilt</h1>
+<section class="views" aria-label="Rendering comparison">
+  <figure><canvas id="old" aria-label="Card rotated at art resolution"></canvas><figcaption>Rotated on the art-pixel grid</figcaption></figure>
+  <figure><canvas id="free" aria-label="Card rotated at display resolution"></canvas><figcaption>Rotated at display resolution</figcaption></figure>
+</section>
+<div class="controls"><label for="angle">Tilt</label><input id="angle" type="range" min="-12" max="12" step="0.1" value="4"><output for="angle"></output></div>
+<p>Drag through zero and watch the long printed border. Both views use the same 64 × 88 pixels.</p>
+<p id="error" role="alert" hidden></p>
+</main>
+<script>
+"use strict";
+const gridWidth = 96, gridHeight = 120;
+const oldCanvas = document.querySelector("#old");
+const freeCanvas = document.querySelector("#free");
+const angle = document.querySelector("#angle");
+const output = document.querySelector("output");
+const card = new Image();
+const grid = document.createElement("canvas");
+grid.width = gridWidth;
+grid.height = gridHeight;
+const scratch = grid.getContext("2d");
+const oldView = oldCanvas.getContext("2d");
+const gl = freeCanvas.getContext("webgl2", {antialias:true, alpha:false, depth:false, stencil:false});
+let drawFree;
+
+function setupFree() {
+  if (!gl) throw new Error("The display-resolution comparison requires WebGL 2. Enable graphics acceleration and reload.");
+  function compile(type, text) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, text);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+    return shader;
+  }
+  const program = gl.createProgram();
+  gl.attachShader(program, compile(gl.VERTEX_SHADER, `#version 300 es
+    uniform vec2 stage;
+    uniform vec2 size;
+    uniform float angle;
+    out vec2 texel;
+    const vec2 corners[4] = vec2[4](vec2(-1,-1),vec2(1,-1),vec2(-1,1),vec2(1,1));
+    void main() {
+      // Keep one empty texel around the sprite for the coverage filter.
+      vec2 local = corners[gl_VertexID] * (size*0.5 + 1.0);
+      texel = local + size*0.5;
+      float c=cos(angle), s=sin(angle);
+      vec2 rotated = mat2(c,s,-s,c) * local;
+      gl_Position = vec4(rotated * vec2(2.0,-2.0) / stage, 0, 1);
+    }`));
+  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, `#version 300 es
+    precision highp float;
+    uniform sampler2D sprite;
+    uniform vec2 size;
+    in vec2 texel;
+    out vec4 color;
+    void main() {
+      // Integrate nearest texels across one display pixel. This covers both the
+      // transparent silhouette and interior ink edges at fractional positions.
+      vec2 dx = dFdx(texel), dy = dFdy(texel);
+      vec4 sum = vec4(0);
+      for (int j=0; j<4; ++j) for (int i=0; i<4; ++i) {
+        vec2 p = texel + ((float(i)+0.5)/4.0-0.5)*dx + ((float(j)+0.5)/4.0-0.5)*dy;
+        if (all(greaterThanEqual(p, vec2(0))) && all(lessThan(p, size))) {
+          vec4 ink = texelFetch(sprite, ivec2(floor(p)), 0);
+          sum += vec4(ink.rgb * ink.a, ink.a);
+        }
+      }
+      vec4 avg = sum / 16.0;
+      color = vec4(avg.rgb + vec3(23,64,52)/255.0 * (1.0-avg.a), 1);
+    }`));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+  gl.useProgram(program);
+  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,card);
+  gl.uniform2f(gl.getUniformLocation(program,"stage"), gridWidth,gridHeight);
+  gl.uniform2f(gl.getUniformLocation(program,"size"), card.width,card.height);
+  const rotation = gl.getUniformLocation(program,"angle");
+  gl.clearColor(23/255,64/255,52/255,1);
+  return radians => {
+    gl.viewport(0,0,freeCanvas.width,freeCanvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1f(rotation,radians);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  };
+}
+
+function resizeCanvas(canvas) {
+  const bounds = canvas.getBoundingClientRect();
+  const width = Math.max(1,Math.round(bounds.width * devicePixelRatio));
+  const height = Math.max(1,Math.round(bounds.height * devicePixelRatio));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+}
+function render() {
+  if (!card.naturalWidth) return;
+  resizeCanvas(oldCanvas);
+  resizeCanvas(freeCanvas);
+  const degrees = Number(angle.value);
+  const radians = degrees * Math.PI / 180;
+  output.textContent = degrees.toFixed(1) + "°";
+  scratch.setTransform(1,0,0,1,0,0);
+  scratch.fillStyle = "#174034";
+  scratch.fillRect(0,0,gridWidth,gridHeight);
+  scratch.translate(gridWidth/2,gridHeight/2);
+  scratch.rotate(radians);
+  scratch.imageSmoothingEnabled = false;
+  scratch.drawImage(card,-card.width/2,-card.height/2);
+  oldView.imageSmoothingEnabled = false;
+  oldView.drawImage(grid,0,0,oldCanvas.width,oldCanvas.height);
+  if (drawFree) drawFree(radians);
+}
+card.onload = () => {
+  try { drawFree = setupFree(); }
+  catch (error) {
+    const message = document.querySelector("#error");
+    message.textContent = error.message;
+    message.hidden = false;
+  }
+  render();
+};
+angle.addEventListener("input", render);
+new ResizeObserver(render).observe(freeCanvas);
+window.addEventListener("resize",render);
+function trackDensity() {
+  matchMedia("(resolution: " + devicePixelRatio + "dppx)").addEventListener("change", () => {
+    render();
+    trackDensity();
+  }, {once:true});
+}
+trackDensity();
+card.src = "data:image/png;base64,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";
+</script>
+</html>

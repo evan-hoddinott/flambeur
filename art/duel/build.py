@@ -1,0 +1,127 @@
+"""Run python art/duel/build.py to export the Aseprite parts and render the art proofs."""
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+
+from PIL import Image, ImageDraw, ImageFont
+
+ROOT = Path(__file__).resolve().parent
+GROUPS = ("you", "masks", "rival", "table", "chips", "lamp", "room", "hud")
+
+
+def export_parts():
+    palette = {
+        tuple(map(int, line.split()[:3]))
+        for line in (ROOT.parent / "palette/flambeur.gpl").read_text().splitlines()
+        if line.strip() and line.strip()[0].isdigit()
+    }
+    # tinted sprites are drawn in the 5-step greyscale and multiplied by a color in code
+    greys = {(255, 255, 255), (208, 208, 208), (160, 160, 160), (104, 104, 104), (48, 48, 48)}
+    parts, slices = {}, []
+    with tempfile.TemporaryDirectory() as tmp:
+        sheet = Path(tmp) / "source.png"
+        data = Path(tmp) / "source.json"
+        for group in GROUPS:
+            subprocess.run([
+                "aseprite", "-b", str(ROOT / f"{group}.aseprite"),
+                "--list-slices", "--sheet", str(sheet), "--data", str(data),
+            ], check=True)
+            source = json.loads(data.read_text())
+            with Image.open(sheet) as image:
+                for item in source["meta"]["slices"]:
+                    key = item["name"]
+                    frame = item["keys"][0]
+                    bounds = frame["bounds"]
+                    x, y, w, h = (bounds[k] for k in ("x", "y", "w", "h"))
+                    if key in parts or "pivot" not in frame:
+                        raise ValueError(f"Duplicate or unanchored slice {key}")
+                    part = image.crop((x, y, x + w, y + h)).convert("RGBA")
+                    tint = key.startswith("hud/ticket/") and key != "hud/ticket/chip"
+                    allowed = palette | greys if tint else palette
+                    for _, (r, g, b, a) in part.getcolors(w * h):
+                        if a and ((r, g, b) not in allowed or a != 255):
+                            raise ValueError(f"Off-palette pixel in {key}: {(r, g, b, a)}")
+                    parts[key] = part
+                    slices.append(item)
+    return parts, slices, source["meta"]["version"]
+
+
+def pack(parts, slices, version):
+    # Pack individual slices. Pivots and nine-slice centers stay local to their sprite.
+    width = 512
+    x = y = row_height = 0
+    for item in sorted(slices, key=lambda s: -parts[s["name"]].height):
+        w, h = parts[item["name"]].size
+        if x + w > width:
+            x, y, row_height = 0, y + row_height + 1, 0
+        item["keys"][0]["bounds"].update(x=x, y=y)
+        x += w + 1
+        row_height = max(row_height, h)
+    height = y + row_height
+    atlas = Image.new("RGBA", (width, height))
+    for item in slices:
+        bounds = item["keys"][0]["bounds"]
+        atlas.paste(parts[item["name"]], (bounds["x"], bounds["y"]))
+    atlas.save(ROOT / "duel.png")
+    size = {"w": width, "h": height}
+    rect = {"x": 0, "y": 0, **size}
+    data = {
+        "frames": {"duel": {"frame": rect, "rotated": False, "trimmed": False,
+                            "spriteSourceSize": rect, "sourceSize": size, "duration": 100}},
+        "meta": {"app": "https://www.aseprite.org/", "version": version,
+                 "image": "duel.png", "format": "RGBA8888", "size": size,
+                 "scale": "1", "slices": slices},
+    }
+    (ROOT / "duel.json").write_text(json.dumps(data, indent=2) + "\n")
+
+
+def contact_sheet(parts):
+    """Lay out the isolated pieces at 2x with their atlas keys underneath."""
+    font = ImageFont.load_default(size=14)
+    margin, width = 16, 1080
+    items = []
+    x = y = margin
+    row_height = 0
+    for key, part in parts.items():
+        w = max(part.width * 2, int(font.getlength(key)) + 1)
+        if x + w + margin > width:
+            x = margin
+            y += row_height + margin
+            row_height = 0
+        items.append((x, y, key, part))
+        row_height = max(row_height, part.height * 2 + 22)
+        x += w + margin
+    sheet = Image.new("RGB", (width, y + row_height + margin), "#655b58")
+    draw = ImageDraw.Draw(sheet)
+    for x, y, key, part in items:
+        scaled = part.resize((part.width * 2, part.height * 2), Image.Resampling.NEAREST)
+        sheet.paste(scaled, (x, y), scaled)
+        draw.text((x, y + scaled.height + 3), key, font=font, fill="#fff8e8")
+    sheet.save(ROOT / "parts.png")
+
+
+def main():
+    from deckstack import stack_review
+    from review import review, tilt_review
+
+    parts, slices, version = export_parts()
+    pack(parts, slices, version)
+    for key, part in parts.items():
+        path = ROOT / "sprites" / f"{key}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part.save(path)
+    pivots, centers = {}, {}
+    for item in slices:
+        key, frame = item["name"], item["keys"][0]
+        pivots[key] = tuple(frame["pivot"][k] for k in ("x", "y"))
+        if "center" in frame:
+            centers[key] = tuple(frame["center"][k] for k in ("x", "y", "w", "h"))
+    contact_sheet(parts)
+    review(parts, pivots, centers)
+    stack_review(parts)
+    tilt_review()
+
+
+if __name__ == "__main__":
+    main()
