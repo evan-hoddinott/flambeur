@@ -76,3 +76,10 @@ export function coin(): void {
   tone(1320, 80, 'square', 0.04)
   tone(1760, 120, 'square', 0.04, 70)
 }
+
+// the desk bell on the shop counter: a bright ding with a ringing overtone
+export function bell(): void {
+  tone(1568, 700, 'sine', 0.07)
+  tone(3136, 400, 'sine', 0.025)
+  tone(2093, 500, 'sine', 0.02, 10)
+}

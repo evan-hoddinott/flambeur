@@ -1,7 +1,49 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "flambeur", "runtimeExecutable": "pnpm", "runtimeArgs": ["dev", "--port", "5174", "--strictPort"], "port": 5174 },
-    { "name": "flambeur-alt", "runtimeExecutable": "pnpm", "runtimeArgs": ["dev", "--port", "5175", "--strictPort"], "port": 5175 }
+    {
+      "name": "flambeur",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "flambeur-alt",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev",
+        "--port",
+        "5175",
+        "--strictPort"
+      ],
+      "port": 5175
+    },
+    {
+      "name": "flambeur-art",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev",
+        "--port",
+        "5177",
+        "--strictPort"
+      ],
+      "port": 5177
+    },
+    {
+      "name": "flambeur-shop",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev",
+        "--port",
+        "5179",
+        "--strictPort"
+      ],
+      "port": 5179
+    }
   ]
 }

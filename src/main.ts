@@ -1,99 +1,267 @@
-import { act, canPeek, firstToAct, forfeit, legalActions, startBetting, type BetAction, type Betting, type Seat } from './engine/betting.ts'
-import { autoKeep, forgePlan, type ForgePlan } from './engine/forge.ts'
-import { botAct, botDeal, botShop, getStyle } from './engine/bot.ts'
-import { SUIT_GLYPH, cardName, isWild, rankLabel, sellPrice, traitName, type Card, type Trait } from './engine/cards.ts'
-import { COLLECTIBLES, describe, getDef, hasCollectible, type Owned } from './engine/collectibles.ts'
-import { GRADING_PRICE, PLAY_SIZE, ROUNDS, COLLECTIBLE_PRICE, SLEEVE_PRICE, TOURNAMENT_ROUNDS, isTableStart, tableOf } from './engine/economy.ts'
-import { DRAFT_PICKS, draftRows, getStarter, starterOffer, type StarterId } from './engine/starters.ts'
-import { allCards, deckSize, pileView } from './engine/deck.ts'
+// the game ui. the table is the pixel art duel scene (ui/duel.ts), the shop is the tabac (ui/shop.ts),
+// the other screens (and the shop's binder, grading and pack overlays) are still the throwaway dom harness.
+// it renders only from a SeatView: offline it runs step() itself, online the server does and sends the view over net.ts
+import { JOKERS, SUITS, SUIT_GLYPH, cardName, playSlots, rankLabel, stuckMate, traitName, type Card, type Trait } from './engine/cards.ts'
+import { describe, getDef } from './engine/collectibles.ts'
+import { COLLECTIBLE_PRICE, PLAY_SIZE, SHIPPERS, tableOf, type Shipper } from './engine/economy.ts'
+import { DRAFT_PICKS, getStarter, type StarterId } from './engine/starters.ts'
+import { pileView } from './engine/deck.ts'
 import { HAND_NAMES, type HandType } from './engine/hands.ts'
 import { randomSeed } from './engine/rng.ts'
+import { autoKeep, type ForgePlan } from './engine/forge.ts'
 import {
-  DIFFICULTIES, appraiseFor, binBulk, binderPrice, bulkPrice, buySleeve, canForge, canGrade, canMulligan, dealHand, defaultToDeck, displaySlots, finishRound,
-  freeMulligan, freeRestocks, handSize, houseMult, mulligan, newRun, nextRound, runScore, sellBinder, sendToGrading, shopSleeve, showdownWinner, stonks,
-  tableBlinds, takePull, twistFor,
-  type Difficulty, type Player, type RoundResult, type Run,
-} from './engine/run.ts'
-import type { Appraisal, Step } from './engine/scoring.ts'
-import { newShop, openPack, restock, restockPrice, type PackContents, type PackKind, type Shop } from './engine/shop.ts'
-import { isTournament, twistName, twistText, type Twist } from './engine/twists.ts'
+  DIFFICULTIES, botAction, canGrade, defaultToDeck, legal, newMatch, pending, step, view,
+  type Action, type BetChoice, type Difficulty, type Event, type Match, type SeatView,
+} from './engine/match.ts'
+import { api, connect, type PlayerInfo, type ServerMsg, type Status } from './net.ts'
+import type { Appraisal } from './engine/scoring.ts'
+import { INSERTS, type PackKind } from './engine/shop.ts'
+import { twistName, twistText } from './engine/twists.ts'
 import { getSleeve, type Stonks } from './engine/sleeves.ts'
 import * as sfx from './ui/sound.ts'
+import { loadArt, cardCanvas, canvasUrl } from './ui/art.ts'
+import { loadFonts } from './ui/font.ts'
+import { loadLogo } from './ui/logo.ts'
+import { loadTitle, panTo, showTitle, type TitleOnline } from './ui/title.ts'
+import { showDuel, say, countUp as duelCountUp, cardInfo, type Slip } from './ui/duel.ts'
+import { showShop, keeperSays, ringBell } from './ui/shop.ts'
 
 const app = document.getElementById('app') as HTMLElement
+const ME = 0
 
 // ---------- state ----------
-type Table = {
-  opp: Player
-  oppPlayed: Card[]
-  oppEst: number
-  selected: Set<number>
-  oppMulls: number
-  locked: Card[] | null
-  peek: Card | null
-  betting: Betting | null
-  log: string[]
-  duel: { you: Appraisal; opp: Appraisal } | null
-  result: RoundResult | null
-  rivalResult: RoundResult | null
-  forgeKeep: Trait[] | null // traits picked when the forge goes over the cap
-}
-type PackView = { kind: PackKind; contents: PackContents; ripped: boolean; flipped: Set<number>; toDeck: Set<number>; then: () => void }
-
-let run: Run
-let table: Table | null = null
-let shop: Shop | null = null
-let pack: PackView | null = null
-let best = { total: 0, hand: '' }
+let match: Match | null = null // offline only
+let online: { view: SeatView; deadlines: (number | null)[] } | null = null // the server's latest view, while in an online match
+let net: ReturnType<typeof connect> | null = null
+let player: PlayerInfo | null | undefined // undefined = haven't heard from the server (or it's down)
+let netStatus: Status = 'offline'
+let room: string | null = null // a room I made, waiting for a friend
+let joinCode = location.pathname.match(/^\/r\/([A-Z]+)$/i)?.[1]?.toUpperCase() ?? null // came in on a room link
+let notice = '' // last server message for the title screen
+let seenChoices = 0 // bet choices already in the log, so the rival's show up once
+let autoSent = new Set<string>() // round-1 auto moves already sent this match, so a reject can't loop them
 let difficulty: Difficulty = 'medium'
-let busy = false // true while animations run so clicks don't double-fire
-let counting = false // meters start at 0 while the count-up runs, then show the final appraisal
+let best = { total: 0, hand: '' }
+let busy = false // true while bots act or animations run, so clicks don't double-fire
+let counting = false // meters start at 0 while the count-up runs
+// ui-only state. never game state: that all lives in the match
+let selected = new Set<number>()
+let pack: { ripped: boolean; flipped: Set<number>; toDeck: Set<number> } | null = null
+let log: string[] = []
+let resultHold = false // keep showing the settled round until "continue"
+let lastLocked: Card[] = [] // my locked cards, so a fold or forge result can still show them
+let countedRound = 0 // the count-up runs once per showdown
+let binderOpen = false // the shop's binder overlay, kept open across renders while you sell
+let binderPicked = new Set<number>()
+let vitrineOpen = false
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const fmt = (n: number) => n.toLocaleString('en-US')
+const v = (): SeatView => online?.view ?? view(match!, ME)
+const mySeat = () => v().me.seat
+
+// greys out buttons. offline it's the real legal(). online the server has the full state, so this only rules out
+// what the view already shows can't work, and the server rejects the rest
+function can(a: Action): boolean {
+  if (match) return legal(match, ME).some(l => JSON.stringify(l) === JSON.stringify(a))
+  const me = v().me
+  const shop = me.shop
+  if (a.type === 'buy') return !!shop && !shop.offers[a.slot].sold && shop.offers[a.slot].price <= me.bankroll
+  if (a.type === 'restock') return !!shop && shop.restockPrice <= me.bankroll
+  if (a.type === 'binBulk') return !!shop && shop.bulkInDeck > 0 && shop.bulkPrice <= me.bankroll
+  if (a.type === 'sell') {
+    const card = me.binder.find(c => c.id === a.cardId)
+    return !!card && !(v().keeper.includes('superstitious') && card.suit === 'S')
+  }
+  if (a.type === 'ship') {
+    const card = [...me.pile, ...me.discard, ...me.binder].find(c => c.id === a.cardId)
+    return !!shop && !shop.shipped && !me.shipping && !!card && canGrade(card) && SHIPPERS[a.shipper].price < me.bankroll
+  }
+  return true
+}
+
+// ---------- driving the match ----------
+
+// my action, then the bots catch up. bets get a pause so you can watch the rival decide.
+// online it just goes to the server, and busy clears on its ok or reject
+async function dispatch(action: Action): Promise<void> {
+  if (busy) return
+  if (online) {
+    // false = socket not open. the click is dropped and the reconnect brings a fresh view
+    if (net!.act(action)) busy = true
+    return
+  }
+  if (!match) return
+  busy = true
+  try {
+    const res = step(match, ME, action)
+    match = res.match
+    onEvents(res.events.filter(e => e.to === ME || e.to === 'all').map(e => e.event))
+    await runBots()
+  } finally {
+    busy = false
+  }
+  render()
+}
+
+async function runBots(): Promise<void> {
+  for (;;) {
+    const m = match!
+    if (m.phase === 'over') return
+    const bot = pending(m).find(s => s !== ME)
+    // simultaneous phases: the bot goes once I'm done, so it never shops off what I just did
+    if (bot === undefined || (pending(m).includes(ME) && m.phase !== 'bet')) return
+    const action = botAction(m, bot)
+    if (m.phase === 'bet' && action.type === 'bet') {
+      render()
+      await sleep(800)
+      log.push(`Rival: <b>${BET_LABEL[action.choice]}</b>`)
+      say(action.choice)
+    }
+    const dealing = m.phase === 'shop'
+    const res = step(m, bot, action)
+    match = res.match
+    onEvents(res.events.filter(e => e.to === ME || e.to === 'all').map(e => e.event))
+    if (dealing && match.phase === 'deal') log = [`Round ${match.round} · the rival has <b>$${v().others[0].bankroll}</b>.`]
+  }
+}
+
+function onEvents(events: Event[]): void {
+  for (const e of events) {
+    if (e.kind === 'packOpened') pack = { ripped: false, flipped: new Set(), toDeck: new Set(e.contents.cards.filter(defaultToDeck).map(c => c.id)) }
+    if (e.kind === 'roundEnd') resultHold = true
+    if (e.kind === 'scratched') {
+      const what = e.hand ? `: ${HAND_NAMES[e.hand]} +1 level` : e.collectible ? `: ${getDef(e.collectible.id).name}` : e.joker ? `: ${JOKERS[e.joker.joker!].name} (${cardName(e.joker)})` : ', pick a card'
+      log.push(`Scratched a <b class="gold">${INSERTS[e.insert].name}</b>${what}.`)
+      sfx.flip(e.insert === 'grail')
+    }
+    if (e.kind === 'graded') log.push(`Back from grading: <b>${cardName(e.card)}</b> came back a <b class="gold">${e.card.grade}</b>.`)
+    if (e.kind === 'showdown' && e.showdown.mine.total > best.total) best = { total: e.showdown.mine.total, hand: handLabel(e.showdown.mine) }
+  }
+}
+
+// ---------- online ----------
+
+function startNet(): void {
+  if (net) return
+  net = connect(onServer, s => {
+    netStatus = s
+    // an action in flight on a dead socket never gets its ok/reject
+    if (s !== 'online') busy = false
+    const dot = document.getElementById('netdot')
+    if (dot) dot.textContent = s
+    if (s === 'online' && joinCode) {
+      net!.joinRoom(joinCode)
+      joinCode = null
+      history.replaceState(null, '', '/')
+    }
+  })
+}
+
+function onServer(msg: ServerMsg): void {
+  if (msg.t === 'view') return onView(msg.view, msg.deadlines, msg.events)
+  if (msg.t === 'ok') {
+    // the view this action made came first, while busy, so anything draw() wanted to send waited for this
+    busy = false
+    render()
+  } else if (msg.t === 'error' && online && GONE.includes(msg.error)) {
+    // the match ended and was swept, or another tab started a new daily over it
+    busy = false
+    notice = 'That match is over.'
+    leaveOnline()
+  } else if (msg.t === 'reject' || msg.t === 'error') {
+    busy = false
+    const why = msg.t === 'reject' ? msg.reason : msg.error
+    if (online) log.push(`Server said no: ${why}`)
+    else notice = why
+    render()
+  } else if (msg.t === 'room') {
+    room = msg.code
+    render()
+  } else if (msg.t === 'queued') {
+    notice = 'Looking for someone to play…'
+    render()
+  } else if (msg.t === 'matched') {
+    room = null
+    notice = ''
+  } else if (msg.t === 'restarting') {
+    notice = 'Server is restarting, your match picks back up in a few seconds'
+    if (online) log.push(notice)
+    render()
+  }
+}
+
+const GONE = ['no such live match', 'not your match', 'not in that match']
+
+function onView(next: SeatView, deadlines: (number | null)[], events: Event[]): void {
+  const prev = online?.view ?? null
+  if (!prev) {
+    // a fresh join: start clean. old events are already in the view, replaying them would rerun old count-ups
+    match = null
+    best = { total: 0, hand: '' }
+    log = []
+    resultHold = false
+    pack = null
+    selected = new Set()
+    autoSent = new Set()
+    countedRound = next.last?.round ?? 0
+  }
+  online = { view: next, deadlines }
+  const choices = next.bet?.choices ?? []
+  const rival = next.others[0]
+  for (const c of choices.slice(seenChoices)) {
+    if (c.seat === next.me.seat) continue
+    log.push(`${rival.name}: <b>${BET_LABEL[c.choice]}</b>`)
+    say(c.choice)
+  }
+  seenChoices = choices.length
+  if (prev && prev.phase !== 'deal' && next.phase === 'deal') log = [`Round ${next.round} · ${rival.name} has <b>$${rival.bankroll}</b>.`]
+  if (prev) onEvents(events)
+  // the rival's moves in a phase you both play at once only change `others`, which these screens don't show.
+  // skipping the redraw keeps open overlays (draft picks, the deck viewer) from resetting under you
+  const quiet = prev && !events.length && ['draft', 'shop', 'forgePick'].includes(next.phase)
+    && JSON.stringify({ ...prev, others: null }) === JSON.stringify({ ...next, others: null })
+  if (!quiet) render()
+}
+
+function leaveOnline(): void {
+  online = null
+  net?.forgetMatch()
+  renderTitle()
+}
+
+// my seat's server clock, ticking in the top bar
+setInterval(() => {
+  const el = document.getElementById('clock')
+  if (!el || !online || !net) return
+  const d = online.deadlines[online.view.me.seat]
+  el.textContent = d === null ? '' : `${Math.max(0, Math.ceil(net.msLeft(d) / 1000))}s`
+}, 250)
 
 // ---------- small render helpers ----------
 function cardHtml(card: Card, cls = ''): string {
-  if (card.bulk) return `<div class="card bulk ${cls}" data-id="${card.id}"><span>▦</span><span class="tag">bulk +5</span><span class="s"></span></div>`
-  const red = !isWild(card) && (card.suit === 'H' || card.suit === 'D')
-  const suit = isWild(card) ? '✦' : SUIT_GLYPH[card.suit]
-  const tags: string[] = []
-  if (card.finish) tags.push(card.finish)
-  if (card.stamp === 'first') tags.push('1st ed')
-  if (card.stamp === 'signed') tags.push('signed')
-  if (card.stamp === 'gold') tags.push('gold')
-  if (card.stamp === 'damaged') tags.push('damaged')
-  if (card.grade !== null) tags.push(`psa ${card.grade}`)
-  for (const t of card.traits) tags.push(traitName(t).toLowerCase())
-  if (card.grind) tags.push(`+${card.grind}`)
-  const badge = card.tier > 0 ? `<span class="badge">${'★'.repeat(card.tier)}</span>` : ''
-  const classes = ['card', red ? 'red' : '', card.finish ?? '', card.tier > 0 ? `forged t${card.tier}` : '', cls].join(' ')
-  return `<div class="${classes}" data-id="${card.id}"><span>${rankLabel(card.rank)}</span>${badge}<span class="tag">${tags.join(' · ')}</span><span class="s">${suit}</span></div>`
-}
-
-function backHtml(): string {
-  return '<div class="card back"></div>'
+  const info = cardInfo(card)
+  return `<div class="card art ${cls}" data-id="${card.id}" title="${cardName(card)}${info ? ` · ${info}` : ''}"><img src="${canvasUrl(cardCanvas(card))}" alt="${cardName(card)}">${info && !cls.includes('mini') ? `<span class="tag">${info}</span>` : ''}</div>`
 }
 
 function caseHtml(sellable: boolean): string {
-  const slots: string[] = []
-  run.you.display.forEach((o, i) => {
+  const me = v().me
+  const slots = me.display.map((o, i) => {
     const def = getDef(o.id)
-    const sell = sellable ? `<button class="ghost" data-sell="${i}">Sell $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}</button>` : ''
-    slots.push(`<div class="item ${def.rarity}" data-slot="${i}"><b>${def.name}</b><span>${describe(o)}</span><div class="rar">${def.rarity}</div>${sell}</div>`)
+    const sell = sellable ? `<button class="ghost" data-sellcol="${i}">Sell $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}</button>` : ''
+    return `<div class="item ${def.rarity}" data-slot="${i}"><b>${def.name}</b><span>${describe(o)}</span><div class="rar">${def.rarity}</div>${sell}</div>`
   })
-  for (let i = run.you.display.length; i < displaySlots(run.you); i++) slots.push('<div class="item empty">empty slot</div>')
+  for (let i = me.display.length; i < me.displaySlots; i++) slots.push('<div class="item empty">empty slot</div>')
   return `<div class="panel"><h3 style="margin-bottom:10px">Display case</h3><div class="case">${slots.join('')}</div></div>`
 }
 
-function levelsHtml(): string {
-  const lv = Object.entries(run.you.levels).filter(([, n]) => n > 0)
+function sideHtml(): string {
+  const me = v().me
+  const lv = Object.entries(me.levels).filter(([, n]) => n > 0)
   const parts: string[] = []
-  if (run.you.sleeves.length) parts.push(`<h3 style="margin-bottom:6px">Sleeves</h3>${run.you.sleeves.map(id => `<div class="muted"><b class="gold">${getSleeve(id).name}</b> · ${getSleeve(id).text}</div>`).join('')}`)
+  if (me.sleeves.length) parts.push(`<h3 style="margin-bottom:6px">Sleeves</h3>${me.sleeves.map(id => `<div class="muted"><b class="gold">${getSleeve(id).name}</b> · ${getSleeve(id).text}</div>`).join('')}`)
   if (lv.length) parts.push(`<h3 style="margin:8px 0 6px">Code cards</h3>${lv.map(([h, n]) => `<div class="muted">${HAND_NAMES[h as HandType]} lv${n + 1}</div>`).join('')}`)
-  if (run.you.grading.length) parts.push(`<h3 style="margin:8px 0 6px">Grading desk</h3>${run.you.grading.map(g => `<div class="muted">${cardName(g.card)} is out, back round ${g.back}</div>`).join('')}`)
-  if (!parts.length) return ''
-  return `<div class="panel" style="margin-top:12px">${parts.join('')}</div>`
+  return caseHtml(v().phase === 'shop') + (parts.length ? `<div class="panel" style="margin-top:12px">${parts.join('')}</div>` : '')
 }
 
 function stonksText(st: Stonks): string {
@@ -102,63 +270,58 @@ function stonksText(st: Stonks): string {
   return `${st.finish} ×2`
 }
 
-function topHtml(extra = ''): string {
-  const { ante, max } = tableBlinds(run)
-  const streak = run.you.streak > 0 ? `🔥 ${run.you.streak}` : run.you.streak < 0 ? `🧊 ${-run.you.streak}` : '—'
+function topHtml(): string {
+  const view_ = v()
+  const t = view_.nextTwist
+  const twistChip = t ? `<span class="chip" title="${twistText(t.twist)}">${t.round === view_.round ? 'This round' : `Round ${t.round}`}: <b class="gold">${twistName(t.twist)}</b></span>` : ''
   return `<div class="top">
     <h2>FLAM<span class="gold">BEUR</span></h2>
     <div class="chips">
-      <span class="chip">Round <b>${run.round}/${ROUNDS}</b> · Table <b>${tableOf(run.round)}</b></span>
-      <span class="chip">Bankroll <b>$${run.you.bankroll}</b></span>
-      <span class="chip">Ante/Max <b>$${ante}/$${max}</b></span>
-      <span class="chip">Streak <b>${streak}</b></span>
-      <button class="chip" id="deckview" style="cursor:pointer;color:inherit;min-height:0">Deck <b>${run.you.pile.length}</b> pile / <b>${run.you.discard.length}</b> discard · Binder <b>${run.you.binder.length}</b></button>
-      <span class="chip">STONKS <b class="hot">${stonksText(stonks(run))}</b></span>
-      <span class="chip">Seed <b>${run.seed}</b></span>
-      <span class="chip">Box <b>${getStarter(run.starter).name}</b></span>
-      <span class="chip">Rival <b>$${run.rival.bankroll}</b> · ${DIFFICULTIES[run.difficulty].name}</span>
-      ${nextTwistChip()}
-      ${extra}
+      <span class="chip">Round <b>${view_.round}/${view_.lastRound ?? '∞'}</b> · Table <b>${tableOf(view_.round)}</b></span>
+      <span class="chip">Bankroll <b>$${view_.me.bankroll}</b></span>
+      <span class="chip">Ante/Max <b>$${view_.blinds.ante}/$${view_.blinds.max}</b></span>
+      <button class="chip" id="deckview" style="cursor:pointer;color:inherit;min-height:0">Deck <b>${view_.me.pile.length}</b> pile / <b>${view_.me.discard.length}</b> discard · Binder <b>${view_.me.binder.length}</b></button>
+      <span class="chip">STONKS <b class="hot">${stonksText(view_.stonks)}</b></span>
+      ${match ? `<span class="chip">Seed <b>${match.config.seed}</b></span>` : ''}
+      ${view_.me.starter ? `<span class="chip">Box <b>${getStarter(view_.me.starter).name}</b></span>` : ''}
+      <span class="chip">${match ? `Rival · ${DIFFICULTIES[difficulty].name}` : `${view_.mode} vs <b>${view_.others[0].name}</b>`}</span>
+      ${online ? '<span class="chip" id="clock"></span><span class="chip" id="netdot">' + netStatus + '</span>' : ''}
+      ${twistChip}
     </div>
   </div>`
 }
 
-// the next tournament round and its twist, so the shop can be used to prepare
-function nextTwistChip(): string {
-  const r = TOURNAMENT_ROUNDS.find(x => x >= run.round)
-  if (r === undefined) return ''
-  const t = twistFor(run, r)!
-  return `<span class="chip" title="${twistText(t)}">${r === run.round ? 'This round' : `Round ${r}`}: <b class="gold">${twistName(t)}</b></span>`
-}
-
-function twistBanner(t: Twist): string {
-  return `<div class="banner bad" style="font-size:16px">Tournament round · ${twistName(t)}<div class="muted" style="font-size:13px">${twistText(t)}. No folding, no forging.</div></div>`
-}
-
-// pile, discard and binder. the pile is sorted so it doesn't leak the draw order
+// pile, discard and binder. the view already sorts the pile so it never shows draw order
 function showDeckViewer(): void {
+  const me = v().me
   const overlay = document.createElement('div')
   overlay.className = 'overlay'
   const section = (title: string, cards: Card[]) => {
-    const v = pileView(cards)
-    const ranks = [...v.byRank.entries()].sort((a, b) => b[0] - a[0]).map(([r, n]) => `${rankLabel(r)}×${n}`).join(' ')
-    const suits = [...v.bySuit.entries()].map(([su, n]) => `${SUIT_GLYPH[su]}${n}`).join(' ')
-    return `<div class="panel" style="margin-top:10px;text-align:left"><b>${title} · ${cards.length}</b> <span class="muted" style="font-size:12px">${ranks} · ${suits}${v.bulk ? ` · bulk ${v.bulk}` : ''}</span>
-      <div class="binder" style="margin-top:8px">${v.cards.map(c => cardHtml(c, 'mini')).join('')}</div></div>`
+    const pv = pileView(cards)
+    const ranks = [...pv.byRank.entries()].sort((a, b) => b[0] - a[0]).map(([r, n]) => `${rankLabel(r)}×${n}`).join(' ')
+    const suits = [...pv.bySuit.entries()].map(([su, n]) => `${SUIT_GLYPH[su]}${n}`).join(' ')
+    return `<div class="panel" style="margin-top:10px;text-align:left"><b>${title} · ${cards.length}</b> <span class="muted small">${ranks} · ${suits}${pv.bulk ? ` · bulk ${pv.bulk}` : ''}</span>
+      <div class="binder" style="margin-top:8px">${pv.cards.map(c => cardHtml(c, 'mini')).join('')}</div></div>`
   }
-  overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>Your deck · ${deckSize(run.you)} cards</h2>
-    ${section('Pile', run.you.pile)}${section('Discard (back next Table)', run.you.discard)}${section('Binder (never drawn, sell it at the shop)', run.you.binder)}
+  overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>Your deck · ${me.pile.length + me.discard.length + me.hand.length} cards</h2>
+    ${section('Pile', me.pile)}${section('Discard (back next Table)', me.discard)}${section('Binder (never drawn, sell it at the shop)', me.binder)}
     <div class="row" style="justify-content:center;margin-top:12px"><button id="closeview">Close</button></div></div>`
   document.body.appendChild(overlay)
   document.getElementById('closeview')!.onclick = () => overlay.remove()
 }
 
-function bindDeckViewer(): void {
-  const el = document.getElementById('deckview')
-  if (el) el.onclick = () => showDeckViewer()
+function bindCommon(): void {
+  const dv = document.getElementById('deckview')
+  if (dv) dv.onclick = () => showDeckViewer()
+  app.querySelectorAll<HTMLElement>('[data-sellcol]').forEach(el => {
+    el.onclick = () => {
+      sfx.coin()
+      void dispatch({ type: 'sellCollectible', slot: Number(el.dataset.sellcol) })
+    }
+  })
 }
 
-// ---------- title ----------
+// ---------- title + leaderboard ----------
 function today(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -175,107 +338,276 @@ function leaderboard(seed: string, diff: Difficulty): Score[] {
 }
 
 function saveScore(): void {
+  const m = match!
   try {
-    const lb = leaderboard(run.seed, run.difficulty)
-    lb.push({ score: runScore(run), bankroll: run.you.bankroll, won: run.won, best: best.total })
+    const lb = leaderboard(m.config.seed, difficulty)
+    lb.push({ score: m.result!.scores[ME], bankroll: m.players[ME].bankroll, won: m.result!.winner === ME, best: best.total })
     lb.sort((a, b) => b.score - a.score)
-    localStorage.setItem(`flambeur:lb:${run.seed}:${run.difficulty}`, JSON.stringify(lb.slice(0, 10)))
+    localStorage.setItem(`flambeur:lb:${m.config.seed}:${difficulty}`, JSON.stringify(lb.slice(0, 10)))
   } catch {
-    // private window etc, leaderboard just doesn't persist
+    // private window etc, the leaderboard just doesn't persist
   }
 }
 
 function lbTable(title: string, lb: Score[]): string {
   if (!lb.length) return ''
-  return `<div class="panel lb"><b>${title}</b><table>${lb.map((e, i) => `<tr><td>#${i + 1}</td><td><b>${fmt(e.score ?? 0)}</b> pts</td><td>$${e.bankroll}</td><td>${e.won ? 'cleared' : 'busted'}</td><td>best ${fmt(e.best)}</td></tr>`).join('')}</table></div>`
+  return `<div class="panel lb"><b>${title}</b><table>${lb.map((e, i) => `<tr><td>#${i + 1}</td><td><b>${fmt(e.score ?? 0)}</b> pts</td><td>$${e.bankroll}</td><td>${e.won ? 'won' : 'lost'}</td><td>best ${fmt(e.best)}</td></tr>`).join('')}</table></div>`
 }
 
+let artReady = false // the title is drawn from the atlases, so it waits for them
+
+// the title world (ui/title.ts): solo in the cellar, online in the sewers. it reads this state every frame,
+// so re-rendering only swaps the state, the logo and the camera keep going
 function renderTitle(): void {
+  if (!artReady) return
   const daily = today()
-  const lb = leaderboard(daily, difficulty)
-  app.innerHTML = `<div class="title"><div>
-    <h1>FLAM<br><span>BEUR</span></h1>
-    <p class="muted" style="max-width:460px;margin:14px auto">Rip packs. Build a deck. Bet your bankroll against one rival, every hand, or forge it into something better.</p>
-    <div class="row" style="justify-content:center;margin-top:16px">
-      ${(Object.keys(DIFFICULTIES) as Difficulty[]).map(d => `<button class="${d === difficulty ? '' : 'ghost'}" data-diff="${d}" title="${DIFFICULTIES[d].text}">${DIFFICULTIES[d].name} ×${DIFFICULTIES[d].scoreMult}</button>`).join('')}
-    </div>
-    <p class="muted" style="font-size:13px">${DIFFICULTIES[difficulty].text}</p>
-    <div class="row" style="justify-content:center;margin-top:16px">
-      <button id="daily">Daily run · ${daily}</button>
-      <button class="ghost" id="random">Random seed</button>
-    </div>
-    <div class="row" style="justify-content:center;margin-top:12px">
-      <input id="seed" placeholder="or type a seed" maxlength="20" style="width:180px">
-      <button class="ghost" id="go">Play seed</button>
-    </div>
-    ${lbTable(`Today's leaderboard · ${DIFFICULTIES[difficulty].name} (this browser)`, lb)}
-  </div></div>`
-  app.querySelectorAll<HTMLElement>('[data-diff]').forEach(el => {
-    el.onclick = () => {
-      difficulty = el.dataset.diff as Difficulty
-      renderTitle()
-    }
+  const name = DIFFICULTIES[difficulty].name
+  showTitle(app, {
+    diffs: (Object.keys(DIFFICULTIES) as Difficulty[]).map(d => ({
+      label: `${DIFFICULTIES[d].name} ×${DIFFICULTIES[d].scoreMult}`,
+      text: DIFFICULTIES[d].text,
+      on: d === difficulty,
+      pick: () => {
+        difficulty = d
+        renderTitle()
+      },
+    })),
+    dailyLabel: `Daily run · ${daily}`,
+    daily: () => startRun(daily),
+    random: () => startRun(randomSeed()),
+    playSeed: s => startRun(s.toUpperCase()),
+    board: {
+      title: `Today's leaderboard · ${name} (this browser)`,
+      rows: leaderboard(daily, difficulty).map((e, i) => [`#${i + 1}`, `${fmt(e.score ?? 0)} pts`, `$${e.bankroll}`, e.won ? 'won' : 'lost', `best ${fmt(e.best)}`]),
+      empty: 'No runs on today\'s seed yet.',
+    },
+    online: titleOnline(),
   })
-  document.getElementById('daily')!.onclick = () => startRun(daily)
-  document.getElementById('random')!.onclick = () => startRun(randomSeed())
-  document.getElementById('go')!.onclick = () => {
-    const s = (document.getElementById('seed') as HTMLInputElement).value.trim()
-    if (s) startRun(s.toUpperCase())
+}
+
+// the sewers' half: sign in, then rooms, quick match, the online daily and the server boards
+function titleOnline(): TitleOnline | null {
+  if (player === undefined) return null
+  const auth = async (path: string, body: object) => {
+    try {
+      player = (await api<{ player: PlayerInfo }>(path, body)).player
+      notice = joinCode ? `Joining room ${joinCode}…` : ''
+      startNet()
+    } catch (err) {
+      notice = (err as Error).message
+    }
+    renderTitle()
+  }
+  if (player === null) {
+    return {
+      signedIn: false,
+      notice,
+      guest: n => void auth('/api/guest', n ? { name: n } : {}),
+      login: (n, password) => void auth('/api/login', { name: n, password }),
+      signup: (n, password) => void auth('/api/signup', { name: n, password }),
+    }
+  }
+  const me = player
+  if (titleBoard?.difficulty !== difficulty) void loadTitleBoard()
+  const rows = (list: BoardRow[]) => list.slice(0, 10).map((r, i) => [`#${i + 1}`, r.name, `${fmt(r.score)} pts`, r.attempts ? `${r.attempts} tr${r.attempts === 1 ? 'y' : 'ies'}` : ''])
+  const name = DIFFICULTIES[difficulty].name
+  const empty = 'Nobody yet. Be first.'
+  return {
+    signedIn: true,
+    who: me.name,
+    guest: me.kind === 'guest',
+    status: () => netStatus,
+    notice,
+    room,
+    dailyLabel: `Online daily · ${name}`,
+    logout: async () => {
+      await api('/api/logout', {})
+      net?.close()
+      net = null
+      player = null
+      room = null
+      renderTitle()
+    },
+    makeRoom: () => net?.createRoom(),
+    queue: () => net?.queue(),
+    daily: () => net?.startDaily(difficulty),
+    join: code => net?.joinRoom(code.toUpperCase()),
+    keep: password => void auth('/api/signup', { name: me.name, password }),
+    cancel: () => {
+      net?.leave()
+      room = null
+      renderTitle()
+    },
+    boards: titleBoard?.difficulty === difficulty
+      ? [{ title: `Online daily ${titleBoard.day} · ${name} · best run`, rows: rows(titleBoard.best), empty },
+        { title: 'First try', rows: rows(titleBoard.first), empty }]
+      : [],
   }
 }
 
-function startRun(seed: string): void {
-  best = { total: 0, hand: '' }
-  showStarterBox(seed)
+type BoardRow = { name: string; kind: string; score: number; attempts?: number }
+type DailyBoard = { day: string; best: BoardRow[]; first: BoardRow[] }
+let titleBoard: (DailyBoard & { difficulty: Difficulty }) | null = null
+let boardLoading: Difficulty | null = null
+
+// the server's daily board for the title, once per difficulty picked
+async function loadTitleBoard(): Promise<void> {
+  if (boardLoading === difficulty) return
+  const d = difficulty
+  boardLoading = d
+  try {
+    titleBoard = { ...await api<DailyBoard>(`/api/daily?difficulty=${d}`), difficulty: d }
+  } catch (err) {
+    console.warn('no daily board:', err)
+    titleBoard = { day: '', best: [], first: [], difficulty: d } // don't refetch in a loop
+  }
+  boardLoading = null
+  if (!match && !online) renderTitle()
 }
 
-// the run opens on a starter box: rip it, pick 1 of 3 starter decks (same seed = same 3)
-function showStarterBox(seed: string): void {
-  const offer = starterOffer(seed)
-  let ripped = false
+// the run-end screen's copy of the server's daily board: best run and first try
+async function fillBoard(): Promise<void> {
+  const lb = await api<DailyBoard>(`/api/daily?difficulty=${difficulty}`)
+  const el = document.getElementById('board')
+  if (!el) return
+  const table = (title: string, rows: BoardRow[]) => `<div class="panel lb" style="margin-top:10px"><b>${title}</b>${rows.length
+    ? `<table>${rows.slice(0, 10).map((r, i) => `<tr><td>#${i + 1}</td><td>${r.name}</td><td><b>${fmt(r.score)}</b> pts</td>${r.attempts ? `<td>${r.attempts} tr${r.attempts === 1 ? 'y' : 'ies'}</td>` : ''}</tr>`).join('')}</table>`
+    : '<p class="muted small">Nobody yet. Be first.</p>'}</div>`
+  el.innerHTML = table(`Online daily ${lb.day} · ${DIFFICULTIES[difficulty].name} · best run`, lb.best) + table('First try', lb.first)
+}
+
+function startRun(seed: string, autoplay = false): void {
+  autoSent = new Set()
+  best = { total: 0, hand: '' }
+  log = []
+  resultHold = false
+  pack = null
+  countedRound = 0
+  match = newMatch({ mode: 'solo', seed, seats: [{ kind: 'human', name: 'You', ...(autoplay ? { style: 'house' } : {}) }, { kind: 'bot', name: 'Rival', difficulty }] })
+  render()
+}
+
+// dev only: ?quick drafts and shops for you (house bot style) straight to the first deal, for testing the table.
+// ?quick&shop plays on (house bot style) until the round 2 shop, for testing the tabac
+function quickStart(): void {
+  startRun(randomSeed(), true)
+  let m = match!
+  const toShop = new URLSearchParams(location.search).has('shop')
+  const going = () => toShop ? m.phase !== 'over' && !(m.phase === 'shop' && m.round >= 2) : m.phase === 'draft' || m.phase === 'shop'
+  while (going()) {
+    const seat = pending(m)[0]
+    m = step(m, seat, botAction(m, seat)).match
+  }
+  match = m
+  render()
+}
+
+// ---------- render: one switch on the phase ----------
+
+// the count-up runs once, the first time a settled showdown is on screen. everything else just draws
+function render(): void {
+  void show()
+}
+
+async function show(): Promise<void> {
+  if (counting) return // a view landing mid count-up waits, the count-up draws when it's done
+  const view_ = match || online ? v() : null
+  const sd = view_?.showdown
+  if (view_ && resultHold && sd && view_.last && countedRound !== view_.last.round && !counting) {
+    countedRound = view_.last.round
+    counting = true
+    busy = true
+    draw()
+    await duelCountUp(sd)
+    counting = false
+    busy = false
+    if (sd.winner === mySeat()) sfx.win()
+    else if (sd.winner !== null) sfx.lose()
+  }
+  draw()
+}
+
+function draw(): void {
+  document.querySelectorAll('.overlay').forEach(o => o.remove())
+  if (!match && !online) return renderTitle()
+  const view_ = v()
+  if (resultHold && view_.last) return renderTable()
+  if (view_.phase === 'over') return renderOver()
+  // online, you can finish the draft or shop before the other player does
+  if (view_.me.done && (view_.phase === 'draft' || view_.phase === 'shop')) {
+    app.innerHTML = `${topHtml()}<div class="panel" style="margin-top:12px"><p class="center muted">Waiting on ${view_.others[0].name}…</p></div>`
+    return bindCommon()
+  }
+  if (view_.phase === 'draft') return view_.me.starter ? renderDraft() : renderStarterBox()
+  if (view_.phase === 'shop') {
+    if (view_.me.shop?.open) return renderPack()
+    if (view_.me.shop?.scratch) return renderInsertPick(view_.me.shop.scratch)
+    // round 1 has no shop, just the free pack: rip it straight away
+    if (view_.round === 1) {
+      const free = view_.me.shop!.offers.findIndex(o => o.type === 'pack' && !o.sold)
+      const action: Action = free >= 0 ? { type: 'buy', slot: free } : { type: 'leaveShop' }
+      if (!busy && !autoSent.has(action.type)) {
+        autoSent.add(action.type)
+        void dispatch(action)
+      }
+      return
+    }
+    return renderShop()
+  }
+  if (view_.phase === 'forgePick' && view_.me.forge) return renderForgePick(view_.me.forge)
+  return renderTable()
+}
+
+// ---------- draft ----------
+function starterArt(id: StarterId | 'sealed'): string {
+  const url = new URL(`../art/packaging/starters/${id}.png`, import.meta.url).href
+  return `<span class="box-tray"><img src="${url}" width="88" height="112" alt=""></span>`
+}
+
+function renderStarterBox(): void {
+  const offer = v().me.draft!.offer
   const overlay = document.createElement('div')
   overlay.className = 'overlay'
   document.body.appendChild(overlay)
-  const draw = () => {
+  let ripped = false
+  const paint = () => {
     const body = !ripped
-      ? `<p class="muted">Every run starts here. Rip it open.</p><div class="bigpack p-collector" id="srip" style="width:200px">STARTER<br>BOX</div>`
-      : `<p class="muted">Pick your deck. Each one plays a little different.</p>
-        <div class="shopgrid" style="margin-top:14px">${offer.map(id => {
+      ? `<button class="package-button" id="srip" aria-label="Open starter box">${starterArt('sealed')}</button><p class="muted">Open your starter box.</p>`
+      : `<p class="muted">Choose a starter box.</p>
+        <div class="starter-tray">${offer.map(id => {
           const s = getStarter(id)
-          return `<div class="offer o-col pull reveal"><h3>${s.name}</h3><p>${s.deckText}</p><p style="color:var(--gold)"><b>${s.twist}</b></p><button data-starter="${id}">Take it</button></div>`
+          return `<button class="starter-choice reveal" data-starter="${id}">${starterArt(id)}<strong>${s.name}</strong><span>${s.deckText}</span><span class="starter-twist">${s.twist}</span></button>`
         }).join('')}</div>`
-    overlay.innerHTML = `<div class="packbox"><h2>Seed ${seed}</h2>${body}</div>`
-    const rip = document.getElementById('srip')
+    overlay.innerHTML = `<div class="packbox"><h2>${match ? `Seed ${match.config.seed}` : 'Starter box'}</h2>${body}</div>`
+    const rip = overlay.querySelector<HTMLButtonElement>('#srip')
     if (rip) rip.onclick = async () => {
+      rip.disabled = true
       rip.classList.add('shake')
       sfx.rip()
       await sleep(450)
       ripped = true
       sfx.flip(true)
-      draw()
+      paint()
     }
     overlay.querySelectorAll<HTMLElement>('[data-starter]').forEach(el => {
-      el.onclick = () => {
-        document.body.removeChild(overlay)
-        showRowDraft(seed, el.dataset.starter as StarterId)
-      }
+      el.onclick = () => void dispatch({ type: 'pickBox', box: el.dataset.starter as StarterId })
     })
   }
-  draw()
+  paint()
 }
 
-// the box is dealt into 4 rows of 8, keep 3 of them = your 24 card deck
-function showRowDraft(seed: string, starter: StarterId): void {
-  const rows = draftRows(seed, starter)
+function renderDraft(): void {
+  const me = v().me
+  const rows = me.draft!.rows!
   const picked = new Set<number>([0, 1, 2])
   const overlay = document.createElement('div')
   overlay.className = 'overlay'
   document.body.appendChild(overlay)
-  const draw = () => {
-    overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>${getStarter(starter).name}</h2>
+  const paint = () => {
+    overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>${getStarter(me.starter!).name}</h2>
       <p class="muted">Keep ${DRAFT_PICKS} rows. That's your ${DRAFT_PICKS * rows[0].cards.length} card deck.</p>
       ${rows.map((row, i) => `<div class="panel" data-row="${i}" style="margin-top:10px;cursor:pointer;${picked.has(i) ? 'border-color:var(--gold)' : 'opacity:.5'}">
-        <div class="muted" style="font-size:13px">${picked.has(i) ? '✔ ' : ''}${row.label}</div>
+        <div class="muted small">${picked.has(i) ? '★ ' : ''}${row.label}</div>
         <div class="hand" style="margin-top:6px">${row.cards.map(c => cardHtml(c)).join('')}</div></div>`).join('')}
       <div class="row" style="justify-content:center;margin-top:12px"><button id="keeprows" ${picked.size !== DRAFT_PICKS ? 'disabled' : ''}>Keep these ${picked.size}/${DRAFT_PICKS}</button></div>
     </div>`
@@ -284,686 +616,470 @@ function showRowDraft(seed: string, starter: StarterId): void {
         const i = Number(el.dataset.row)
         if (picked.has(i)) picked.delete(i)
         else picked.add(i)
-        draw()
+        paint()
       }
     })
     document.getElementById('keeprows')!.onclick = () => {
-      if (picked.size !== DRAFT_PICKS) return
-      document.body.removeChild(overlay)
-      run = newRun(seed, starter, [...picked].sort(), difficulty)
-      // round 1 starts with a free pack instead of a shop
-      showPack('free', () => startRound())
+      if (picked.size === DRAFT_PICKS) void dispatch({ type: 'draft', rows: [...picked].sort() })
     }
   }
-  draw()
+  paint()
 }
 
 // ---------- pack opening ----------
+const PACK_NAMES: Record<PackKind, string> = { free: 'Free Pack', offbrand: 'Off-Brand', repack: 'Repack', collector: 'Collector Pack' }
+
 function glowFor(card: Card): string {
   if (card.finish === 'prism') return 'var(--gold)'
   if (card.finish || card.stamp) return card.stamp ? 'var(--green)' : 'var(--blue)'
   return '#e8e8e8'
 }
 
-function showPack(kind: PackKind, then: () => void): void {
-  const contents = openPack(kind, run.rng, run.round, run.mem, run.you.display)
-  // every pull goes to the deck or the binder. default: special cards to the deck, plain ones to the binder
-  const toDeck = new Set(contents.cards.filter(defaultToDeck).map(c => c.id))
-  pack = { kind, contents, ripped: false, flipped: new Set(), toDeck, then }
-  renderPack()
-}
-
-const PACK_NAMES: Record<PackKind, string> = { free: 'Free Pack', offbrand: 'Off-Brand', repack: 'Repack', collector: 'Collector Pack' }
-
 function renderPack(): void {
-  if (!pack) return
+  const open = v().me.shop!.open!
+  if (!pack) pack = { ripped: false, flipped: new Set(), toDeck: new Set(open.cards.filter(defaultToDeck).map(c => c.id)) }
   const p = pack
-  const allFlipped = p.contents.cards.every(c => p.flipped.has(c.id))
+  // older servers sent the contents without the lane. each lane has a unique collation.
+  const kind = open.kind ?? (open.codeCard ? 'collector' : open.cards.length === 5 ? 'offbrand' : open.cards.length === 4 ? 'repack' : 'free')
+  const allFlipped = open.cards.every(c => p.flipped.has(c.id))
   let body: string
   if (!p.ripped) {
-    body = `<p class="muted">Click the pack to rip it open</p><div class="bigpack p-${p.kind}" id="rip">${PACK_NAMES[p.kind].toUpperCase()}</div>`
+    const url = new URL(`../art/packaging/boosters/${kind}.png`, import.meta.url).href
+    body = `<button class="package-button" id="rip" aria-label="Rip open ${PACK_NAMES[kind]}"><img src="${url}" width="72" height="104" alt=""></button><p class="muted">Rip it open.</p>`
   } else {
-    const pulls = p.contents.cards.map(c => {
-      if (!p.flipped.has(c.id)) return `<div class="pull"><div class="glowback" style="--glow:${glowFor(c)}" data-flip="${c.id}"></div><span class="muted" style="font-size:12px">?</span></div>`
+    const pulls = open.cards.map(c => {
+      if (!p.flipped.has(c.id)) return `<div class="pull"><div class="glowback" style="--glow:${glowFor(c)}" data-flip="${c.id}"></div><span class="muted small">?</span></div>`
       const deck = p.toDeck.has(c.id)
-      return `<div class="pull reveal">${cardHtml(c)}<button class="${deck ? '' : 'ghost'}" data-sort="${c.id}" style="padding:4px 10px;min-height:28px;font-size:12px">${deck ? 'Deck' : 'Binder'}</button></div>`
+      return `<div class="pull reveal">${cardHtml(c)}<button class="${deck ? '' : 'ghost'}" data-sort="${c.id}">${deck ? 'Deck' : 'Binder'}</button></div>`
     })
-    if (allFlipped && p.contents.codeCard) pulls.push(`<div class="pull reveal"><div class="extra code">CODE CARD<br>${HAND_NAMES[p.contents.codeCard]} +1 level</div><span class="muted" style="font-size:12px">auto-applied</span></div>`)
-    if (allFlipped && p.contents.collectible) {
-      const def = getDef(p.contents.collectible.id)
-      const room = run.you.display.length < displaySlots(run.you)
-      pulls.push(`<div class="pull reveal"><div class="extra col">★ ${def.name}<br><span style="font-weight:400;font-size:11px;color:#d5cde8">${describe(p.contents.collectible)}</span></div><span class="muted" style="font-size:12px">${room ? 'goes in your case' : `case full, sells for $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}`}</span></div>`)
+    if (allFlipped && open.codeCard) pulls.push(`<div class="pull reveal"><div class="extra code">CODE CARD<br>${HAND_NAMES[open.codeCard]} +1 level</div><span class="muted small">auto-applied</span></div>`)
+    if (allFlipped && open.collectible) {
+      const def = getDef(open.collectible.id)
+      const room = v().me.display.length < v().me.displaySlots
+      pulls.push(`<div class="pull reveal"><div class="extra col">★ ${def.name}<br><span class="small" style="color:#d5cde8">${describe(open.collectible)}</span></div><span class="muted small">${room ? 'goes in your case' : `case full, sells for $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}`}</span></div>`)
     }
     body = `<div class="pulls">${pulls.join('')}</div>
-      <div class="row" style="justify-content:center">
-        ${allFlipped ? '<button id="done">Done</button>' : '<button class="ghost" id="all">Reveal all</button>'}
-      </div>`
+      <div class="row" style="justify-content:center">${allFlipped ? '<button id="done">Done</button>' : '<button class="ghost" id="all">Reveal all</button>'}</div>`
   }
-  let overlay = document.getElementById('overlay')
-  if (!overlay) {
-    overlay = document.createElement('div')
-    overlay.id = 'overlay'
-    overlay.className = 'overlay'
-    document.body.appendChild(overlay)
-  }
-  overlay.innerHTML = `<div class="packbox"><h2>${PACK_NAMES[p.kind]}</h2>${body}</div>`
+  const overlay = document.createElement('div')
+  overlay.className = 'overlay'
+  overlay.innerHTML = `<div class="packbox"><h2>${PACK_NAMES[kind]}</h2>${body}</div>`
+  document.body.appendChild(overlay)
 
-  const ripEl = document.getElementById('rip')
+  const ripEl = overlay.querySelector<HTMLButtonElement>('#rip')
   if (ripEl) ripEl.onclick = async () => {
+    ripEl.disabled = true
     ripEl.classList.add('shake')
     sfx.rip()
     await sleep(450)
     p.ripped = true
-    renderPack()
+    render()
+  }
+  const flip = (id: number) => {
+    if (p.flipped.has(id)) return
+    const card = open.cards.find(c => c.id === id)!
+    p.flipped.add(id)
+    sfx.flip(card.finish === 'prism' || card.stamp !== null)
   }
   overlay.querySelectorAll<HTMLElement>('[data-flip]').forEach(el => {
-    el.onclick = () => flipCard(Number(el.dataset.flip))
+    el.onclick = () => {
+      flip(Number(el.dataset.flip))
+      render()
+    }
   })
   overlay.querySelectorAll<HTMLElement>('[data-sort]').forEach(el => {
     el.onclick = () => {
       const id = Number(el.dataset.sort)
       if (p.toDeck.has(id)) p.toDeck.delete(id)
       else p.toDeck.add(id)
-      renderPack()
+      render()
     }
   })
   const allEl = document.getElementById('all')
   if (allEl) allEl.onclick = async () => {
-    for (const c of p.contents.cards) {
+    for (const c of open.cards) {
       if (p.flipped.has(c.id)) continue
-      flipCard(c.id)
+      flip(c.id)
+      render()
       await sleep(220)
     }
   }
   const doneEl = document.getElementById('done')
-  if (doneEl) doneEl.onclick = () => finishPack()
-}
-
-function flipCard(id: number): void {
-  if (!pack || pack.flipped.has(id)) return
-  const card = pack.contents.cards.find(c => c.id === id)
-  if (!card) throw new Error(`flipping unknown card ${id}`)
-  pack.flipped.add(id)
-  sfx.flip(card.finish === 'prism' || card.stamp !== null)
-  renderPack()
-}
-
-function finishPack(): void {
-  if (!pack) return
-  const p = pack
-  for (const c of p.contents.cards) takePull(run, c, p.toDeck.has(c.id))
-  if (p.contents.codeCard) run.you.levels[p.contents.codeCard]++
-  if (p.contents.collectible) {
-    if (run.you.display.length < displaySlots(run.you)) run.you.display.push(p.contents.collectible)
-    else run.you.bankroll += Math.floor(COLLECTIBLE_PRICE[getDef(p.contents.collectible.id).rarity] / 2)
+  if (doneEl) doneEl.onclick = () => {
+    const toDeck = [...p.toDeck]
+    pack = null
+    sfx.coin()
+    void dispatch({ type: 'sortPack', toDeck })
   }
-  sfx.coin()
-  document.getElementById('overlay')?.remove()
-  pack = null
-  p.then()
 }
 
 // ---------- shop ----------
-const PACK_TEXT: Record<PackKind, string> = {
-  free: '3 plain cards. One per shop. Binder them and sell when STONKS is hot.',
-  offbrand: '5 cheap cards. Lots of stamps, some damaged.',
-  repack: '4 cards other collectors sold. Some come pre-forged.',
-  collector: '3 cards, a Code Card, and a rare slot: collectible or Prism.',
-}
-
-function enterShop(): void {
-  shop = newShop(run.rng, run.mem, run.you.display, shopSleeve(run, 0))
-  renderShop()
-}
-
-// the binder: sell (STONKS hot cards pay more), send to grading, bin bulk
-function binderHtml(): string {
-  const bulkCount = [...run.you.pile, ...run.you.discard].filter(c => c.bulk).length
-  const gradeOk = run.you.bankroll - GRADING_PRICE >= 1
-  const cards = run.you.binder.map(c => {
-    const price = binderPrice(run, run.you, c)
-    const hot = price > sellPrice(c)
-    return `<div class="slot">${cardHtml(c, 'mini')}<button data-sellcard="${c.id}" class="${hot ? '' : 'ghost'}">Sell $${price}${hot ? ' 🔥' : ''}</button>${canGrade(c) ? `<button class="ghost" data-grade="${c.id}" ${gradeOk ? '' : 'disabled'}>Grade $${GRADING_PRICE}</button>` : ''}</div>`
-  })
-  return `<div class="panel" style="margin-top:14px">
-    <h3 style="margin-bottom:8px">Binder · STONKS today: <span class="hot">${stonksText(stonks(run))}</span></h3>
-    ${cards.length ? `<div class="binder">${cards.join('')}</div>` : '<p class="muted" style="font-size:13px">Empty. Pulls you send to the binder land here. It\'s the only place you can sell from.</p>'}
-    <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
-      <button class="ghost" id="binbulk" ${bulkCount === 0 || run.you.bankroll - bulkPrice(run.you) < 1 ? 'disabled' : ''}>Bin a Bulk for good · $${bulkPrice(run.you)} (${bulkCount} in deck)</button>
-      <button class="ghost" id="gradedeck" ${gradeOk ? '' : 'disabled'}>Grade a deck card · $${GRADING_PRICE}</button>
-    </div>
-  </div>`
-}
 
 function renderShop(): void {
-  if (!shop) return
-  const s = shop
-  const restockCost = restockPrice(s, freeRestocks(run.you))
-  const line = run.mem.rolledOver
-    ? '"What, you too good for my stuff? Fine. Prices are up."'
-    : isTournament(run.round) ? '"Big game next round. Got something special in the back."' : '"Fresh stock came in this morning. Take a look."'
-  const offers = s.offers.map((o, i) => {
-    const afford = run.you.bankroll - o.price >= 1 // keep $1 to sit at the table
-    if (o.type === 'pack') {
-      return `<div class="offer p-${o.kind} ${o.sold ? 'sold' : ''}"><h3>${PACK_NAMES[o.kind]}</h3><b>${o.price ? `$${o.price}` : 'FREE'}</b><p>${PACK_TEXT[o.kind]}</p>
-        <button data-buy="${i}" ${o.sold || !afford ? 'disabled' : ''}>${o.sold ? 'Opened' : 'Open'}</button></div>`
-    }
-    if (o.type === 'sleeve') {
-      const sl = getSleeve(o.id)
-      return `<div class="offer o-col ${o.sold ? 'sold' : ''}" style="outline:2px solid var(--gold)"><h3>Sleeve · ${sl.name}</h3><b>$${o.price} · run-wide</b><p>${sl.text}</p>
-        <button data-buy="${i}" ${o.sold || !afford ? 'disabled' : ''}>${o.sold ? 'Bought' : 'Buy'}</button></div>`
-    }
-    const def = getDef(o.owned.id)
-    const full = run.you.display.length >= displaySlots(run.you)
-    return `<div class="offer o-col ${o.sold ? 'sold' : ''}"><h3>${def.name}</h3><b>$${o.price} · ${def.rarity}</b><p>${describe(o.owned)}</p>
-      <button data-buy="${i}" ${o.sold || !afford || full ? 'disabled' : ''}>${o.sold ? 'Bought' : full ? 'Case full' : 'Buy'}</button></div>`
-  })
-  app.innerHTML = `${topHtml()}
-    <div class="main">
-      <div class="panel">
-        <div class="keeper"><div class="face">🧔</div><div class="bubble">${line}</div></div>
-        <div class="shopgrid">${offers.join('')}</div>
-        <div class="row" style="margin-top:14px;justify-content:space-between">
-          <button class="ghost" id="restock" ${run.you.bankroll - restockCost < 1 ? 'disabled' : ''}>Restock · ${restockCost ? `$${restockCost}` : 'free'}</button>
-          <button id="next">To the table · round ${run.round}</button>
-        </div>
-        ${binderHtml()}
-      </div>
-      <div>${caseHtml(true)}${levelsHtml()}</div>
-    </div>`
-
-  bindDeckViewer()
-  app.querySelectorAll<HTMLElement>('[data-buy]').forEach(el => {
-    el.onclick = () => buy(Number(el.dataset.buy))
-  })
-  app.querySelectorAll<HTMLElement>('[data-sell]').forEach(el => {
-    el.onclick = () => sellCollectible(Number(el.dataset.sell), renderShop)
-  })
-  app.querySelectorAll<HTMLElement>('[data-sellcard]').forEach(el => {
-    el.onclick = () => {
-      sellBinder(run, 0, Number(el.dataset.sellcard))
+  const view_ = v()
+  const me = view_.me
+  const shop = me.shop!
+  const toast = log.filter(l => l.startsWith('Back from grading') || l.startsWith('Scratched')).at(-1)?.replace(/<[^>]+>/g, '') ?? ''
+  showShop(app, {
+    view: view_,
+    toast,
+    clock: () => {
+      if (!online || !net) return ''
+      const d = online.deadlines[online.view.me.seat]
+      return d === null ? '' : `${Math.max(0, Math.ceil(net.msLeft(d) / 1000))}s`
+    },
+    canBuy: slot => can({ type: 'buy', slot }),
+    canRestock: can({ type: 'restock' }),
+    canBinBulk: can({ type: 'binBulk' }),
+    canGrade: !shop.shipped && !me.shipping,
+    onBuy: slot => {
       sfx.coin()
-      renderShop()
-    }
+      if (shop.offers[slot].type !== 'pack') keeperSays('Bon.')
+      void dispatch({ type: 'buy', slot })
+    },
+    onRestock: () => {
+      ringBell()
+      keeperSays('Pfff.')
+      void dispatch({ type: 'restock' })
+    },
+    onBinBulk: () => void dispatch({ type: 'binBulk' }),
+    onGrading: () => pickDeckCardToGrade(),
+    onBinder: () => {
+      binderOpen = true
+      binderPicked = new Set()
+      render()
+    },
+    onVitrine: () => {
+      vitrineOpen = true
+      render()
+    },
+    onPile: () => showDeckViewer(),
+    onLeave: () => void dispatch({ type: 'leaveShop' }),
   })
-  app.querySelectorAll<HTMLElement>('[data-grade]').forEach(el => {
-    el.onclick = () => {
-      sendToGrading(run, 0, Number(el.dataset.grade))
-      sfx.coin()
-      renderShop()
-    }
-  })
-  document.getElementById('binbulk')!.onclick = () => {
-    binBulk(run, 0)
-    sfx.coin()
-    renderShop()
-  }
-  document.getElementById('gradedeck')!.onclick = () => pickDeckCardToGrade()
-  document.getElementById('restock')!.onclick = () => {
-    if (run.you.bankroll - restockCost < 1) return
-    run.you.bankroll -= restockCost
-    shop = restock(s, run.rng, run.mem, run.you.display)
-    sfx.coin()
-    renderShop()
-  }
-  document.getElementById('next')!.onclick = () => startRound()
+  if (binderOpen) showBinder()
+  if (vitrineOpen) showVitrine()
 }
 
-// grading a deck card takes it out of your deck for a round
-function pickDeckCardToGrade(): void {
-  const cards = pileView([...run.you.pile, ...run.you.discard].filter(canGrade)).cards
+// the binder over the counter: tap cards to pick them, then sell them all. stonks-hot cards say so
+function showBinder(): void {
+  const view_ = v()
+  const me = view_.me
   const overlay = document.createElement('div')
   overlay.className = 'overlay'
-  overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>Grading desk · $${GRADING_PRICE}</h2>
-    <p class="muted">Pick a card. It's gone for a round and comes back graded 1–10. Fresh pulls grade higher.</p>
-    <div class="binder" style="justify-content:center">${cards.map(c => `<div class="slot" data-pickgrade="${c.id}" style="cursor:pointer">${cardHtml(c, 'mini')}</div>`).join('')}</div>
-    <div class="row" style="justify-content:center;margin-top:12px"><button class="ghost" id="cancelgrade">Cancel</button></div></div>`
   document.body.appendChild(overlay)
-  document.getElementById('cancelgrade')!.onclick = () => overlay.remove()
-  overlay.querySelectorAll<HTMLElement>('[data-pickgrade]').forEach(el => {
-    el.onclick = () => {
-      sendToGrading(run, 0, Number(el.dataset.pickgrade))
+  for (const id of binderPicked) if (!me.binder.some(c => c.id === id)) binderPicked.delete(id)
+  const paint = () => {
+    const cards = me.binder.map(c => {
+      const ok = can({ type: 'sell', cardId: c.id })
+      return `<div class="slot" data-pick="${c.id}" style="cursor:${ok ? 'pointer' : 'not-allowed'};opacity:${ok ? 1 : 0.5}">${cardHtml(c, `mini ${binderPicked.has(c.id) ? 'sel' : ''}`)}</div>`
+    })
+    const n = binderPicked.size
+    overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>Binder · ${me.binder.length}</h2>
+      <p class="muted">Tap cards to pick them, then sell. Today's hot: <span class="hot">${stonksText(view_.stonks)}</span>.</p>
+      ${cards.length ? `<div class="binder" style="justify-content:center">${cards.join('')}</div>` : '<p class="muted">Empty. Pulls you send to the binder land here.</p>'}
+      <div class="row" style="justify-content:center;margin-top:12px">
+        <button data-buy id="sellpicked" ${n ? '' : 'disabled'}>Sell ${n || ''} picked</button>
+        <button class="ghost" id="closebinder">Close</button>
+      </div></div>`
+    overlay.querySelectorAll<HTMLElement>('[data-pick]').forEach(el => {
+      el.onclick = () => {
+        const id = Number(el.dataset.pick)
+        if (!can({ type: 'sell', cardId: id })) return
+        if (binderPicked.has(id)) binderPicked.delete(id)
+        else binderPicked.add(id)
+        paint()
+      }
+    })
+    document.getElementById('closebinder')!.onclick = () => {
+      binderOpen = false
       overlay.remove()
+    }
+    document.getElementById('sellpicked')!.onclick = async () => {
+      const ids = [...binderPicked]
+      binderPicked = new Set()
       sfx.coin()
-      renderShop()
+      keeperSays('Mouais.')
+      for (const id of ids) await dispatch({ type: 'sell', cardId: id })
+    }
+  }
+  paint()
+}
+
+// your collectibles, sellable while you're in the shop
+function showVitrine(): void {
+  const overlay = document.createElement('div')
+  overlay.className = 'overlay'
+  overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>La Vitrine</h2>${caseHtml(true)}
+    <div class="row" style="justify-content:center;margin-top:12px"><button class="ghost" id="closevitrine">Close</button></div></div>`
+  document.body.appendChild(overlay)
+  overlay.querySelectorAll<HTMLElement>('[data-sellcol]').forEach(el => {
+    el.onclick = () => {
+      sfx.coin()
+      void dispatch({ type: 'sellCollectible', slot: Number(el.dataset.sellcol) })
     }
   })
+  document.getElementById('closevitrine')!.onclick = () => {
+    vitrineOpen = false
+    overlay.remove()
+  }
 }
 
-function buy(i: number): void {
-  if (!shop) return
-  const o = shop.offers[i]
-  if (o.sold || run.you.bankroll - o.price < 1) return
-  if (o.type === 'sleeve') {
-    if (o.price !== SLEEVE_PRICE) throw new Error('sleeve price drifted from the engine')
-    buySleeve(run, 0, o.id)
-    o.sold = true
-    sfx.gradeUp()
-    renderShop()
-    return
+function pickDeckCardToGrade(): void {
+  const me = v().me
+  let shipper: Shipper = 'poste'
+  const overlay = document.createElement('div')
+  overlay.className = 'overlay'
+  document.body.appendChild(overlay)
+  const paint = () => {
+    const cards = [...me.pile, ...me.discard, ...me.binder].filter(c => can({ type: 'ship', cardId: c.id, shipper }))
+    const shippers = (Object.keys(SHIPPERS) as Shipper[]).map(id => {
+      const sh = SHIPPERS[id]
+      return `<button class="${id === shipper ? '' : 'ghost'}" data-shipper="${id}" ${sh.price < me.bankroll ? '' : 'disabled'}>${sh.name} $${sh.price}<br><span class="small">${sh.text}</span></button>`
+    }).join('')
+    overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>Grading desk</h2>
+      <p class="muted">Ship one card. It's away for a round and comes back graded 1–10 at the next shop. Fresh pulls grade higher. One per shop.</p>
+      <div class="row" style="justify-content:center;gap:8px;flex-wrap:wrap">${shippers}</div>
+      <div class="binder" style="justify-content:center;margin-top:12px">${cards.map(c => `<div class="slot" data-pickgrade="${c.id}" style="cursor:pointer">${cardHtml(c, 'mini')}</div>`).join('')}</div>
+      <div class="row" style="justify-content:center;margin-top:12px"><button class="ghost" id="cancelgrade">Cancel</button></div></div>`
+    document.getElementById('cancelgrade')!.onclick = () => overlay.remove()
+    overlay.querySelectorAll<HTMLElement>('[data-shipper]').forEach(el => {
+      el.onclick = () => {
+        shipper = el.dataset.shipper as Shipper
+        paint()
+      }
+    })
+    overlay.querySelectorAll<HTMLElement>('[data-pickgrade]').forEach(el => {
+      el.onclick = () => {
+        sfx.coin()
+        void dispatch({ type: 'ship', cardId: Number(el.dataset.pickgrade), shipper })
+      }
+    })
   }
-  run.you.bankroll -= o.price
-  o.sold = true
-  if (o.type === 'collectible') {
-    if (run.you.display.length >= displaySlots(run.you)) throw new Error('bought a collectible with a full case')
-    run.you.display.push(o.owned)
-    sfx.coin()
-    renderShop()
-    return
-  }
-  showPack(o.kind, renderShop)
+  paint()
 }
 
-function sellCollectible(slot: number, then: () => void): void {
-  const owned: Owned | undefined = run.you.display[slot]
-  if (!owned) return
-  run.you.bankroll += Math.floor(COLLECTIBLE_PRICE[getDef(owned.id).rarity] / 2)
-  run.you.display.splice(slot, 1)
-  sfx.coin()
-  then()
+// a scratched checklist or wishlist: pick the card (and for a checklist, the new suit)
+function renderInsertPick(kind: 'checklist' | 'wishlist'): void {
+  const me = v().me
+  const cards = kind === 'wishlist' ? me.binder : [...me.pile, ...me.discard].filter(c => !c.bulk)
+  let picked: Card | null = null
+  const overlay = document.createElement('div')
+  overlay.className = 'overlay'
+  document.body.appendChild(overlay)
+  const paint = () => {
+    const suits = kind === 'checklist' && picked
+      ? `<div class="row" style="justify-content:center;margin-top:12px">${SUITS.filter(x => x !== picked!.suit).map(x => `<button data-suit="${x}">${SUIT_GLYPH[x]}</button>`).join('')}</div>`
+      : ''
+    overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>${INSERTS[kind].name}</h2><p class="muted">${INSERTS[kind].text}.</p>
+      <div class="binder" style="justify-content:center">${cards.map(c => `<div class="slot" data-ins="${c.id}" style="cursor:pointer">${cardHtml(c, `mini ${picked?.id === c.id ? 'sel' : ''}`)}</div>`).join('')}</div>${suits}</div>`
+    overlay.querySelectorAll<HTMLElement>('[data-ins]').forEach(el => {
+      el.onclick = () => {
+        const card = cards.find(c => c.id === Number(el.dataset.ins))!
+        if (kind === 'wishlist') {
+          log.push(`Scratched a <b class="gold">Wishlist</b>: ${cardName(card)} went into your deck.`)
+          return void dispatch({ type: 'useInsert', cardId: card.id, suit: null })
+        }
+        picked = card
+        paint()
+      }
+    })
+    overlay.querySelectorAll<HTMLElement>('[data-suit]').forEach(el => {
+      el.onclick = () => {
+        const suit = el.dataset.suit as Card['suit']
+        log.push(`Scratched a <b class="gold">Checklist</b>: ${cardName(picked!)} is now ${SUIT_GLYPH[suit]}.`)
+        void dispatch({ type: 'useInsert', cardId: picked!.id, suit })
+      }
+    })
+  }
+  paint()
 }
 
 // ---------- the table ----------
-function startRound(): void {
-  if (run.you.bankroll <= 0) throw new Error('sat down at the table with no bankroll')
-  // the rival shops and draws at the same time you do, off its own rng streams
-  const spent = botShop(run, 1, rivalStyle())
-  const full = handSize(run.you)
-  const yours = dealHand(run)
-  const oBest = botDeal(run, 1)
-  const opp = run.rival
-  const log = [run.round === 1
-    ? `Your rival opens a <b>${getStarter(run.rivalStarter).name}</b> and sits down with <b>$${opp.bankroll}</b>.`
-    : `Your rival ${spent > 0 ? `spent $${spent} in the shop` : 'skipped the shop'} and has <b>$${opp.bankroll}</b>.`]
-  if (isTableStart(run.round)) log.push(`<b>Table ${tableOf(run.round)}</b>: everything shuffled back into one pile.`)
-  if (yours.length < full) log.push(`The pile ran low: you only got <b>${yours.length}</b> cards.`)
-  table = {
-    opp, oppPlayed: oBest.played, oppEst: oBest.est?.total ?? 0,
-    selected: new Set(), oppMulls: oBest.mulls, locked: null, peek: null, betting: null,
-    log, duel: null, result: null, rivalResult: null, forgeKeep: null,
-  }
-  // an empty pile loses the round on the spot
-  if (yours.length === 0 || oBest.played.length === 0) {
-    const t = table
-    t.locked = []
-    const { ante, max } = tableBlinds(run)
-    const bankrolls: [number, number] = [run.you.bankroll, opp.bankroll]
-    const who: Seat | null = yours.length === 0 && oBest.played.length === 0 ? null : yours.length === 0 ? 0 : 1
-    t.log.push(who === 0 ? 'Your pile is empty. <b>You lose the round.</b>' : who === 1 ? 'Rival\'s pile is empty. <b>They lose the round.</b>' : 'Both piles are empty.')
-    t.betting = forfeit(startBetting(firstToAct(bankrolls, run.round), ante, max, bankrolls, [false, false], isTournament(run.round)), who)
-    renderTable()
-    void resolveRound()
-    return
-  }
-  renderTable()
+const BET_LABEL: Record<BetChoice, string> = { fold: 'Fold', forge: 'Flamber', min: 'Min', max: 'Max', match: 'Match' }
+
+// the rival's face: a mask and a name per difficulty. online opponents get a mask from their name
+type DuelRival = { name: string; mask: string; stamp: string; back: StarterId }
+const RIVALS: Record<Difficulty, DuelRival> = {
+  easy: { name: 'Le Lièvre', mask: 'hare', stamp: 'FACILE', back: 'classic' },
+  medium: { name: 'Scaramouche', mask: 'scaramouche', stamp: 'MOYEN', back: 'suited' },
+  hard: { name: 'Le Roi', mask: 'king_spades', stamp: 'GROS JOUEUR', back: 'highroller' },
+}
+const MASKS = ['domino', 'pierrot', 'arlequin', 'scaramouche', 'hare', 'fox', 'owl', 'king_spades', 'queen_hearts']
+
+function rivalFace(): DuelRival {
+  if (match) return RIVALS[difficulty]
+  const name = v().others[0].name
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return { name, mask: MASKS[h % MASKS.length], stamp: v().mode.toUpperCase(), back: 'standard' }
 }
 
-function rivalStyle() {
-  return getStyle(DIFFICULTIES[run.difficulty].style)
-}
-
-const ACTION_LABEL: Record<BetAction, string> = { fold: 'Fold', forge: 'Forge', min: 'Bet Min', max: 'Bet Max', call: 'Call', raise: 'Raise' }
+const plain = (html: string) => html.replace(/<[^>]+>/g, '')
 
 function renderTable(): void {
-  if (!table) return
-  const t = table
-  const { ante, max } = tableBlinds(run)
-  const lockedIds = new Set((t.locked ?? []).map(c => c.id))
+  const view_ = v()
+  const me = view_.me
+  const them = view_.others[0]
+  const settled = resultHold && view_.last !== null
 
-  // rival: you see their hand size, never how many they locked. face up at showdown
-  const showOpp = t.duel !== null
-  const oppCards = showOpp
-    ? t.oppPlayed.map(c => cardHtml(c, t.duel!.opp.scoringIds.includes(c.id) ? 'scoring' : 'dim')).join('')
-    : run.rival.hand.map((_, i) => (t.peek && i === 0 ? cardHtml(t.peek) : backHtml())).join('')
-
-  const yourCards = t.locked
-    ? t.locked.map(c => cardHtml(c, t.duel ? (t.duel.you.scoringIds.includes(c.id) ? 'scoring' : 'dim') : '')).join('') +
-      run.you.hand.filter(c => !lockedIds.has(c.id)).map(c => cardHtml(c, 'dim')).join('')
-    : run.you.hand.map(c => cardHtml(c, t.selected.has(c.id) ? 'sel' : '')).join('')
-
-  let controls = ''
-  if (!t.locked) {
-    const n = t.selected.size
-    const mullOk = canMulligan(run, run.you) && n > 0
-    const mullCost = freeMulligan(run.you) ? 'free' : 'hand −1 this Table'
-    controls = `<div class="bets">
-      <button class="ghost" id="mull" ${mullOk ? '' : 'disabled'}>Mulligan ${n || ''} (${twistFor(run)?.id === 'colddeck' ? 'cold deck' : mullCost})</button>
-      <button id="lock" ${n < 1 || n > PLAY_SIZE ? 'disabled' : ''}>Lock in ${n}</button>
-    </div><p class="center muted" style="font-size:13px">Pick 1–${PLAY_SIZE} cards to play. Played cards are out until the next Table, the rest go back into the pile. Fold or forge mucks the whole hand.</p>`
-  } else if (t.betting && !t.betting.outcome && t.betting.toAct === 0) {
-    const legal = legalActions(t.betting)
-    const amount = (a: BetAction) => {
-      const b = t.betting!
-      if (a === 'min') return ` $${b.minStake}`
-      if (a === 'max' || a === 'raise') return ` $${b.maxStake}`
-      if (a === 'call') return ` $${b.committed[1]}`
-      if (a === 'fold' || a === 'forge') return ` (lose $${b.committed[0]})`
-      return ''
+  let slips: Slip[] = []
+  let hint = ''
+  if (settled) {
+    if (!counting) slips = [{ label: view_.phase === 'over' ? 'See results' : 'Continue', kind: 'continue', primary: true, enabled: true, onClick: () => {
+      resultHold = false
+      if (match?.phase === 'over') saveScore()
+      render()
+    } }]
+  } else if (view_.phase === 'deal' && !me.locked) {
+    const n = selected.size
+    const picked = me.hand.filter(c => selected.has(c.id))
+    const slots = playSlots(picked)
+    const mullOk = n > 0 && can({ type: 'mulligan', cardIds: [...selected] })
+    const cost = view_.twist?.id === 'colddeck' ? 'cold deck' : me.freeMulligan ? 'free' : 'hand −1'
+    hint = !n ? `Pick 1–${PLAY_SIZE} cards to play. The rest go back in the pile.` : slots > n ? `Those take ${slots} of your ${PLAY_SIZE} slots.` : 'Lock them in to bet, or mulligan them for new ones.'
+    slips = [
+      { label: 'Mulligan', price: n ? cost : '', kind: 'mulligan', enabled: mullOk, onClick: () => {
+        const tossed = [...selected]
+        selected = new Set()
+        sfx.flip(false)
+        log.push(`Mulliganed ${tossed.length}${me.freeMulligan ? ' (free)' : ', hand size −1 this Table'}.`)
+        void dispatch({ type: 'mulligan', cardIds: tossed })
+      } },
+      { label: 'Lock in', price: n ? `${n} card${n > 1 ? 's' : ''}` : '', kind: 'lock', primary: n >= 1 && slots <= PLAY_SIZE, enabled: n >= 1 && slots <= PLAY_SIZE, onClick: () => {
+        lastLocked = picked
+        const ids = [...selected]
+        selected = new Set()
+        void dispatch({ type: 'lock', cardIds: ids })
+      } },
+    ]
+  } else if (view_.phase === 'bet' && view_.bet?.toAct === me.seat) {
+    const b = view_.bet
+    const price = (c: BetChoice) => {
+      if (c === 'min') return `$${b.minStake}`
+      if (c === 'max' || c === 'match') return `$${b.maxStake}`
+      if (c === 'forge') return `$${b.forgePrice}`
+      return b.committed[0] ? `−$${b.committed[0]}` : ''
     }
-    controls = `<div class="bets">${legal.map(a => `<button data-act="${a}" class="${a === 'fold' ? 'ghost' : a === 'forge' ? 'danger' : ''}">${ACTION_LABEL[a]}${amount(a)}</button>`).join('')}</div>`
-    if (legal.includes('forge') && t.locked) {
-      const plan = forgePlan(t.locked)
-      if (plan) controls += `<p class="center muted" style="font-size:13px">${forgePreview(plan)}</p>`
-    }
-  } else if (t.result) {
-    controls = `<div class="bets"><button id="cont">${run.over ? 'See results' : 'Continue to shop'}</button></div>`
-  }
+    // all four always show, the ones you can't use are struck through
+    const all: BetChoice[] = b.options.includes('match') ? ['match', 'fold'] : ['fold', 'forge', 'min', 'max']
+    slips = all.map(c => ({ label: BET_LABEL[c], price: price(c), stamp: c, kind: c, enabled: b.options.includes(c), onClick: () => {
+      log.push(`You: <b>${BET_LABEL[c]}</b>`)
+      void dispatch({ type: 'bet', choice: c })
+    } }))
+    hint = b.forced ? 'Tournament round: no folding, no flambé.' : b.underdog ? "You're 2× behind: you see one of their cards and flambé for the Min." : ''
+  } else hint = `Waiting on ${them.name}…`
 
-  const duel = t.duel
-    ? `<div class="duel">${meterHtml('You', 'you', t.duel.you, t.duel.opp)}${meterHtml('Rival', 'opp', t.duel.opp, t.duel.you)}</div>`
-    : ''
-
-  const resultHtml = t.result ? resultBanner(t.result) : ''
-
-  const twist = twistFor(run)
-  app.innerHTML = `${topHtml()}
-    <div class="main">
-      <div class="panel">
-        ${twist ? twistBanner(twist) : ''}
-        <div class="muted" style="font-size:12px;letter-spacing:2px;text-transform:uppercase">Rival · ${getStarter(run.rivalStarter).name} · ${t.opp.display.length} collectibles · ${deckSize(t.opp)} cards · hand ${run.rival.hand.length} · ${t.oppMulls} mulligan${t.oppMulls === 1 ? '' : 's'}</div>
-        <div class="hand" style="margin:8px 0 4px">${oppCards}</div>
-        ${duel}
-        <div class="log">${t.log.slice(-3).map(l => `<div>${l}</div>`).join('')}</div>
-        ${resultHtml}
-        <div class="hand" style="margin-top:14px" id="yourhand">${yourCards}</div>
-        ${controls}
-        <p class="center muted" style="font-size:12px;margin-top:8px">Ante $${ante} · Max $${max} · hand size ${handSize(run.you)} · lower bankroll acts second · showdowns pay your paycheck, the winner gets a house bonus${isTournament(run.round) ? ` (${houseMult(run, run.you)}× ante for you with momentum)` : ''}</p>
-      </div>
-      <div>${caseHtml(false)}${levelsHtml()}</div>
-    </div>`
-
-  bindDeckViewer()
-  if (!t.locked) {
-    app.querySelectorAll<HTMLElement>('#yourhand .card').forEach(el => {
-      el.onclick = () => {
-        const id = Number(el.dataset.id)
-        if (t.selected.has(id)) t.selected.delete(id)
-        else t.selected.add(id)
-        renderTable()
+  const deadline = online ? online.deadlines[me.seat] : null
+  showDuel(app, {
+    view: view_,
+    settled,
+    counting,
+    selected,
+    lastLocked,
+    slips,
+    hint,
+    rival: rivalFace(),
+    myMask: 'domino_red',
+    toast: plain(log[log.length - 1] ?? ''),
+    clock: () => (deadline === null || !net ? '' : `${Math.max(0, Math.ceil(net.msLeft(deadline) / 1000))}s`),
+    onCard: id => {
+      // a beer-stained pair is picked and dropped together
+      const mate = stuckMate(me.hand.find(c => c.id === id)!, me.hand)
+      const on = !selected.has(id)
+      for (const x of mate ? [id, mate.id] : [id]) {
+        if (on) selected.add(x)
+        else selected.delete(x)
       }
-    })
-    document.getElementById('mull')!.onclick = () => doMulligan()
-    document.getElementById('lock')!.onclick = () => lockIn()
-  }
-  app.querySelectorAll<HTMLElement>('[data-act]').forEach(el => {
-    el.onclick = () => void playerAct(el.dataset.act as BetAction)
+      sfx.flip(false)
+      render()
+    },
+    onPile: () => showDeckViewer(),
   })
-  const cont = document.getElementById('cont')
-  if (cont) cont.onclick = () => {
-    if (run.over) return renderOver()
-    nextRound(run)
-    enterShop()
-  }
-}
-
-function meterHtml(who: string, side: 'you' | 'opp', mine: Appraisal, theirs: Appraisal): string {
-  if (counting) {
-    return `<div class="meter" id="m-${side}"><div class="who">${who}</div><div class="hand"></div>
-      <div class="math"><span class="v">0</span> × <span class="h">0</span><span class="g"></span></div>
-      <div class="total">0</div><div class="step"></div></div>`
-  }
-  const w = showdownWinner(run, side === 'you' ? mine.total : theirs.total, side === 'you' ? theirs.total : mine.total)
-  const won = w === (side === 'you' ? 0 : 1) ? 'winner' : ''
-  return `<div class="meter ${won}" id="m-${side}"><div class="who">${who}</div><div class="hand">${handLabel(mine)}</div>
-    <div class="math"><span class="v">${fmt(mine.value)}</span> × <span class="h">${fmt(mine.hype)}</span><span class="g">${mine.grade > 0 ? ` × 2^${mine.grade}` : ''}</span></div>
-    <div class="total">${fmt(mine.total)}</div><div class="step"></div></div>`
 }
 
 function handLabel(a: Appraisal): string {
   return [a.hand, ...a.bonus].map(h => HAND_NAMES[h]).join(' + ')
 }
 
-function resultBanner(r: RoundResult): string {
-  const text = {
-    win: ['You take the pot', 'good'], loss: ['Rival takes it', 'bad'], tie: ['Dead even, nobody pays', ''],
-    fold: ['You folded', 'bad'], forge: ['Forged!', 'good'],
-  }[r.outcome]
-  const inc = r.income
-  const incomeParts = [inc.paycheck ? `paycheck +$${inc.paycheck}` : 'no paycheck (no showdown)']
-  if (inc.house) incomeParts.push(`house bonus +$${inc.house}${isTournament(run.round) ? ` (${houseMult(run, run.you)}× ante with momentum)` : ''}`)
-  if (inc.interest) incomeParts.push(`interest +$${inc.interest}`)
-  if (inc.streak) incomeParts.push(`streak +$${inc.streak}`)
-  if (inc.sticker) incomeParts.push(`price sticker +$${inc.sticker}`)
-  if (inc.gold) incomeParts.push(`gold border ${inc.gold > 0 ? '+' : '−'}$${Math.abs(inc.gold)}`)
-  const forged = r.forged ? `<div class="center" style="margin-top:6px">New card in your deck: ${cardHtml(r.forged).replace('class="card', 'style="display:inline-flex;vertical-align:middle" class="card')}</div>` : ''
-  const ground = r.ground ? `<div class="center muted">Folding ground your <b class="gold">${cardName(r.ground)}</b> up to +${r.ground.grind} Value. That's it. That's the build.</div>` : ''
-  const bulk = r.bulk.length ? `<div class="center muted">The forge left <b>${r.bulk.length} Bulk</b> in your deck (+5 Value each when played).</div>` : ''
-  const torn = r.torn.length ? `<div class="center muted">Torn up: ${r.torn.map(cardName).join(', ')}</div>` : ''
-  const income = run.over ? '' : `<div class="center muted">${incomeParts.join(' · ')}</div>`
-  const bust = run.over && run.rival.bankroll === 0 ? `<div class="banner good">Your rival is busted. The table is yours.</div>` : ''
-  return `${bust}<div class="banner ${text[1]}">${text[0]} ${r.delta > 0 ? `+$${r.delta}` : r.delta < 0 ? `−$${-r.delta}` : ''}</div>${income}${forged}${bulk}${ground}${torn}`
-}
-
-function doMulligan(): void {
-  if (!table || table.selected.size === 0 || !canMulligan(run, run.you)) return
-  const tossed = table.selected.size
-  const res = mulligan(run, 0, [...table.selected])
-  table.selected.clear()
-  table.log.push(`Mulliganed ${tossed}, drew ${res.drawn.length}${res.free ? ' (free)' : `. Hand size is ${handSize(run.you)} for the rest of this Table`}.`)
-  sfx.flip(false)
-  renderTable()
-}
-
-function lockIn(): void {
-  if (!table || table.selected.size < 1 || table.selected.size > PLAY_SIZE) return
-  const t = table
-  t.locked = run.you.hand.filter(c => t.selected.has(c.id))
-  const bankrolls: [number, number] = [run.you.bankroll, t.opp.bankroll]
-  if (canPeek(0, bankrolls)) {
-    t.peek = t.oppPlayed[Math.floor(run.rng() * t.oppPlayed.length)]
-    t.log.push(`You're the underdog: you <b>peek</b> at one of their locked cards.`)
-  }
-  const { ante, max } = tableBlinds(run)
-  const forgeable: [boolean, boolean] = [canForge(t.locked), canForge(t.oppPlayed)]
-  const first = firstToAct(bankrolls, run.round)
-  t.betting = startBetting(first, ante, max, bankrolls, forgeable, isTournament(run.round))
-  t.log.push(first === 0 ? 'You act first.' : 'Rival acts first, you see their bet.')
-  renderTable()
-  void botTurns()
-}
-
-async function botTurns(): Promise<void> {
-  if (!table?.betting) return
-  const t = table
-  while (t.betting && !t.betting.outcome && t.betting.toAct === 1) {
-    busy = true
-    await sleep(800)
-    const b: Betting = t.betting
-    const a = botAct(b, legalActions(b), t.oppEst, run, rivalStyle(), run.rng)
-    t.betting = act(b, a)
-    t.log.push(`Rival: <b>${ACTION_LABEL[a]}</b>${a === 'max' || a === 'raise' ? ` ($${b.maxStake})` : ''}`)
-    renderTable()
-  }
-  busy = false
-  if (t.betting?.outcome) void resolveRound()
-}
-
-function forgePreview(plan: ForgePlan): string {
-  const into = `${rankLabel(plan.rank)}${'★'.repeat(plan.tier)}`
-  const traits = plan.candidates.map(traitName).join(', ')
-  const pick = plan.candidates.length > plan.tier ? ` · you keep ${plan.tier} of ${plan.candidates.length}` : ''
-  return `Forge folds and merges ${plan.merged.map(cardName).join(' ')} into <b class="gold">${into}</b> (${traits}${pick})`
-}
-
-// over the trait cap: let the player pick which traits the new card keeps, then forge
-// resolves null if they back out, then nothing happens and they can pick another action
-function chooseTraits(plan: ForgePlan): Promise<Trait[] | null> {
-  return new Promise(resolve => {
-    const keep = new Set<number>(autoKeep(plan).map(t => plan.candidates.indexOf(t)))
-    const overlay = document.createElement('div')
-    overlay.className = 'overlay'
-    document.body.appendChild(overlay)
-    const draw = () => {
-      overlay.innerHTML = `<div class="packbox panel" style="max-width:440px">
-        <h2>${rankLabel(plan.rank)}${'★'.repeat(plan.tier)} holds ${plan.tier} trait${plan.tier > 1 ? 's' : ''}</h2>
-        <p class="muted">Pick which ones to keep.</p>
-        <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin:12px 0">
-          ${plan.candidates.map((t, i) => `<label style="cursor:pointer"><input type="checkbox" data-t="${i}" ${keep.has(i) ? 'checked' : ''}> <b>${traitName(t)}</b></label>`).join('')}
-        </div>
-        <div class="row" style="justify-content:center"><button class="ghost" id="cancel">Cancel</button><button id="keep" ${keep.size !== plan.tier ? 'disabled' : ''}>Forge it (${keep.size}/${plan.tier})</button></div>
-      </div>`
-      overlay.querySelectorAll<HTMLInputElement>('[data-t]').forEach(el => {
-        el.onchange = () => {
-          const i = Number(el.dataset.t)
-          if (el.checked) keep.add(i)
-          else keep.delete(i)
-          draw()
-        }
-      })
-      document.getElementById('cancel')!.onclick = () => {
-        document.body.removeChild(overlay)
-        resolve(null)
+// over the trait cap: pick which traits the new card keeps
+function renderForgePick(plan: ForgePlan): void {
+  const keep = new Set<number>(autoKeep(plan).map(t => plan.candidates.indexOf(t)))
+  const overlay = document.createElement('div')
+  overlay.className = 'overlay'
+  document.body.appendChild(overlay)
+  const paint = () => {
+    overlay.innerHTML = `<div class="packbox panel" style="max-width:440px">
+      <h2>${rankLabel(plan.rank)}${'★'.repeat(plan.tier)} holds ${plan.tier} trait${plan.tier > 1 ? 's' : ''}</h2>
+      <p class="muted">Pick which ones to keep.</p>
+      <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin:12px 0">
+        ${plan.candidates.map((t, i) => `<label style="cursor:pointer"><input type="checkbox" data-t="${i}" ${keep.has(i) ? 'checked' : ''}> <b>${traitName(t)}</b></label>`).join('')}
+      </div>
+      <div class="row" style="justify-content:center"><button id="keep" ${keep.size !== plan.tier ? 'disabled' : ''}>Flambé it (${keep.size}/${plan.tier})</button></div>
+    </div>`
+    overlay.querySelectorAll<HTMLInputElement>('[data-t]').forEach(el => {
+      el.onchange = () => {
+        const i = Number(el.dataset.t)
+        if (el.checked) keep.add(i)
+        else keep.delete(i)
+        paint()
       }
-      document.getElementById('keep')!.onclick = () => {
-        if (keep.size !== plan.tier) return
-        document.body.removeChild(overlay)
-        resolve([...keep].map(i => plan.candidates[i]))
-      }
-    }
-    draw()
-  })
-}
-
-async function playerAct(a: BetAction): Promise<void> {
-  if (!table?.betting || busy) return
-  if (a === 'forge' && table.locked) {
-    const plan = forgePlan(table.locked)
-    if (!plan) throw new Error('forge offered on a hand that cannot forge')
-    table.forgeKeep = null
-    if (plan.candidates.length > plan.tier) {
-      busy = true
-      const picked = await chooseTraits(plan)
-      busy = false
-      if (!picked) return
-      table.forgeKeep = picked
+    })
+    document.getElementById('keep')!.onclick = () => {
+      if (keep.size !== plan.tier) return
+      const traits: Trait[] = [...keep].map(i => plan.candidates[i])
+      sfx.gradeUp()
+      void dispatch({ type: 'forgeKeep', traits })
     }
   }
-  table.betting = act(table.betting, a)
-  table.log.push(`You: <b>${ACTION_LABEL[a]}</b>`)
-  renderTable()
-  if (table.betting.outcome) void resolveRound()
-  else void botTurns()
-}
-
-async function resolveRound(): Promise<void> {
-  if (!table?.betting?.outcome || !table.locked) return
-  const t = table
-  busy = true
-  const b = t.betting!
-  let winner: Seat | null = null
-  let scoring: [number[], number[]] = [[], []]
-  if (b.outcome!.kind === 'showdown' && t.locked!.length && t.oppPlayed.length) {
-    const betMax = (s: Seat) => b.maxStake > b.minStake && b.committed[s] === b.maxStake
-    const you = appraiseFor(run, run.you, t.locked!, betMax(0), run.rng)
-    const opp = appraiseFor(run, t.opp, t.oppPlayed, betMax(1), run.rng)
-    t.duel = { you, opp }
-    counting = true
-    renderTable()
-    await countUp(you, opp)
-    counting = false
-    winner = showdownWinner(run, you.total, opp.total)
-    scoring = [you.scoringIds, opp.scoringIds]
-    if (you.total > best.total) best = { total: you.total, hand: handLabel(you) }
-    if (winner !== null) document.getElementById(winner === 0 ? 'm-you' : 'm-opp')?.classList.add('winner')
-    if (winner === 0) sfx.win()
-    else if (winner === 1) sfx.lose()
-    await sleep(700)
-  } else if (b.outcome!.kind === 'fold' && b.outcome!.by === 1) {
-    t.log.push('Rival folds. Their ante is yours.')
-    sfx.coin()
-  } else if (b.outcome!.kind === 'forge' && b.outcome!.by === 1) {
-    t.log.push('Rival forges their hand and walks away.')
-  } else if (b.outcome!.kind === 'fold' && b.outcome!.by === 0) {
-    t.log.push('You fold.')
-  }
-  const [mine, theirs] = finishRound(run, b, winner, [t.locked!, t.oppPlayed], scoring, t.forgeKeep)
-  t.result = mine
-  t.rivalResult = theirs
-  if (theirs.forged) t.log.push(`Rival forged a <b class="gold">${cardName(theirs.forged)}</b> into their deck.`)
-  if (t.result.outcome === 'forge') sfx.gradeUp()
-  if (run.over) saveScore()
-  busy = false
-  renderTable()
-}
-
-// both appraisals tick up side by side, one step at a time, so it stays tense to the end
-async function countUp(you: Appraisal, opp: Appraisal): Promise<void> {
-  const sides = [
-    { a: you, el: document.getElementById('m-you')!, v: 0, h: 0, g: 0 },
-    { a: opp, el: document.getElementById('m-opp')!, v: 0, h: 0, g: 0 },
-  ]
-  const steps = Math.max(you.steps.length, opp.steps.length)
-  for (let i = 0; i < steps; i++) {
-    let gradeHit = false
-    for (const s of sides) {
-      const step: Step | undefined = s.a.steps[i]
-      if (!step) continue
-      s.v += step.value
-      s.h += step.hype
-      s.g += step.grade
-      if (step.grade) gradeHit = true
-      if (i <= s.a.bonus.length) s.el.querySelector('.hand')!.textContent = handLabel({ ...s.a, bonus: s.a.bonus.slice(0, i) })
-      s.el.querySelector('.step')!.textContent = i === 0 ? '' : stepLabel(step, s === sides[0] ? run.you : table!.opp)
-      s.el.querySelector('.v')!.textContent = fmt(s.v)
-      s.el.querySelector('.h')!.textContent = fmt(Math.max(1, s.h))
-      s.el.querySelector('.g')!.textContent = s.g > 0 ? ` × 2^${s.g}` : ''
-      const total = s.el.querySelector('.total')!
-      total.textContent = fmt(s.v * Math.max(1, s.h) * 2 ** s.g)
-      total.classList.remove('bump')
-      void (total as HTMLElement).offsetWidth
-      total.classList.add('bump')
-      if (step.cardId !== null) document.querySelector(`.card[data-id="${step.cardId}"]`)?.classList.add('pulse')
-      if (step.slot !== null && s === sides[0]) {
-        const slot = document.querySelector(`.item[data-slot="${step.slot}"]`)
-        slot?.classList.remove('fire')
-        void (slot as HTMLElement | null)?.offsetWidth
-        slot?.classList.add('fire')
-      }
-    }
-    if (gradeHit) sfx.gradeUp()
-    else sfx.tick(i)
-    await sleep(Math.max(110, 320 - i * 14))
-    document.querySelectorAll('.card.pulse').forEach(el => el.classList.remove('pulse'))
-  }
-  for (const s of sides) {
-    if (s.v * Math.max(1, s.h) * 2 ** s.g !== s.a.total) throw new Error('count-up does not match appraisal')
-  }
-}
-
-function stepLabel(step: Step, owner: Player): string {
-  const parts: string[] = []
-  if (step.value) parts.push(`${step.value > 0 ? '+' : ''}${step.value} Value`)
-  if (step.hype) parts.push(`${step.hype > 0 ? '+' : ''}${step.hype} Hype`)
-  if (step.grade) parts.push(`+${step.grade} Grade`)
-  let who = step.label
-  if (step.label === 'card' && step.cardId !== null) {
-    const card = [...allCards(owner), ...(table?.locked ?? []), ...(table?.oppPlayed ?? [])].find(c => c.id === step.cardId)
-    who = card ? cardName(card) : 'card'
-  }
-  return `${who}: ${parts.join(', ')}`
+  paint()
 }
 
 // ---------- end of run ----------
 function renderOver(): void {
-  const lb = leaderboard(run.seed, run.difficulty)
+  const view_ = v()
+  const res = view_.result!
+  const me = view_.me
+  const them = view_.others[0]
+  const won = res.winner === me.seat
+  // the match ends in the round someone busts, so view_.round is the bust round
+  const how = won ? (!them.alive ? `Busted ${them.name} in round ${view_.round}. ` : 'Chip lead after round 12. ') : ''
+  const score = view_.mode === 'solo' || view_.mode === 'daily' ? `Score <b class="gold">${fmt(res.scores[me.seat])}</b> pts` : ''
+  const seed = match ? ` · seed <b>${match.config.seed}</b>` : ''
   app.innerHTML = `<div class="title"><div>
-    <h1>${run.won ? 'CLEARED<br><span>THE TABLE</span>' : 'BUSTED'}</h1>
-    <p style="font-size:20px">${run.won ? `${run.rival.bankroll === 0 ? `Busted your rival in round ${run.round}. ` : ''}Final bankroll <b class="gold">$${run.you.bankroll}</b> × ${DIFFICULTIES[run.difficulty].scoreMult} = <b class="gold">${fmt(runScore(run))}</b> pts` : `Out in round ${run.round}`}</p>
-    <p class="muted">Best appraisal: <b class="gold">${fmt(best.total)}</b>${best.hand ? ` (${best.hand})` : ''} · seed <b>${run.seed}</b> · ${run.you.display.length} collectibles · ${deckSize(run.you)} cards</p>
+    <h1>${won ? 'TOOK<br><span>THE TABLE</span>' : 'BUSTED'}</h1>
+    <p class="big">${won ? `${how}${score}` : me.alive ? 'Behind on chips after round 12' : `Out in round ${view_.round}`}</p>
+    <p class="muted">Best appraisal: <b class="gold">${fmt(best.total)}</b>${best.hand ? ` (${best.hand})` : ''}${seed} · you $${me.bankroll} vs ${them.name} $${them.bankroll}</p>
     <div class="row" style="justify-content:center;margin-top:14px">
-      <button id="again">Same seed again</button>
+      ${match ? '<button id="again">Same seed again</button>' : ''}
       <button class="ghost" id="menu">Main menu</button>
     </div>
-    ${lbTable(`Leaderboard · ${run.seed} · ${DIFFICULTIES[run.difficulty].name}`, lb)}
+    ${match ? lbTable(`Leaderboard · ${match.config.seed} · ${DIFFICULTIES[difficulty].name}`, leaderboard(match.config.seed, difficulty)) : ''}
+    ${view_.mode === 'daily' ? '<div id="board"></div>' : ''}
   </div></div>`
-  document.getElementById('again')!.onclick = () => {
-    difficulty = run.difficulty
-    startRun(run.seed)
+  if (match) document.getElementById('again')!.onclick = () => startRun(match!.config.seed)
+  document.getElementById('menu')!.onclick = () => {
+    match = null
+    if (online) leaveOnline()
+    else renderTitle()
   }
-  document.getElementById('menu')!.onclick = () => renderTitle()
+  if (view_.mode === 'daily') void fillBoard()
 }
 
-// collectible count sanity: the shop's no-repeat rule needs a pool bigger than one shop visit
-if (COLLECTIBLES.length < 4) throw new Error('collectible pool too small for the shop')
+// ---------- boot ----------
+const QUICK = import.meta.env.DEV && new URLSearchParams(location.search).has('quick')
+// already signed in (cookie) = straight online. no server (offline vite, plane) = solo only
+api<{ player: PlayerInfo | null }>('/api/me').then(r => {
+  player = r.player
+  if (player && !QUICK) startNet() // ?quick stays offline
+  else if (joinCode) notice = `Pick a name to join room ${joinCode}`
+  if (!online && !match) renderTitle() // don't draw over a solo run started before this came back
+}, err => {
+  console.warn('no game server, online play is off:', err)
+})
 
-renderTitle()
+await Promise.all([loadArt(), loadFonts()])
+await Promise.all([loadLogo(), loadTitle()])
+artReady = true
+if (joinCode) panTo(2) // came in on a room link: start down in the sewers, where joining happens
+if (QUICK) quickStart()
+else renderTitle()
