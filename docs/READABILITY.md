@@ -86,7 +86,7 @@ One sprite, tinted per action in code, the same way card pips work (CARDS.md §2
 | Primary idle (progress only) | same, plus a soft brass glow behind it | scale 1.00 → 1.03 → 1.00 over 1.2 s, glow breathes with it |
 | Hover | face lifts to 4 px above the plinth, 1px cream outline | `juiceUp` 0.12 the moment hover starts, a ±2° wobble that settles in 0.25 s |
 | Press | face drops onto the plinth (0 px gap) | 60 ms down, the ink stamp (`hud/stamp/<choice>`) slams on at 2× → 1×, coin sfx, then the ticket slides away |
-| Disabled | flat `#2e2320` face, no plinth, strike line, dim label | none, no hover |
+| Disabled | flat `#2e2320` face, no plinth, strike line through the label, the reason in the price chip's spot (§10) | none, no hover |
 | Appearing | slides in from the right with spring overshoot, staggered 40 ms per ticket | |
 
 ## 6. Other interactables
@@ -125,10 +125,46 @@ The right edge is the **action column** (x 508–634): the latest log line, the 
 - [ ] Does disabled read as "off" rather than "broken"?
 - [ ] Is every word over the world outlined?
 - [ ] Is every hit area at least 96×22 art px?
+- [ ] Does every change of state get its own beat (§10), or does something just jump?
 
-## 10. Still open
+## 10. Beats
+
+Built Nov 17 2026. §1–9 make it clear what you can press. This section makes it clear **what just happened and whose turn it is**. It came from a playtest: when the richer rival folded first, the round went straight from Lock in to the tally, and it read as "sometimes it just plays the hand."
+
+### The rules
+
+1. **Big.** Nothing new is smaller than a ticket. Callouts use the Didone, and every word over the felt is outlined (§8). The bar is "readable from across the room at the demo."
+2. **Driven by the view, not the bot.** Every beat comes from `view.bet` (`first`, `choices`, `toAct`, `why`) or `view.last` (`ended`, `bets`), never from the local bot loop. That way it works the same online, where the rival's move arrives from the server.
+3. **One beat at a time, skippable.** Each beat holds long enough that you can't miss it. A click, Space or Enter skips ahead. Nothing ever jumps straight to the next state.
+
+### The beats, in round order
+
+| Beat | When | What you see | Time |
+|---|---|---|---|
+| **Round track** | always, at the top center | `Pick » Bets » Showdown » Tally`, the current step in brass. A round that ends early crosses out Showdown, with *folded* / *flambéd* / *no cards* under it | always on |
+| **Lock in** | you lock | your cards fly face down onto your spots and the rest of the hand dims and sinks. The rival's spot gets a squared stack once they've locked (never their count) | spring |
+| **1er token** | betting starts | a brass puck marked **1er** springs from the pot onto the first bettor's plate. Until the first bet lands: *"You bet first / Scaramouche bets first"* in Didone and why (*richer goes first*, *tied: alternates*) | until the round ends |
+| **The rival thinks** | rival to act | their head tips and nods. The column reads **SCARAMOUCHE** *is deciding…* | 1.2 s when they open, 0.7 s otherwise |
+| **Bet lands** | any bet | a full-size ticket in its §4 color slams onto the felt with its stamp and amount: yours left of the pot, theirs right. The rival's bubble shows the French line big and the bet word under it (*Tapis.* / MAX). The tickets stay through the tally | 1 s hold after a rival bet |
+| **À vous** | your turn to bet | soft chime (`sfx.turn`), the lamp flares, **À VOUS** / *your bet* rises over the felt while the tickets slide in | 1 s |
+| **Why it's off** | a ticket you can't use | struck through the label, with the reason where the price was (*needs a pair*, *would bust you*, *tournament: no folding*, *they went Max*, *all-in at $X*). The hint above the tickets spells it out in full | on your turn |
+| **Ending callout** | a round ends without a showdown | the felt dims, a framed banner holds the middle: *Scaramouche se couche* / "Rival folded. The pot is yours, +$3" (or *flambe !*, *Vous vous couchez*, *Plus de cartes*…). The pot slides to the winner. The tally and Continue wait for it | 1.6 s |
+| **Showdown flip** | showdown | your face-down cards turn over in place. The rival's fly in from their hand | 0.3 s, then the count-up |
+| **Tally** | after all of the above | the title names the cause: *Scaramouche folded*, *You flambéd*. *You take the pot* is for showdown wins only | until Continue |
+
+### Language
+
+The French is the flavor, the English is the rule. Callouts and bubbles show the French big and the English under it. Explanations (the 1er caption, the hint, the reasons) are English only.
+
+### Testing
+
+`/?quick&wild` makes the rival bet at random, so folds, raises and flambés come up within a few rounds.
+
+## 11. Still open
 
 - **DOM screens** (draft, shop, packs) still use CSS buttons, now in the §4 colors: brass for progress (the default), money green for `data-buy`, ink for `.ghost`, burgundy for `.danger`, with a 3 px plinth shadow and a press shift. They still need the canvas treatment eventually.
 - **Keyboard shortcuts:** built. 1–4 press the tickets top to bottom, Space or Enter presses the primary.
-- **Why a ticket is off:** a disabled Flamber doesn't say "needs a pair" or "would bust you". It could go in its price chip.
+- **Why a ticket is off:** built (§10).
+- **Sprites for the beats:** the 1er puck and the callout banner are drawn in code. Art list: `hud/token/premier` (36×36), and a banner frame if the plate frame stops looking right at that size.
+- **A rival flambé callout** hasn't been seen in the browser yet. It's the same path as a fold, with a different line.
 - **ART.md §13 "Buttons"** should be updated to point here once Evan approves.

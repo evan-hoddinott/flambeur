@@ -279,6 +279,8 @@ Four mask families, all **unlockable through play, never bought**:
 
 ## 9. Cards
 
+**Special cards are as loud as Balatro's** (Evan, Nov 17). Each modifier slot owns its own channel: the card type changes the stock and frame, the finish covers the surface, a stamp or knockoff marks the center, the tier lights the rim, and traits hang below. Signature colors and the full rule: `docs/CARDS.md` §0.5.
+
 ### Anatomy (64×88)
 - **Paper:** cream stock (`paper` ramp), not stark white, with a 1 px ink outline and 3 px rounded corners.
 - **Indices:** **English K Q J A** (no learning cost), top-left and bottom-right, rank above suit. Ranks use the pixel Didone numerals.
@@ -309,7 +311,7 @@ Finishes always shimmer a little when idle. That's part of the "the table is ali
 - **Stamps** are rubber-stamp marks in colored ink, slightly misaligned and partly faded. Each stamp has its own ink color and icon.
 - **Knockoffs** take the stamp slot and look like bad printing:
   - **Crayon:** the pips are redrawn in wobbly crayon.
-  - **Marked:** a pinprick and a tiny pencil dot in the corner. Sneaky.
+  - **Marked:** a red grease-pencil circle around the index with a pinprick inside. The rival sees the card anyway, so it doesn't hide from you.
   - **Wrong Suit:** the suit is misprinted with a registration offset (the colors don't line up).
   - **Beer-stained:** a ring stain on the card, and it's stuck to its partner card, so the two are drawn overlapping and move as one.
 
@@ -323,7 +325,7 @@ Finishes always shimmer a little when idle. That's part of the "the table is ali
 Trait icons sit in a small strip at the bottom of the card, and the number of slots = the tier.
 
 ### Collectibles (the display case)
-- Same 64×88 frame, but **behind glass**: a beveled brass frame and a glass glint that slides on hover.
+- **Not cards.** Like Balatro's jokers, each is its own object with its own size, shape and background, and no shared frame. Rarity is a glow behind it, the buraliste hides in every one, and each has a tiny idle loop. Full spec, all 29: `docs/CARDS.md` §14.
 - **Flavor text appears only in the collection view.** It's **funny references and jokes about the card**, e.g. a Balatro-joker nod that just says *"Looks familiar…"*. Keep it to 1 line, and never let it explain a rule.
 
 ### Card motion (always on)
@@ -339,7 +341,7 @@ Trait icons sit in a small strip at the bottom of the card, and the number of sl
 - **Jetons (round chips)** for small amounts: $1 cream, $5 burgundy, $25 green, each with a brass inlay ring and an "F" monogram.
 - **Plaques (rectangular)** for big amounts ($100+): mother-of-pearl look, brass corners. Monte Carlo style.
 - **Stacks + a big number:** the stack height shows magnitude at a glance, and the number above it (money green) is the truth.
-- **Scratchers:** lottery tickets in the tabac rack, scratched with the cursor (silver flakes come off). Each insert (Code, Checklist, Wishlist, Grail) has its own ticket design.
+- **Scratchers:** *La Fortune du Pot* tickets in the tabac rack, scratched with a $1 jeton cursor (silver flakes come off and settle on the counter). Every ticket looks the same outside, since the insert rolls on the scratch; each insert (Code, Checklist, Wishlist, Grail) has its own emblem under the foil. Full spec: SHOP.md §7.
 - **Sleeves** (run-wide buffs): actual card sleeves on a display hook. The **Archival Sleeve** is a thick toploader.
 - **The Gold Border side bet:** a small gold-edged chip placed on its own circle on the felt.
 
