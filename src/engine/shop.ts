@@ -1,6 +1,6 @@
 import { REAL_JOKERS, SUITS, newCard, type Card, type JokerId, type Finish, type Ids, type Knockoff, type Stamp, type Trait, type Variant } from './cards.ts'
 import { COLLECTIBLES, RARITY_WEIGHT, rollParam, type CollectibleDef, type Owned, type Rarity } from './collectibles.ts'
-import { COLLECTIBLE_PRICE, PACK_PRICE, SCRATCHER_PRICE, SLEEVE_PRICE } from './economy.ts'
+import { COLLECTIBLE_PRICE, POCHETTE_PRICE, PACK_PRICE, SCRATCHER_PRICE, SPOILS_ODDS } from './economy.ts'
 import type { SleeveId } from './sleeves.ts'
 import { HAND_TYPES, type HandType } from './hands.ts'
 import { chance, makeRng, next, pick, randInt, shuffled, type Rng } from './rng.ts'
@@ -20,7 +20,7 @@ export type ShopOffer =
   | { type: 'sleeve'; id: SleeveId; price: number; sold: boolean }
   | { type: 'scratcher'; price: number; sold: boolean }
 
-export type Shop = { offers: ShopOffer[]; restocks: number }
+export type Shop = { kind: ShopKind; offers: ShopOffer[]; restocks: number }
 
 // run-wide state the shop needs. seen = collectibles that have shown up this run (an array, state stays plain JSON)
 export type ShopMemory = { seen: string[]; rolledOver: boolean; packDiscount: number }
@@ -61,6 +61,18 @@ function rollKnockoff(rng: Rng, card: Card, pack: Card[]): Knockoff {
   return { kind }
 }
 
+// spoils: plain 2-A of random suits. 10% a finish, 5% a stamp, 3% a card type. no knockoffs or jokers, those stay in packs
+export function spoilsCard(ids: Ids, rng: Rng, round: number): Card {
+  const card = randomCard(ids, rng, round)
+  if (chance(rng, SPOILS_ODDS.finish)) card.finish = pick<Finish>(rng, ['foil', 'foil', 'holo', 'holo', 'misprint'])
+  if (chance(rng, SPOILS_ODDS.stamp)) card.stamp = pick<Stamp>(rng, ['first', 'signed', 'gold', 'damaged'])
+  if (chance(rng, SPOILS_ODDS.variant)) {
+    card.variant = pick<Variant>(rng, ['chase', 'sticker', 'rookie', 'jumbo'])
+    if (card.variant === 'sticker') card.finish = null // a sticker borrows its finish
+  }
+  return card
+}
+
 function rollRarity(rng: Rng): Rarity {
   const total = RARITY_WEIGHT.common + RARITY_WEIGHT.uncommon + RARITY_WEIGHT.rare
   const r = next(rng) * total
@@ -70,20 +82,23 @@ function rollRarity(rng: Rng): Rarity {
 }
 
 // nothing repeats until every collectible has been shown once. then the pool resets and the shopkeeper gets salty
-// exclude = ids already on display in this shop, so a rollover mid-stock can't offer the same thing twice
-export function drawCollectible(rng: Rng, mem: ShopMemory, owned: Owned[], exclude: string[] = [], forceRarity: Rarity | null = null): Owned {
+// exclude = ids already on display in this shop, so a rollover mid-stock can't offer the same thing twice.
+// payoff = only a lane payoff (the big shop's guaranteed one). if every payoff is owned it falls back to anything
+export function drawCollectible(rng: Rng, mem: ShopMemory, owned: Owned[], exclude: string[] = [], forceRarity: Rarity | null = null, payoff = false): Owned {
   const ownedIds = new Set([...owned.map(o => o.id), ...exclude])
-  let fresh = COLLECTIBLES.filter(d => !mem.seen.includes(d.id) && !ownedIds.has(d.id))
+  const pool = payoff && COLLECTIBLES.some(d => d.payoff && !ownedIds.has(d.id)) ? COLLECTIBLES.filter(d => d.payoff) : COLLECTIBLES
+  let fresh = pool.filter(d => !mem.seen.includes(d.id) && !ownedIds.has(d.id))
+  if (fresh.length === 0 && payoff) fresh = pool.filter(d => !ownedIds.has(d.id)) // a payoff can show again before the rollover
   if (fresh.length === 0) {
     mem.seen.length = 0
     mem.rolledOver = true
-    fresh = COLLECTIBLES.filter(d => !ownedIds.has(d.id))
+    fresh = pool.filter(d => !ownedIds.has(d.id))
     if (fresh.length === 0) throw new Error('every collectible is owned')
   }
   const rarity = forceRarity ?? rollRarity(rng)
   const ofRarity = fresh.filter(d => d.rarity === rarity)
   const def: CollectibleDef = pick(rng, ofRarity.length > 0 ? ofRarity : fresh)
-  mem.seen.push(def.id)
+  if (!mem.seen.includes(def.id)) mem.seen.push(def.id)
   return { id: def.id, param: rollParam(def, rng) }
 }
 
@@ -95,11 +110,8 @@ export function collectiblePrice(owned: Owned, mem: ShopMemory): number {
 }
 
 export function openPack(ids: Ids, kind: PackKind, rng: Rng, round: number, mem: ShopMemory, owned: Owned[]): PackContents {
-  // pack lanes: free = plain, off-brand = stamps and knockoffs, repack = forged, jumbos and rookies,
-  // collector = finishes, stickers and the rare slot. any paid pack has a small shot at a chase card
-  if (kind === 'free') {
-    return { kind, cards: [0, 1, 2].map(() => randomCard(ids, rng, round)), collectible: null, codeCard: null }
-  }
+  // pack lanes: off-brand = stamps and knockoffs, repack = forged, jumbos and rookies,
+  // collector = finishes, stickers and the rare slot. any pack has a small shot at a chase card
   if (kind === 'offbrand') {
     const cards = [0, 1, 2, 3, 4].map(() => randomCard(ids, rng, round, { finish: rollFinish(rng, 0.25), stamp: rollStamp(rng, 0.25) }))
     for (const card of cards) if (card.stamp === null && chance(rng, 0.35)) card.knockoff = rollKnockoff(rng, card, cards)
@@ -143,43 +155,65 @@ export function openPack(ids: Ids, kind: PackKind, rng: Rng, round: number, mem:
   return { kind, cards, collectible, codeCard }
 }
 
-const PAID_PACKS: readonly PackKind[] = ['offbrand', 'repack', 'collector']
+const PACKS: readonly PackKind[] = ['offbrand', 'repack', 'collector']
 
-// free pack is always there (once per shop). restocking rerolls everything else
-export function stockShop(rng: Rng, mem: ShopMemory, owned: Owned[], freeAvailable: boolean): ShopOffer[] {
+// small shop after most rounds, big shop between tables
+export type ShopKind = 'small' | 'big'
+const STOCK: Record<ShopKind, { packs: number; collectibles: number; scratchers: number }> = {
+  small: { packs: 2, collectibles: 1, scratchers: 1 },
+  big: { packs: 3, collectibles: 3, scratchers: 2 },
+}
+
+// packs, collectibles and scratchers. the big shop always has one lane payoff among its collectibles
+export function stockShop(rng: Rng, mem: ShopMemory, owned: Owned[], kind: ShopKind): ShopOffer[] {
+  const n = STOCK[kind]
   const offers: ShopOffer[] = []
-  if (freeAvailable) offers.push({ type: 'pack', kind: 'free', price: 0, sold: false })
-  for (let i = 0; i < 2; i++) {
-    const kind = pick(rng, PAID_PACKS)
-    offers.push({ type: 'pack', kind, price: Math.max(1, PACK_PRICE[kind] - mem.packDiscount), sold: false })
+  for (let i = 0; i < n.packs; i++) {
+    const pack = pick(rng, PACKS)
+    offers.push({ type: 'pack', kind: pack, price: Math.max(1, PACK_PRICE[pack] - mem.packDiscount), sold: false })
   }
   const shown: string[] = []
-  for (let i = 0; i < 2; i++) {
-    const offer = drawCollectible(rng, mem, owned, shown)
+  for (let i = 0; i < n.collectibles; i++) {
+    const offer = kind === 'big' && i === 0 ? drawCollectible(rng, mem, owned, shown, 'rare', true) : drawCollectible(rng, mem, owned, shown)
     shown.push(offer.id)
     offers.push({ type: 'collectible', owned: offer, price: collectiblePrice(offer, mem), sold: false })
   }
-  // 1 or 2 scratchers at the register
-  for (let i = randInt(rng, 1, 2); i > 0; i--) offers.push({ type: 'scratcher', price: SCRATCHER_PRICE, sold: false })
+  for (let i = 0; i < n.scratchers; i++) offers.push({ type: 'scratcher', price: SCRATCHER_PRICE, sold: false })
   return offers
 }
 
-// a scratcher resolves on the spot into one random insert. checklist and wishlist then wait on a card pick
-export type Insert = 'code' | 'checklist' | 'wishlist' | 'grail'
+// a scratcher gives one random insert. it goes into the Sleeve (2 slots) to use later, except a grail, which
+// resolves on the spot. "hand" inserts are used during a round on the cards you hold, before a lock
+export type Insert = 'code' | 'checklist' | 'stylo' | 'broyeuse' | 'photocopie' | 'reprint' | 'foil' | 'holo' | 'prism' | 'tampon' | 'allumettes' | 'wishlist' | 'grail'
+export type InsertWhen = 'anytime' | 'hand' | 'shop' | 'spot'
 
-export const INSERTS: Record<Insert, { name: string; text: string }> = {
-  code: { name: 'Code', text: 'Levels up a random hand type' },
-  checklist: { name: 'Checklist', text: "Change one deck card's suit" },
-  wishlist: { name: 'Wishlist', text: 'Move one binder card into your deck' },
-  grail: { name: 'Grail', text: 'A free rare collectible or a Joker' },
+// cards = how many cards it takes [min, max]. odds add up to 100
+export const INSERTS: Record<Insert, { name: string; text: string; when: InsertWhen; cards: [number, number]; odds: number }> = {
+  code: { name: 'Code', text: 'Level up a hand type (+15 Value, +1 Hype)', when: 'anytime', cards: [0, 0], odds: 18 },
+  checklist: { name: 'Checklist', text: 'Up to 2 cards become a suit you pick', when: 'hand', cards: [1, 2], odds: 11 },
+  stylo: { name: 'Stylo', text: 'Up to 2 cards go up one rank (an Ace stays an Ace)', when: 'hand', cards: [1, 2], odds: 11 },
+  broyeuse: { name: 'Broyeuse', text: 'Shred up to 2 cards for good', when: 'hand', cards: [1, 2], odds: 9 },
+  photocopie: { name: 'Photocopie', text: 'Pick 2: the first becomes a copy of the second', when: 'hand', cards: [2, 2], odds: 8 },
+  reprint: { name: 'Reprint', text: 'A copy of 1 card goes into your deck', when: 'hand', cards: [1, 1], odds: 7 },
+  foil: { name: 'Foil wrap', text: '1 card becomes Foil', when: 'hand', cards: [1, 1], odds: 7 },
+  holo: { name: 'Holo wrap', text: '1 card becomes Holo', when: 'hand', cards: [1, 1], odds: 7 },
+  prism: { name: 'Prism wrap', text: '1 card becomes Prism', when: 'hand', cards: [1, 1], odds: 2 },
+  tampon: { name: 'Tampon', text: '1 card gets a random stamp: 1st Edition, Signed or Gold Border', when: 'hand', cards: [1, 1], odds: 6 },
+  allumettes: { name: 'Allumettes', text: 'Merge 2 same-rank cards in your hand into a ★ card now. Leaves 1 Bulk', when: 'hand', cards: [2, 2], odds: 6 },
+  wishlist: { name: 'Wishlist', text: '1 binder card shuffles into your deck', when: 'shop', cards: [1, 1], odds: 5 },
+  grail: { name: 'Grail', text: 'A free rare collectible or a Joker', when: 'spot', cards: [0, 0], odds: 3 },
 }
 
+// one insert in the Sleeve. a code rolls its hand type when it's scratched, so you see what it levels
+export type SleeveCard = { id: Insert; hand: HandType | null }
+
 export function rollInsert(rng: Rng): Insert {
-  const r = next(rng)
-  if (r < 0.4) return 'code'
-  if (r < 0.7) return 'checklist'
-  if (r < 0.92) return 'wishlist'
-  return 'grail'
+  let r = next(rng) * 100
+  for (const id of Object.keys(INSERTS) as Insert[]) {
+    r -= INSERTS[id].odds
+    if (r < 0) return id
+  }
+  return 'grail' // float rounding at the very top
 }
 
 // the shopkeeper's posted sign: 3 seeded one-line rules for the whole run, the same shopkeeper for every seat
@@ -204,26 +238,26 @@ export function getKeeper(id: KeeperId): { id: KeeperId; name: string; text: str
   return k
 }
 
-// sleeve = this table's sleeve, only offered in the shop right before the boss.
-// the sign's price change on fresh stock. free stays free, nothing drops under $1
+// the sign's price change on fresh stock. nothing drops under $1
 function adjust(offers: ShopOffer[], priceAdj: number): ShopOffer[] {
-  return offers.map(o => (o.price === 0 ? o : { ...o, price: Math.max(1, o.price + priceAdj) }))
+  return offers.map(o => ({ ...o, price: Math.max(1, o.price + priceAdj) }))
 }
 
-export function newShop(rng: Rng, mem: ShopMemory, owned: Owned[], sleeve: SleeveId | null, priceAdj: number): Shop {
-  const offers = stockShop(rng, mem, owned, true)
-  if (sleeve) offers.push({ type: 'sleeve', id: sleeve, price: SLEEVE_PRICE, sold: false })
-  return { offers: adjust(offers, priceAdj), restocks: 0 }
+// pochette = the big shop's run-wide upgrade (shown as a Pochette, the code still calls it a sleeve)
+export function newShop(rng: Rng, mem: ShopMemory, owned: Owned[], kind: ShopKind, pochette: SleeveId | null, priceAdj: number): Shop {
+  const offers = stockShop(rng, mem, owned, kind)
+  if (pochette) offers.push({ type: 'sleeve', id: pochette, price: POCHETTE_PRICE, sold: false })
+  return { kind, offers: adjust(offers, priceAdj), restocks: 0 }
 }
 
-// $1, $2, $3... free = how many restocks this shop cost nothing (store credit, restock sleeve)
+// $1, $2, $3... free = how many restocks this shop cost nothing (store credit, pochette restock)
 export function restockPrice(shop: Shop, free: number): number {
   return Math.max(0, shop.restocks + 1 - free)
 }
 
-// rerolls everything except the free pack and the sleeve
+// rerolls packs, collectibles and scratchers. never the pochette
 export function restock(shop: Shop, rng: Rng, mem: ShopMemory, owned: Owned[], priceAdj: number): Shop {
-  const kept = shop.offers.filter(o => (o.type === 'pack' && o.kind === 'free') || o.type === 'sleeve')
-  const offers = adjust(stockShop(rng, mem, owned, false), priceAdj)
-  return { offers: [...kept.filter(o => o.type === 'pack'), ...offers, ...kept.filter(o => o.type === 'sleeve')], restocks: shop.restocks + 1 }
+  const pochette = shop.offers.filter(o => o.type === 'sleeve')
+  const offers = adjust(stockShop(rng, mem, owned, shop.kind), priceAdj)
+  return { kind: shop.kind, offers: [...offers, ...pochette], restocks: shop.restocks + 1 }
 }

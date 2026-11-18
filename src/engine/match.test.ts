@@ -27,12 +27,14 @@ function play(config: MatchConfig, how: 'random' | 'bot', onStep?: (m: Match) =>
 // every card id in this seat's view, from "id":N
 const idsIn = (v: unknown) => new Set([...JSON.stringify(v).matchAll(/"id":(\d+)/g)].map(x => Number(x[1])))
 
-// another seat's hidden cards: hand (minus what showdown or peek legitimately reveals), pile, discard, binder
+// another seat's hidden cards: hand, pile, discard, binder. minus what the game shows on purpose: the last revealed
+// hand, locked Marked knockoffs, and the spoils both seats drafted from
 function leaks(m: Match, s: SeatId): number[] {
   const v = view(m, s)
   const seen = idsIn(v)
   const allowed = new Set<number>([
-    ...(v.showdown?.theirCards ?? []).map(c => c.id), ...(v.bet?.peek ? [v.bet.peek.id] : []), ...v.others.flatMap(o => o.marked.map(c => c.id)),
+    ...(v.showdown?.theirCards ?? []).map(c => c.id), ...v.others.flatMap(o => o.marked.map(c => c.id)),
+    ...(v.spoils?.picks ?? []).flatMap(x => (x.card ? [x.card.id] : [])), ...(v.last?.stolen ? [v.last.stolen.id] : []), ...(v.last?.robbed ? [v.last.robbed.id] : []),
   ])
   const out: number[] = []
   for (const p of m.players) {
@@ -48,6 +50,25 @@ test('fuzz: 2 seats, random legal moves, no throws, replay equals the live match
     const { m, log } = play(config, 'random')
     assert.ok(m.result)
     assert.deepEqual(replay(config, log), m)
+  }
+})
+
+test('fuzz: a betting seat always has min and max, and every round result adds up', () => {
+  for (let i = 0; i < 4; i++) {
+    const config: MatchConfig = { mode: 'solo', seed: `why-${i}`, seats: seats(2, true) }
+    play(config, 'random', m => {
+      for (const p of m.players) {
+        const v = view(m, p.seat)
+        if (v.bet && v.bet.options.length) assert.deepEqual(v.bet.options, ['min', 'max'])
+        const r = v.last
+        if (!r || r.outcome === 'bye') continue
+        // a tie round moves no table money, and the pot always goes the winner's way
+        if (r.outcome === 'tie') assert.equal(r.tally.pot, 0)
+        if (r.outcome === 'win') assert.ok(r.tally.pot > 0)
+        if (r.outcome === 'loss') assert.ok(r.tally.pot < 0)
+        if (r.ko) assert.equal(r.outcome, 'win')
+      }
+    })
   }
 })
 
@@ -110,14 +131,14 @@ test('step rejects out-of-turn and foreign actions, and the rejected match is un
   while (m.phase !== 'deal') m = step(m, pending(m)[0], botAction(m, pending(m)[0])).match
   const before = JSON.stringify(m)
   const theirCard = m.players[1].hand[0].id
-  assert.throws(() => step(m, 0, { type: 'lock', cardIds: [theirCard] }))
-  assert.throws(() => step(m, 0, { type: 'lock', cardIds: [] }))
+  assert.throws(() => step(m, 0, { type: 'play', cardIds: [theirCard] }))
+  assert.throws(() => step(m, 0, { type: 'play', cardIds: [] }))
   assert.throws(() => step(m, 0, { type: 'bet', choice: 'max' }))
   assert.throws(() => step(m, 0, { type: 'leaveShop' }))
   assert.throws(() => step(m, 7, { type: 'leaveShop' }))
   assert.equal(JSON.stringify(m), before)
   // and everything legal() lists is accepted
-  for (const a of legal(m, 0).slice(0, 40)) assert.doesNotThrow(() => step(m, 0, a))
+  for (const a of legal(m, 0).filter((_, i) => i % 25 === 0)) assert.doesNotThrow(() => step(m, 0, a))
 })
 
 test('replay refuses a log from another engine version', () => {

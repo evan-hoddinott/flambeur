@@ -18,13 +18,15 @@ export const VARIANTS: Record<Variant, { name: string; text: string }> = {
 // joker cards are real playing cards with a rule on top. max 2 in a deck. the crayon joker is the off-brand one
 export type JokerId = 'sticky' | 'double' | 'courtier' | 'catalyst' | 'bluff' | 'rivals' | 'crayon'
 
+// jokers settle once per round: "played" = played in any of the round's hands (a flamber throws its cards, it
+// doesn't play them). ids stay as they were when bluff became poker face
 export const JOKERS: Record<JokerId, { name: string; text: string }> = {
-  sticky: { name: 'Sticky Fingers', text: "Win the showdown with it played: steal a random card from the rival's deck" },
-  double: { name: 'Double or Nothing', text: 'Played: this showdown pays and costs double' },
+  sticky: { name: 'Sticky Fingers', text: "Win the round with it played: steal a random card from the rival's deck" },
+  double: { name: 'Double or Nothing', text: 'Played by either side: everything the round pays or costs is doubled' },
   courtier: { name: 'Courtier', text: 'Counts as whichever J, Q or K makes your best hand' },
   catalyst: { name: 'Catalyst', text: 'Flambé with it: the new card comes out one ★ higher' },
-  bluff: { name: 'Bluff', text: 'Played, you go Max and the rival folds: +$5 from the house' },
-  rivals: { name: "Rival's Card", text: "At showdown it turns into a copy of the rival's highest played card" },
+  bluff: { name: 'Poker Face', text: 'Played in a round you lose: your Max bet comes back' },
+  rivals: { name: "Rival's Card", text: "At each reveal it copies the rival's highest played card" },
   crayon: { name: 'Crayon Joker', text: 'Each time it is played it copies a random Joker' },
 }
 
@@ -58,7 +60,7 @@ export type Card = {
   joker: JokerId | null
   tier: number // 0 = never forged, 1..3 = ★
   traits: Trait[] // at most `tier` of them
-  grind: number // +value from high card forges, the meme build
+  grind: number // +value from no-pair flambés, the meme build
   bonusHype: number // grows on 1st Edition cards
   grade: number | null // 1..10 once graded
   pulledRound: number // 0 = starting deck
@@ -175,7 +177,7 @@ export function cardName(card: Card): string {
   return `${rankLabel(card.rank)}${suit}${stars}`
 }
 
-// 2-10 face, JQK 10, A 11. grind is the high card forge bonus
+// 2-10 face, JQK 10, A 11. grind is the no-pair flambé bonus
 export function cardValue(card: Card): number {
   if (isCrayon(card)) return card.grind
   const face = card.rank === 14 ? 11 : Math.min(card.rank, 10)

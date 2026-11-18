@@ -1,16 +1,17 @@
-import { BULK_VALUE, bestFinish, cardValue, has, type Card } from './cards.ts'
-import { getDef, type HandCtx, type Owned } from './collectibles.ts'
+import { BULK_VALUE, bestFinish, cardValue, has, type Card, type Finish } from './cards.ts'
+import { getDef, hasCollectible, type HandCtx, type Owned } from './collectibles.ts'
 import { HAND_BASE, HAND_NAMES, evaluateHand, type HandType } from './hands.ts'
 import { randInt, type Rng } from './rng.ts'
 import type { Twist } from './twists.ts'
 
-// one line of the count-up animation
+// one line of the count-up animation. xhype = a hype multiplier (1 = none), applied when the step lands
 export type Step = {
   label: string
   cardId: number | null
   slot: number | null // display case index
   value: number
   hype: number
+  xhype: number
   grade: number
 }
 
@@ -19,7 +20,7 @@ export type Appraisal = {
   bonus: HandType[]
   scoringIds: number[]
   value: number
-  hype: number
+  hype: number // can be fractional once a × lands. the total rounds down at the end
   grade: number
   total: number
   steps: Step[]
@@ -34,7 +35,7 @@ export type ScoreCtx = {
   ante: number
   betMax: boolean
   hypeMod?: Partial<Record<HandType, number>> // starter box tweaks to hand base hype
-  twist: Twist | null // tournament round rule, null on normal rounds
+  twist: Twist | null // boss round rule, null on normal rounds
   // rng for misprints. null = estimate (bots planning a bet), uses the average roll
   rng: Rng | null
 }
@@ -42,7 +43,9 @@ export type ScoreCtx = {
 export const LEVEL_VALUE = 15
 export const LEVEL_HYPE = 1
 
-// appraisal = value × hype × 2^grade. hype never drops below 1
+// appraisal = value × hype × 2^grade, rounded down. the case triggers left to right and a × multiplies whatever
+// hype has built up so far, so order matters: hand base → each scored card in play order (value, finish, stamps,
+// tier, grade, then each collectible's per-card effect) → bulk → each collectible's per-hand effect
 export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
   const hand = evaluateHand(played)
   const steps: Step[] = []
@@ -57,26 +60,30 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
       slot: null,
       value: base.value + LEVEL_VALUE * level,
       hype: base.hype + LEVEL_HYPE * level + (ctx.hypeMod?.[type] ?? 0),
+      xhype: 1,
       grade: 0,
     })
   }
 
+  const tw = ctx.twist?.id
   const add = (label: string, cardId: number | null, slot: number | null, d: Partial<Step>) => {
-    // hype freeze: only the hand bases give hype
-    const hype = ctx.twist?.id === 'hypefreeze' ? 0 : d.hype ?? 0
-    const step = { label, cardId, slot, value: d.value ?? 0, hype, grade: d.grade ?? 0 }
-    if (step.value || step.hype || step.grade) steps.push(step)
+    // hype freeze: only the hand bases give hype, multipliers included
+    const freeze = tw === 'hypefreeze'
+    const step = { label, cardId, slot, value: d.value ?? 0, hype: freeze ? 0 : d.hype ?? 0, xhype: freeze ? 1 : d.xhype ?? 1, grade: d.grade ?? 0 }
+    if (step.value || step.hype || step.grade || step.xhype !== 1) steps.push(step)
   }
 
-  const tw = ctx.twist?.id
   const display = tw === 'sealed' ? [] : ctx.display
   // face cards / the banned suit still make the hand, they just score nothing themselves
   const blank = (c: Card) => (tw === 'faceless' && c.rank >= 11 && c.rank <= 13) || (tw === 'banwave' && c.suit === ctx.twist?.suit)
+  const signedTimes = hasCollectible(display, 'bis') ? 3 : 2
+  const worn: Finish[] = []
   for (const card of hand.scoring) {
-    if (blank(card)) continue
-    const times = card.stamp === 'signed' ? 2 : 1
     // a sticker wears the best finish of the other cards played with it
     const finish = card.finish ?? (card.variant === 'sticker' ? bestFinish(played.filter(c => c.id !== card.id)) : null)
+    if (blank(card)) continue
+    if (finish) worn.push(finish) // a blanked card triggers nothing, its finish included
+    const times = card.stamp === 'signed' ? signedTimes : 1
     const tag = (name: string) => (card.finish === null && finish !== null ? `Sticker ${name}` : name)
     for (let t = 0; t < times; t++) {
       add(card.variant === 'jumbo' ? 'Jumbo' : 'card', card.id, null, { value: cardValue(card) * (card.variant === 'jumbo' ? 3 : 1) })
@@ -111,6 +118,8 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
   const handCtx: HandCtx = {
     hand,
     played: played.filter(c => !c.bulk),
+    bulk: bulk.length,
+    worn,
     deckSize: ctx.deckSize,
     bankroll: ctx.bankroll,
     ante: ctx.ante,
@@ -127,7 +136,7 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
   let grade = 0
   for (const s of steps) {
     value += s.value
-    hype += s.hype
+    hype = (hype + s.hype) * s.xhype
     grade += s.grade
   }
   hype = Math.max(1, hype)
@@ -138,7 +147,7 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
     value,
     hype,
     grade,
-    total: value * hype * 2 ** grade,
+    total: Math.floor(value * hype * 2 ** grade),
     steps,
   }
 }

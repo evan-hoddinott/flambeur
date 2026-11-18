@@ -8,9 +8,9 @@ import type { Db } from './db.ts'
 export type Engine = typeof EngineModule
 export type SeatPlayer = { playerId: number; name: string } | null // null = bot seat
 
-// the Timers table in DESIGN.md. the shop before a boss gets 45s
-const PHASE_MS: Record<PhaseKind, number> = { draft: 45_000, shop: 30_000, deal: 20_000, bet: 10_000, forgePick: 10_000, over: 0 }
-const BOSS_SHOP_MS = 45_000
+// the Timers table in DESIGN.md (V2.md §16). the big shop between tables gets 45s
+const PHASE_MS: Record<PhaseKind, number> = { draft: 45_000, shop: 20_000, deal: 20_000, bet: 10_000, spoils: 10_000, over: 0 }
+const BIG_SHOP_MS = 45_000
 const BOT_DELAY_MS = 700
 const EVENTS_KEPT = 100 // enough to resume a short disconnect, older ones are just the view
 export const MAX_REJECTS = 20 // a normal client almost never sends an illegal action
@@ -143,13 +143,13 @@ export class MatchActor {
   // after every step: who's on the clock, and which bots owe a move
   schedule(): void {
     const now = Date.now()
-    const key = `${this.match.round}:${this.match.phase}`
+    const key = `${this.match.round}:${this.match.hand}:${this.match.phase}` // a round locks up to 3 hands
     if (key !== this.phaseKey) {
       this.deadlines.fill(null)
       this.phaseKey = key
     }
     const pend = new Set(this.engine.pending(this.match))
-    const phaseMs = this.match.phase === 'shop' && this.match.round % 3 === 0 ? BOSS_SHOP_MS : PHASE_MS[this.match.phase]
+    const phaseMs = this.match.phase === 'shop' && this.match.round % 3 === 1 ? BIG_SHOP_MS : PHASE_MS[this.match.phase]
     this.seats.forEach((player, seat) => {
       if (!player || !pend.has(seat) || phaseMs === 0) this.deadlines[seat] = null
       else this.deadlines[seat] ??= now + phaseMs

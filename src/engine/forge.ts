@@ -1,7 +1,7 @@
 import { MAX_TIER, bestFinish, newBulk, newCard, type Card, type Ids, type Trait } from './cards.ts'
 import { evaluateHand, type HandType } from './hands.ts'
 
-// forging folds the hand and merges every card that scored into one card.
+// flamber throws the hand and merges every card that scored into one card.
 // the new card gets the traits for the primary hand and every bonus hand, keeps the traits of any forged cards it ate,
 // and goes up a tier. a card holds as many traits as its tier (★1 = 1 ... ★3 = 3)
 
@@ -18,7 +18,7 @@ export type ForgePlan = {
 // other = the second rank in two pair / full house (whichever isn't the new card's rank)
 function newTraits(hand: HandType, other: number): Trait[] {
   switch (hand) {
-    case 'high': return [] // never forged, folding grinds instead (see grindOnFold)
+    case 'high': return [] // never merged, a no-pair flamber grinds instead (see grindCard)
     case 'pair': return [{ kind: 'multi', count: 2 }]
     case 'trips': return [{ kind: 'multi', count: 3 }]
     case 'quads': return [{ kind: 'multi', count: 4 }]
@@ -55,7 +55,7 @@ function mergeTraits(traits: Trait[], rank: number): Trait[] {
 export function forgePlan(played: Card[]): ForgePlan | null {
   const hand = evaluateHand(played)
   const merged = hand.scoring
-  // high card can't be forged (folding grinds instead). a lone forged card (K Twin is already a pair) would just re-make itself
+  // high card can't be merged (it grinds instead). a lone forged card (K Twin is already a pair) would just re-make itself
   if (hand.type === 'high' || merged.length < 2) return null
 
   // a rank hand (pair, quads...) anchors the new card to that rank, so Twin/Quad stay on the cards that made them.
@@ -103,14 +103,10 @@ export function buildForged(plan: ForgePlan, keep: Trait[], round: number, ids: 
   return { forged, bulk }
 }
 
-// folding grinds your highest locked card: same card, +1 value forever. the meme build, and the only
-// thing a fold gives back. done in place so the card keeps its stamp, grade and 1st edition growth
-// bulk can't be ground. folding a hand of only bulk grinds nothing
-export function grindOnFold(played: Card[]): Card | null {
-  if (played.length === 0) throw new Error('folding with no locked cards')
-  const real = played.filter(c => !c.bulk)
-  if (real.length === 0) return null
-  const top = real.reduce((best, c) => (c.rank > best.rank ? c : best))
-  top.grind++
-  return top
+// a flamber with no pair grinds the card you pick: same card, +1 value forever. the meme build.
+// done in place so the card keeps its stamp, grade and 1st edition growth. bulk can't be ground
+export function grindCard(card: Card): Card {
+  if (card.bulk) throw new Error('bulk can not be ground')
+  card.grind++
+  return card
 }

@@ -1,14 +1,17 @@
-import { SUITS, SUIT_GLYPH, isForged, isWild, type Card, type Suit } from './cards.ts'
+import { SUITS, SUIT_GLYPH, isCrayon, isForged, isWild, type Card, type Finish, type Suit } from './cards.ts'
 import type { HandResult, HandType } from './hands.ts'
 import { next, pick, type Rng } from './rng.ts'
 
 export type Rarity = 'common' | 'uncommon' | 'rare'
 
-export type Delta = { value: number; hype: number; grade: number }
+// xhype multiplies the hype built up so far (the case triggers left to right)
+export type Delta = { value: number; hype: number; xhype: number; grade: number }
 
 export type HandCtx = {
   hand: HandResult
-  played: Card[]
+  played: Card[] // without bulk
+  bulk: number // bulk cards played
+  worn: Finish[] // the finish each scored card wore (a sticker wears its borrowed one)
   deckSize: number
   bankroll: number
   ante: number
@@ -25,6 +28,7 @@ export type CollectibleDef = {
   rarity: Rarity
   text: string // {S} and {R} get the rolled param
   roll?: 'suit' | 'rank'
+  payoff?: true // a lane's rare × payoff. the big shop always offers one
   // per scored card, every time it scores
   onCard?: (card: Card, param: string | null) => Partial<Delta> | null
   // once per hand, after the cards
@@ -32,6 +36,20 @@ export type CollectibleDef = {
 }
 
 const handIs = (t: HandType) => (ctx: HandCtx) => ctx.hand.type === t
+const hands = (ctx: HandCtx) => [ctx.hand.type, ...ctx.hand.bonus]
+
+// ×x for each of n things, by repeated multiplication (no Math.pow in the engine)
+function times(x: number, n: number): Partial<Delta> | null {
+  if (n <= 0) return null
+  let out = 1
+  for (let i = 0; i < n; i++) out *= x
+  return { xhype: out }
+}
+
+// pairs in the primary and bonus hands: pair 1, two pair 2, full house 1
+function pairsIn(ctx: HandCtx): number {
+  return hands(ctx).reduce((n, h) => n + (h === 'pair' || h === 'fullhouse' ? 1 : h === 'twopair' ? 2 : 0), 0)
+}
 
 export const COLLECTIBLES: readonly CollectibleDef[] = [
   // flat
@@ -81,6 +99,25 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   { id: 'psa_slab', name: 'PSA 10 Slab', rarity: 'rare', text: '+1 Grade if 2+ scored cards are {R}', roll: 'rank', onHand: (c, r) => (c.hand.scoring.filter(x => String(x.rank) === r).length >= 2 ? { grade: 1 } : null) },
   { id: 'thin_binder', name: 'Thin Binder', rarity: 'rare', text: '+1 Grade if your deck has 18 or fewer cards', onHand: c => (c.deckSize <= 18 ? { grade: 1 } : null) },
   { id: 'high_roller', name: 'High Roller', rarity: 'rare', text: '+1 Grade and +10 Hype while bankroll is under 3× the ante', onHand: c => (c.bankroll < 3 * c.ante ? { grade: 1, hype: 10 } : null) },
+  // bulk feeder
+  { id: 'bulk_bin', name: 'Bulk Bin', rarity: 'common', text: 'Each Bulk played: +2 Hype', onHand: c => (c.bulk > 0 ? { hype: 2 * c.bulk } : null) },
+  // the lane payoffs: rare, and they multiply
+  { id: 'les_jumeaux', name: 'Les Jumeaux', rarity: 'rare', payoff: true, text: 'Each Pair in the hand: ×1.5 Hype', onHand: c => times(1.5, pairsIn(c)) },
+  {
+    id: 'sommelier', name: 'Sommelier', rarity: 'rare', payoff: true, text: 'Flush: ×2 Hype if a scored card is Holo',
+    onHand: c => (hands(c).some(h => h === 'flush' || h === 'straightflush' || h === 'royalflush') && c.worn.includes('holo') ? { xhype: 2 } : null),
+  },
+  { id: 'flamme_bleue', name: 'Flamme Bleue', rarity: 'rare', payoff: true, text: 'Each scored flambéed card: ×1.5 Hype', onCard: c => (isForged(c) ? { xhype: 1.5 } : null) },
+  { id: 'vitrine', name: 'Vitrine', rarity: 'rare', payoff: true, text: '×1 Hype per different Finish scored', onHand: c => (new Set(c.worn).size > 1 ? { xhype: new Set(c.worn).size } : null) },
+  { id: 'petite_monnaie', name: 'Petite Monnaie', rarity: 'rare', payoff: true, text: 'Each scored 2–6: ×1.25 Hype', onCard: c => (!isCrayon(c) && c.rank <= 6 ? { xhype: 1.25 } : null) },
+  { id: 'ferrailleur', name: 'Le Ferrailleur', rarity: 'rare', payoff: true, text: 'Each Bulk played: ×1.5 Hype', onHand: c => times(1.5, c.bulk) },
+  { id: 'le_flambeur', name: 'Le Flambeur', rarity: 'rare', payoff: true, text: '×Hype: 1, +1 per $20 you hold', onHand: c => (c.bankroll >= 20 ? { xhype: 1 + Math.floor(c.bankroll / 20) } : null) },
+  { id: 'bis', name: 'Bis !', rarity: 'rare', payoff: true, text: 'Signed cards score 3 times, not 2' }, // scoring.ts reads it
+  {
+    id: 'ligne_droite', name: 'Ligne Droite', rarity: 'rare', payoff: true, text: 'Straight: ×2.5 Hype',
+    onHand: c => (hands(c).some(h => h === 'straight' || h === 'straightflush' || h === 'royalflush') ? { xhype: 2.5 } : null),
+  },
+  { id: 'commissaire', name: 'Le Commissaire-priseur', rarity: 'rare', payoff: true, text: 'Each scored graded card: ×1.5 Hype', onCard: c => (c.grade !== null ? { xhype: 1.5 } : null) },
 ]
 
 export const RARITY_WEIGHT: Record<Rarity, number> = { common: 65, uncommon: 27, rare: 8 }

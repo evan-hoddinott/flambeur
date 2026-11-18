@@ -1,11 +1,11 @@
-// betting, tournament rounds, twists and how a match ends. expected numbers are hand-computed
+// boss twists, income and how a match ends. expected numbers are hand-computed
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { newCard, type Card, type Suit } from './cards.ts'
 import { appraise, emptyLevels } from './scoring.ts'
-import { act, legalActions, settle, startBetting } from './betting.ts'
-import { blinds, HOUSE_BONUS, PAYCHECK } from './economy.ts'
+import { blinds, HOUSE_BONUS, HOUSE_FLAT } from './economy.ts'
 import { rollTwists, type Twist } from './twists.ts'
+import { DEFAULT_RULES } from './starters.ts'
 import { defaultAction, newMatch, pairBlinds, pending, problem, showdownWinner, step, twistFor, type Match, type MatchConfig, type PhaseKind } from './match.ts'
 
 const ids = { nextCardId: 1 }
@@ -18,7 +18,7 @@ const duel = (seed: string, mode: MatchConfig['mode'] = 'duel'): MatchConfig => 
   mode, seed, seats: [{ kind: mode === 'duel' ? 'bot' : 'human', name: 'a', difficulty: 'medium' }, { kind: 'bot', name: 'b', difficulty: 'medium' }],
 })
 
-// timeout defaults until the match reaches this phase (and round). defaults bet min and always show down
+// timeout defaults until the match reaches this phase (and round). defaults bet min
 function drive(m: Match, phase: PhaseKind, round = m.round): Match {
   for (let guard = 0; !(m.phase === phase && m.round === round); guard++) {
     if (guard > 5000 || m.phase === 'over') throw new Error(`never reached ${phase} in round ${round}`)
@@ -27,50 +27,6 @@ function drive(m: Match, phase: PhaseKind, round = m.round): Match {
   }
   return m
 }
-
-test('four buttons: min/min shows down, min/max gives the first player match or fold', () => {
-  let b = startBetting(0, 2, 5, [20, 20], [false, false])
-  assert.deepEqual(legalActions(b), ['fold', 'min', 'max'])
-  b = act(b, 'min')
-  assert.deepEqual(legalActions(b), ['fold', 'min', 'max'])
-  assert.equal(act(b, 'min').outcome?.kind, 'showdown')
-  b = act(b, 'max')
-  assert.deepEqual(legalActions(b), ['match', 'fold'])
-  b = act(b, 'match')
-  assert.deepEqual(b.committed, [5, 5])
-  assert.equal(b.outcome?.kind, 'showdown')
-})
-
-test('against a max the second player can fold, forge or max (match), never min', () => {
-  const b = act(startBetting(0, 2, 5, [20, 20], [true, true]), 'max')
-  assert.deepEqual(legalActions(b), ['fold', 'forge', 'max'])
-})
-
-test('forced betting: no fold or forge, min → max → match goes to showdown', () => {
-  let b = startBetting(0, 4, 8, [20, 20], [true, true], true)
-  assert.deepEqual(legalActions(b), ['min', 'max'])
-  b = act(b, 'min')
-  assert.deepEqual(legalActions(b), ['min', 'max'])
-  b = act(b, 'max')
-  assert.deepEqual(legalActions(b), ['match'])
-  b = act(b, 'match')
-  assert.equal(b.outcome?.kind, 'showdown')
-})
-
-test('forge costs the max ($5), the min ($2) when 2× behind, and is not offered if it would bust you', () => {
-  const even = act(startBetting(0, 2, 5, [20, 20], [true, true]), 'forge')
-  assert.deepEqual(settle(even, null), [-5, 5])
-  // $8 vs $20: 8 × 2 = 16 <= 20, the underdog forges for the min
-  const under = act(startBetting(0, 2, 5, [8, 20], [true, true]), 'forge')
-  assert.deepEqual(settle(under, null), [-2, 2])
-  // $5 vs $6: the max is capped at $5, nobody is 2× behind, paying $5 would bust seat 0 so it can't forge
-  assert.deepEqual(startBetting(0, 2, 5, [5, 6], [true, true]).canForge, [false, true])
-})
-
-test('a fold costs what you put in: fold after a raise = the $2 min', () => {
-  const b = act(act(act(startBetting(0, 2, 5, [20, 20], [false, false]), 'min'), 'max'), 'fold')
-  assert.deepEqual(settle(b, null), [-2, 2])
-})
 
 test('sealed only: pair of kings + Lucky Penny scores (10 + 10 + 10) × 2 = 60, not × 6', () => {
   assert.equal(score(kings(), null).total, 30 * 6)
@@ -101,28 +57,39 @@ test('lowball: lower appraisal wins the showdown, only on its round', () => {
   assert.equal(showdownWinner(m, 100, 500), 1)
 })
 
-test('high stakes: round 3 min becomes the max ($8 / $8), cold deck: mulligans are refused', () => {
-  const hs = newMatch(duel('hs'))
-  hs.round = 3
-  hs.twists[0] = { id: 'highstakes', suit: null }
-  assert.deepEqual(pairBlinds(hs, [0, 1]), { ante: 8, max: 8 })
-  const m = drive(newMatch(duel('cd')), 'deal')
+// both seats at a round 3 deal with plain rules, no case and $20
+function boss(seed: string, twist: Twist): Match {
+  const m = drive(newMatch(duel(seed)), 'deal')
   m.round = 3
-  m.twists[0] = { id: 'colddeck', suit: null }
-  assert.equal(problem(m, 0, { type: 'mulligan', cardIds: [m.players[0].hand[0].id] }), 'cold deck: no mulligans')
+  m.twists[0] = twist
+  for (const p of m.players) {
+    p.rules = { ...DEFAULT_RULES }
+    p.display = []
+    p.bankroll = 20
+  }
+  return m
+}
+
+test('high stakes: round 3 at $4 / $8, everyone who can cover the max is on it, nobody gets asked. cold deck: no discards', () => {
+  let m = boss('hs', { id: 'highstakes', suit: null })
+  for (const s of [0, 1]) m = step(m, s, defaultAction(m, s)).match
+  assert.notEqual(m.phase, 'bet')
+  assert.deepEqual(m.pairs[0].betting!.onMax, [true, true])
+  const cd = boss('cd', { id: 'colddeck', suit: null })
+  assert.equal(problem(cd, 0, { type: 'discard', cardIds: [cd.players[0].hand[0].id] }), 'cold deck: no discards')
 })
 
-test('double down: the round 3 winner takes the ante twice, the loser pays it once', () => {
-  let m = drive(newMatch(duel('dd')), 'deal', 3)
-  m.twists[0] = { id: 'doubledown', suit: null }
-  const ante = pairBlinds(m, [0, 1]).ante
-  m = drive(m, 'shop', 4)
-  const [a, b] = m.players.map(p => p.last!)
-  assert.notEqual(a.outcome, 'tie')
-  const win = a.outcome === 'win' ? a : b
-  const lose = a.outcome === 'win' ? b : a
-  assert.equal(win.tally.pot, 2 * ante)
-  assert.equal(lose.tally.pot, -ante)
+test('double down: the house matches the pot, so a round 3 knockout takes the $4 stake twice (+8), the loser pays it once (−4)', () => {
+  let m = boss('dd', { id: 'doubledown', suit: null })
+  const kk = [newCard(m, 13, 'S'), newCard(m, 13, 'H')]
+  const two = [newCard(m, 2, 'C')]
+  m.players[0].hand = kk
+  m.players[1].hand = two
+  m = step(m, 0, { type: 'play', cardIds: kk.map(x => x.id) }).match
+  m = step(m, 1, { type: 'play', cardIds: two.map(x => x.id) }).match
+  while (m.phase === 'bet') m = step(m, pending(m)[0], { type: 'bet', choice: 'min' }).match
+  assert.equal(m.players[0].last!.tally.pot, 8)
+  assert.equal(m.players[1].last!.tally.pot, -4)
 })
 
 test('twists: 4 different ones per seed, same seed same twists, only on rounds 3/6/9/12', () => {
@@ -135,13 +102,15 @@ test('twists: 4 different ones per seed, same seed same twists, only on rounds 3
   assert.deepEqual(twistFor(m, 12), a[3])
 })
 
-test('income: a round 2 showdown win pays house = paycheck 2 + 2 × ante', () => {
+test('income: a round 2 win pays house = 2 + 2 × ante, the loser still gets the 2', () => {
   let m = drive(newMatch(duel('pay')), 'deal', 2)
   const ante = pairBlinds(m, [0, 1]).ante
   m = drive(m, 'shop', 3)
   const won = m.players.map(p => p.last!).find(r => r.outcome === 'win')
-  assert.ok(won, 'defaults always show down, someone wins unless it tied')
-  assert.equal(won.tally.house, PAYCHECK + HOUSE_BONUS * ante)
+  const lost = m.players.map(p => p.last!).find(r => r.outcome === 'loss')
+  assert.ok(won && lost, 'this seed has no tie round')
+  assert.equal(won.tally.house, HOUSE_FLAT + HOUSE_BONUS * ante)
+  assert.equal(lost.tally.house, HOUSE_FLAT)
 })
 
 test('sudden death: round 13 ante 27 × 2 = 54, round 14 108. solo never goes past 12', () => {

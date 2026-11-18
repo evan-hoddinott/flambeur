@@ -1,5 +1,5 @@
-// tournament rounds (3, 6, 9) are the boss blinds: nobody can fold or forge, and one rule twist applies to both players.
-// the 3 twists for a run come from the seed, no repeats, and the next one is shown in the shop the round before
+// boss rounds (3, 6, 9, 12) close each table: one rule twist for both players, on all three hands, and a bigger payout.
+// the 4 twists for a run come from the seed, no repeats, and the next one is always shown
 import { SUITS, type Suit } from './cards.ts'
 import { TOURNAMENT_ROUNDS } from './economy.ts'
 import { makeRng, pick, shuffled } from './rng.ts'
@@ -12,11 +12,11 @@ export const TWISTS: readonly { id: TwistId; name: string; text: string }[] = [
   { id: 'sealed', name: 'Sealed Only', text: 'Collectibles don\'t trigger' },
   { id: 'faceless', name: 'Face Cards Don\'t Score', text: 'J, Q and K score no Value and trigger nothing' },
   { id: 'banwave', name: 'Ban Wave', text: '{S} cards score no Value and trigger nothing' },
-  { id: 'highstakes', name: 'High Stakes', text: 'Min bet is the Max' },
-  { id: 'lowball', name: 'Lowball', text: 'Lowest appraisal wins' },
+  { id: 'highstakes', name: 'High Stakes', text: 'Everyone is on Max this round' },
+  { id: 'lowball', name: 'Lowball', text: 'Lowest takes each hand, and you knock out by being K× lower' },
   { id: 'doubledown', name: 'Double Down', text: 'The house matches the pot: the winner takes double' },
   { id: 'hypefreeze', name: 'Hype Freeze', text: 'Only the hand itself gives Hype' },
-  { id: 'colddeck', name: 'Cold Deck', text: 'No mulligans' },
+  { id: 'colddeck', name: 'Cold Deck', text: 'No discards this round' },
 ]
 
 export function isTournament(round: number): boolean {

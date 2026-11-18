@@ -1,7 +1,7 @@
 // starter boxes: like balatro's decks, each one changes a rule, not just the cards.
 // the run opens by ripping a starter box that offers 3 of these (same seed, same 3)
 import { SUITS, SUIT_GLYPH, cardValue, isSpecial, newCard, standardDeck, type Card, type Ids, type Suit } from './cards.ts'
-import { DISPLAY_SLOTS, START_BANKROLL } from './economy.ts'
+import { DISCARDS, DISPLAY_SLOTS, START_BANKROLL } from './economy.ts'
 import type { HandType } from './hands.ts'
 import type { Owned } from './collectibles.ts'
 import { makeRng, next, pick, shuffled, type Rng } from './rng.ts'
@@ -10,7 +10,7 @@ import { makeRng, next, pick, shuffled, type Rng } from './rng.ts'
 export type Rules = {
   startBankroll: number
   displaySlots: number
-  freeMulligans: number // per table, these don't shrink your hand
+  discards: number // per round
   anteBonus: number // added to every ante and max
   packDiscount: number // $ off every paid pack
   startDisplay: Owned[] // collectibles already in the case
@@ -20,7 +20,7 @@ export type Rules = {
 export const DEFAULT_RULES: Rules = {
   startBankroll: START_BANKROLL,
   displaySlots: DISPLAY_SLOTS,
-  freeMulligans: 0,
+  discards: DISCARDS,
   anteBonus: 0,
   packDiscount: 0,
   startDisplay: [],
@@ -38,27 +38,26 @@ export type Starter = {
   deck: (rng: Rng, ids: Ids) => Card[]
 }
 
-// 7 through A in every suit = 32 cards. smaller deck = the stuff you add actually shows up
-export function shortDeck(ids: Ids, suits: readonly Suit[] = SUITS, lowest = 7): Card[] {
+// a full 2 through A in these suits. suited doubles it so every box is 52 cards
+export function fullDeck(ids: Ids, suits: readonly Suit[] = SUITS): Card[] {
   const deck: Card[] = []
-  for (const suit of suits) for (let rank = lowest; rank <= 14; rank++) deck.push(newCard(ids, rank, suit))
+  for (const suit of suits) for (let rank = 2; rank <= 14; rank++) deck.push(newCard(ids, rank, suit))
   return deck
 }
 
 export const STARTERS: readonly Starter[] = [
   {
-    id: 'classic', name: 'Classic Box', deckText: '7 through A',
-    twist: 'First mulligan each Table is free (no hand size cost)', rules: { freeMulligans: 1 },
-    deck: (_rng, ids) => shortDeck(ids),
+    id: 'classic', name: 'Classic Box', deckText: '2 through A',
+    twist: '4 discards a round instead of 3', rules: { discards: DISCARDS + 1 },
+    deck: (_rng, ids) => fullDeck(ids),
   },
   {
-    id: 'forge', name: 'Flambé Box', deckText: '7 through A, a Q★ Twin and K★ Twin swapped in',
+    id: 'forge', name: 'Flambé Box', deckText: '2 through A, a Q★ Twin and K★ Twin swapped in',
     twist: 'Starts with a Chalumeau in your case (+20 Value per scored flambéed card)', rules: { startDisplay: [{ id: 'forge_hammer', param: null }] },
     deck: (rng, ids) => {
-      const deck = shortDeck(ids)
+      const deck = fullDeck(ids)
       for (const rank of [12, 13]) {
-        const plain = deck.filter(c => c.rank === rank)
-        const swap = pick(rng, plain)
+        const swap = pick(rng, deck.filter(c => c.rank === rank))
         swap.tier = 1
         swap.traits = [{ kind: 'multi', count: 2 }]
       }
@@ -66,35 +65,34 @@ export const STARTERS: readonly Starter[] = [
     },
   },
   {
-    id: 'suited', name: 'Suited Box', deckText: 'two copies of 7 through A, only ♥ and ♠',
+    id: 'suited', name: 'Suited Box', deckText: 'two copies of 2 through A, only ♥ and ♠',
     twist: 'Flushes come easy, but Flush scores −2 Hype', rules: { hypeMod: { flush: -2 } },
-    deck: (_rng, ids) => [...shortDeck(ids, ['H', 'S']), ...shortDeck(ids, ['H', 'S'])],
+    deck: (_rng, ids) => [...fullDeck(ids, ['H', 'S']), ...fullDeck(ids, ['H', 'S'])],
   },
   {
-    id: 'highroller', name: 'High Roller', deckText: '7 through A',
-    twist: 'Start with $30, but every ante and max is +$1', rules: { startBankroll: 30, anteBonus: 1 },
-    deck: (_rng, ids) => shortDeck(ids),
+    id: 'highroller', name: 'High Roller', deckText: '2 through A',
+    twist: 'Start with +$10, but every ante and max is +$1', rules: { startBankroll: START_BANKROLL + 10, anteBonus: 1 },
+    deck: (_rng, ids) => fullDeck(ids),
   },
   {
-    id: 'bargain', name: 'Bargain Bin', deckText: '7 through A, 3 of them Damaged',
-    twist: 'Every paid pack costs $1 less', rules: { packDiscount: 1 },
+    id: 'bargain', name: 'Bargain Bin', deckText: '2 through A, 3 of them Damaged',
+    twist: 'Every pack costs $1 less', rules: { packDiscount: 1 },
     deck: (rng, ids) => {
-      const deck = shortDeck(ids)
+      const deck = fullDeck(ids)
       for (const c of shuffled(rng, deck).slice(0, 3)) c.stamp = 'damaged'
       return deck
     },
   },
   {
-    id: 'collector', name: 'Collector Box', deckText: '8 through A plus 4 Foil copies',
+    id: 'collector', name: 'Collector Box', deckText: '2 through A plus 4 Foil copies',
     twist: 'Only 4 display case slots', rules: { displaySlots: 4 },
-    // 28 cards + 4 foil copies of random ones = 32 for the row draft
     deck: (rng, ids) => {
-      const deck = shortDeck(ids, SUITS, 8)
+      const deck = fullDeck(ids)
       const copies = shuffled(rng, deck).slice(0, 4).map(c => newCard(ids, c.rank, c.suit, { finish: 'foil' }))
       return [...deck, ...copies]
     },
   },
-  // the old 52 card start. not offered in the box, kept so the sim can compare against it (drafts 39)
+  // a plain 52 with no twist. not offered in the box, kept so the sim can compare against it
   {
     id: 'standard', name: 'Standard Deck', deckText: '52 cards',
     twist: 'none', rules: {},
@@ -120,11 +118,13 @@ export function rulesFor(id: StarterId): Rules {
 }
 
 // ---------- row draft ----------
-// every box holds 32 cards, dealt into 4 rows of 8. you keep 3 rows = 24 card deck.
-// special cards (twins, damaged, foils) each land in a different row, so dropping a row costs you at most one of them
+// every box is a full 2-A deck. 24 of its cards are dealt into 4 rows of 6, and you keep 3 rows = an 18 card deck.
+// special cards (twins, damaged, foils) are always dealt and each lands in a different row, so dropping a row
+// costs you at most one of them
 
 export const DRAFT_ROWS = 4
 export const DRAFT_PICKS = 3
+export const ROW_SIZE = 6
 
 export type DraftRow = { cards: Card[]; label: string }
 
@@ -132,16 +132,15 @@ export type DraftRow = { cards: Card[]; label: string }
 export function draftRows(stream: string, id: StarterId, ids: Ids): DraftRow[] {
   const rng = makeRng(`${stream}:draft`)
   const deck = getStarter(id).deck(rng, ids)
-  if (deck.length % DRAFT_ROWS !== 0) throw new Error(`${id} box has ${deck.length} cards, can't split into ${DRAFT_ROWS} rows`)
-  const size = deck.length / DRAFT_ROWS
-  const rows: Card[][] = Array.from({ length: DRAFT_ROWS }, () => [])
   const specials = shuffled(rng, deck.filter(isSpecial))
   if (specials.length > DRAFT_ROWS) throw new Error(`${id} box has more specials than rows`)
+  const rows: Card[][] = Array.from({ length: DRAFT_ROWS }, () => [])
   const start = Math.floor(next(rng) * DRAFT_ROWS)
   specials.forEach((c, i) => rows[(start + i) % DRAFT_ROWS].push(c))
   let r = 0
   for (const c of shuffled(rng, deck.filter(c => !isSpecial(c)))) {
-    while (rows[r].length >= size) r++
+    while (r < DRAFT_ROWS && rows[r].length >= ROW_SIZE) r++
+    if (r >= DRAFT_ROWS) break // the rest of the box isn't dealt
     rows[r].push(c)
   }
   return rows.map(cards => {
@@ -167,7 +166,7 @@ export function autoDraft(rows: DraftRow[]): number[] {
   return rows.map((_, i) => i).filter(i => i !== drop)
 }
 
-// short hint at what a row is good for. thresholds are ~2 above what a random row of 8 averages
+// short hint at what a row is good for. thresholds sit about 1 above what a random row of 6 averages
 export function rowLabel(cards: Card[]): string {
   const tags: string[] = []
   const ranks = new Map<number, number>()
@@ -179,7 +178,7 @@ export function rowLabel(cards: Card[]): string {
   const pairs = [...ranks.values()].filter(n => n >= 2).length
   const [topSuit, topCount] = [...suits.entries()].sort((a, b) => b[1] - a[1])[0]
   const high = cards.filter(c => c.rank >= 12).length
-  const low = cards.filter(c => c.rank <= 9).length
+  const low = cards.filter(c => c.rank <= 6).length
   let run = 1
   let longest = 1
   const distinct = [...ranks.keys()].sort((a, b) => a - b)
@@ -187,11 +186,11 @@ export function rowLabel(cards: Card[]): string {
     run = distinct[i] === distinct[i - 1] + 1 ? run + 1 : 1
     longest = Math.max(longest, run)
   }
-  if (pairs >= 3) tags.push('pair-heavy')
-  if (topCount >= (suits.size <= 2 ? 6 : 4)) tags.push(`suited ${SUIT_GLYPH[topSuit]}`)
-  if (high >= 5) tags.push('high cards')
-  if (low >= 5) tags.push('low cards')
-  if (longest >= 5) tags.push('connected')
+  if (pairs >= 2) tags.push('pair-heavy')
+  if (topCount >= (suits.size <= 2 ? 5 : 3)) tags.push(`suited ${SUIT_GLYPH[topSuit]}`)
+  if (high >= 3) tags.push('high cards')
+  if (low >= 4) tags.push('low cards')
+  if (longest >= 4) tags.push('connected')
   if (tags.length === 0) tags.push('mixed')
   const special = cards.find(isSpecial)
   const extra = !special ? '' : special.tier > 0 ? 'has a ★ Twin' : special.stamp === 'damaged' ? 'has a Damaged' : special.finish === 'foil' ? 'has a Foil' : 'has a special'

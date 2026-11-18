@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { newCard, type Card, type Suit, type Trait } from './cards.ts'
 import { evaluateHand } from './hands.ts'
 import { appraise, emptyLevels } from './scoring.ts'
-import { autoKeep, buildForged, forgePlan, grindOnFold } from './forge.ts'
+import { autoKeep, buildForged, forgePlan, grindCard } from './forge.ts'
 import { starterOffer } from './starters.ts'
 
 const ids = { nextCardId: 1 }
@@ -161,13 +161,34 @@ test('picked traits still forge after the plan is rebuilt (chooser → finishRou
   assert.doesNotThrow(() => buildForged(second, autoKeep(first), 1, ids))
 })
 
-test('folding grinds the highest card in place, keeping stamp and grade', () => {
+test('a no-pair flamber grinds the picked card in place, keeping stamp and grade. bulk can not be ground', () => {
   const ace = c(14, 'S', { stamp: 'gold', grade: 9, grind: 2 })
-  const ground = grindOnFold([c(2, 'C'), c(5, 'D'), ace, c(11, 'H'), c(8, 'S')])!
-  assert.equal(ground, ace)
+  assert.equal(grindCard(ace), ace)
   assert.equal(ace.grind, 3)
   assert.equal(ace.stamp, 'gold')
   assert.equal(ace.grade, 9)
+  assert.throws(() => grindCard(c(2, 'S', { bulk: true })))
+})
+
+// scoring order: the case triggers left to right and a × multiplies the hype built up so far
+const withCase = (cards: Card[], ids: string[]) =>
+  appraise(cards, { levels: emptyLevels(), display: ids.map(id => ({ id, param: null })), displaySlots: 5, deckSize: 18, bankroll: 20, ante: 2, betMax: false, twist: null, rng: null })
+
+test('order matters: KK with Lucky Penny then Les Jumeaux = 30 × (2 + 4) × 1.5 = 270, the other way round 30 × (2 × 1.5 + 4) = 210', () => {
+  const kk = () => [c(13, 'S'), c(13, 'H')]
+  assert.equal(withCase(kk(), ['penny_sleeve', 'les_jumeaux']).total, 270)
+  assert.equal(withCase(kk(), ['les_jumeaux', 'penny_sleeve']).total, 210)
+})
+
+test('hype goes fractional and the total rounds down: 2-6 pair of 3s with Petite Monnaie = (10 + 3 + 3) × 2 × 1.25 × 1.25 = 50', () => {
+  const a = withCase([c(3, 'S'), c(3, 'H')], ['petite_monnaie'])
+  assert.equal(a.hype, 3.125)
+  assert.equal(a.total, 50)
+})
+
+test('ligne droite ×2.5 on a straight: (35 + 2+3+4+5+6) × 4 × 2.5 = 550. bis !: a signed 9 pair scores 3 times = (10 + 9×3 + 9) × 2 = 92', () => {
+  assert.equal(withCase([c(2, 'S'), c(3, 'H'), c(4, 'D'), c(5, 'C'), c(6, 'S')], ['ligne_droite']).total, 550)
+  assert.equal(withCase([c(9, 'S', { stamp: 'signed' }), c(9, 'H')], ['bis']).total, 92)
 })
 
 test('flush + K pair with a Wild 9 forges a K (anchored to the pair), not a 9', () => {
