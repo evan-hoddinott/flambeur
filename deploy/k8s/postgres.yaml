@@ -1,0 +1,55 @@
+# one postgres on precision02's disk (local-path), so it's pinned there for good.
+# needs secret flambeur-db (key: password), made by hand, see docs/architecture.md section 5
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: flambeur-db
+  namespace: flambeur
+spec:
+  serviceName: flambeur-db
+  replicas: 1
+  selector:
+    matchLabels: { app: flambeur-db }
+  template:
+    metadata:
+      labels: { app: flambeur-db }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: precision02
+      containers:
+        - name: postgres
+          image: postgres:17
+          ports:
+            - containerPort: 5432
+          env:
+            - { name: POSTGRES_DB, value: flambeur }
+            - { name: POSTGRES_USER, value: flambeur }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: flambeur-db, key: password } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, flambeur, -d, flambeur] }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests: { storage: 5Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flambeur-db
+  namespace: flambeur
+spec:
+  selector: { app: flambeur-db }
+  ports:
+    - { port: 5432, targetPort: 5432 }

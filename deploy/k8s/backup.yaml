@@ -1,0 +1,51 @@
+# nightly pg_dump (custom format, so a failed dump fails the job instead of leaving an empty file) onto precision03's disk, so a dead precision02 doesn't take the backups with it. keeps 14 days
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flambeur-backup
+  namespace: flambeur
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests: { storage: 5Gi }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flambeur-backup
+  namespace: flambeur
+spec:
+  schedule: "45 4 * * *" # utc, after the homelab's own backups
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 3 # a brand-new pod can be refused for a moment while the network policy catches up
+      template:
+        metadata:
+          labels: { app: flambeur-backup } # the db's network policy lets this in
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: precision03
+          containers:
+            - name: dump
+              image: postgres:17
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  f=/backup/flambeur-$(date -u +%Y%m%d-%H%M).dump
+                  pg_dump -h flambeur-db -U flambeur -Fc -f "$f.part" flambeur
+                  mv "$f.part" "$f"
+                  find /backup -name 'flambeur-*.dump' -mtime +14 -delete
+                  ls -l /backup
+              env:
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: flambeur-db, key: password } }
+              volumeMounts:
+                - { name: backup, mountPath: /backup }
+          volumes:
+            - name: backup
+              persistentVolumeClaim: { claimName: flambeur-backup }

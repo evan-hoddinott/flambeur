@@ -1,0 +1,8 @@
+node_modules
+.git
+.claude
+art
+docs
+sim
+*.md
+pitch.html

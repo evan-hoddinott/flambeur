@@ -1,0 +1,52 @@
+# the game server. one replica, Recreate: two pods at once would split the queue and the rooms.
+# flambeur:TAG is replaced by deploy.sh. the image is imported straight into precision02's containerd, no registry
+# needs secret flambeur (keys: database-url, daily-secret), made by hand, see docs/architecture.md section 5
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flambeur
+  namespace: flambeur
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: flambeur }
+  template:
+    metadata:
+      labels: { app: flambeur }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: precision02
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: app
+          image: docker.io/library/flambeur:TAG
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: flambeur, key: database-url } }
+            - name: DAILY_SECRET
+              valueFrom: { secretKeyRef: { name: flambeur, key: daily-secret } }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flambeur
+  namespace: flambeur
+spec:
+  selector: { app: flambeur }
+  ports:
+    - { port: 80, targetPort: 8080 }

@@ -1,0 +1,35 @@
+# only the tunnel reaches the app, and only the app and the backup job reach postgres.
+# without these, any pod in the cluster could talk to the app (spoofing cf-connecting-ip) or the db
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flambeur-app
+  namespace: flambeur
+spec:
+  podSelector:
+    matchLabels: { app: flambeur }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: cloudflared }
+      ports:
+        - { port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flambeur-db
+  namespace: flambeur
+spec:
+  podSelector:
+    matchLabels: { app: flambeur-db }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: flambeur }
+        - podSelector:
+            matchLabels: { app: flambeur-backup }
+      ports:
+        - { port: 5432 }
