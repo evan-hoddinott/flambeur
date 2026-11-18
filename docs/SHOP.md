@@ -2,7 +2,9 @@
 
 The tabac between rounds: you stand at the counter, the buraliste stands behind it, and everything for sale sits on a shelf in front of him. This doc is for the art agent and whoever builds the renderer. Style, palette and motion come from `docs/ART.md`, cards from `docs/CARDS.md`, buttons and hover cues from `docs/READABILITY.md`. The shop's rules and prices are in `DESIGN.md` and are already built (`src/engine/shop.ts`, `match.ts`). This doc only says how they look.
 
-**Built Nov 17 (first pass):** the counter view is in the game (`src/ui/shop.ts`, art from `art/shop/buraliste.py` and `art/shop/counter.py`, which export `art/shop/shop.png` + `shop.json`). Working: the buraliste's idle (reading, glances, sighs and "Alors ?" after 20s), bubbles (Bonjour, Bon, Pfff, Mouais), the offer shelf with hover tags and VENDU, the deal-in on restock, the bell (click it or the Restock ticket), the sign with a hover tag, the STONKS board with Chatty's tip, the round and next-twist note, the wall clock online, and the bottom bar. Still the DOM harness: pack ripping, the binder (tap to pick, sell all), the Vitrine, the grading desk and the scratcher pick. Not built yet: the whip-pan, the side pan to the guichet, the salty note (needs `rolledOver` in the view), the god-pull stare. Evan wants a polish pass on all the art.
+**Built Nov 17 (first pass):** the counter view is in the game (`src/ui/shop.ts`, art from `art/shop/buraliste.py` and `art/shop/counter.py`, which export `art/shop/shop.png` + `shop.json`). Working: the buraliste's idle (reading, glances, sighs and "Alors ?" after 20s), bubbles (Bonjour, Bon, Pfff, Mouais), the offer shelf with hover tags and VENDU, the deal-in on restock, the bell (click it or the Restock ticket), the sign with a hover tag, the STONKS board with Chatty's tip, the round and next-twist note, the wall clock online, and the bottom bar. Still the DOM harness: pack ripping, the binder (tap to pick, sell all), the Vitrine, the grading desk and the scratcher pick. Not built yet: the whip-pan, the side pan to the guichet, the salty note (needs `rolledOver` in the view), the god-pull stare.
+
+**Polished Nov 18** (brief: `docs/handoff-shop-polish.md`): the back wall is a real tabac (green faience tiles as the color anchor, carton cubbies, mirror, lottery poster, lighter carousel), a pendant lamp lights the counter with a warm pool and dark edges, the case is a framed vitrine with a velvet back, a light strip, glass bands, and a contact shadow and reflection under each offer. The row is centered. Offers lift and tilt on hover with a cream outline. Tickets use the READABILITY colors (Restock and Bin Bulk green, Grading violet, Sortir brass), the plate uses the Didone, the deck pile is card-sized with a caption, and the binder is leather. The buraliste is shaded to the lamp. Beats: door bell on arrival, buy hop with coins to the plate and a count-down, restock box slam with the old row sliding out, Bin Bulk thunk.
 
 Nov 17 2026, from Evan's shop ideation answers. The scope is **full**: everything here ships Friday. Where this doc and ART.md disagree about the shop, this doc wins.
 
@@ -42,7 +44,7 @@ Change these here if they're wrong.
 | What's in the side pan? | The **postal window** (grading desk) only. The binder opens over the counter, so it doesn't need a table. |
 | Where does the binder live? | A leather binder lying on the counter, bottom-right. Click it to open it over the scene. |
 | How do scratchers resolve? | The ticket lifts off the shelf and grows to fill the center. You **rub it** (drag) to scratch; a click scratches it all at once. Checklist and Wishlist then open the deck or binder picker. |
-| How do collectibles look on the shelf? | A collectible stands on a little **card-sized easel** with its icon, the same art as in the Vitrine, so they're as big as the packs. |
+| How do collectibles look on the shelf? | A collectible stands on the shelf **as itself**, at its own size, the same sprite as in the Vitrine (CARDS.md §14.2). Its slot is its width + 8 px. |
 | The sleeve offer | Last in the row, on a **velvet card stand** with a "Spécial Table" tag, only in the shop before the tournament round. |
 | How do you leave? | A brass **Sortir** ticket, bottom-right, the only thing that pulses (READABILITY.md §2). |
 | Multiplayer timer | A **wall clock** behind the buraliste, with a red hand sweeping the 30s (45s before a boss). Solo has no clock. |
@@ -154,10 +156,113 @@ Bubble lines are short, flavor only, and never repeat back to back.
 
 ## 7. Scratchers
 
-- Click a scratcher: it lifts off the shelf and grows to the middle of the screen.
-- **Rub to scratch:** dragging scrapes off the silver foil (a mask texture), with a scratchy sound. A click scratches it all.
-- Under the foil: the insert's name and one line (Code, Checklist, Wishlist, Grail). Grail gets the god-pull flash.
-- Checklist and Wishlist then open the deck or binder picker, as the rules say. Code shows the hand leveling up on a little paper chart.
+Rules are in DESIGN.md, "Scratchers". This section is the look. Proposed by Claude Nov 17, not yet picked by Evan.
+
+### 7.1 One ticket design
+
+The insert rolls **when you scratch** (`scratch()` in match.ts), not when the shop stocks. So **every ticket on the shelf is the same design**; the four inserts only differ under the foil. That's also how real tickets work: you can't tell a winner from the outside.
+
+**The brand: La Fortune du Pot.** A parody French ticket à gratter (FDJ's Cash / Millionnaire family, never their real names or layouts). The name puns on the poker pot. Alternatives if it doesn't land: *Coup de Bol* (slang for a lucky break, absinthe on violet) or *Le Magot* (the stash, black and gold).
+
+### 7.2 Shelf ticket (72×104)
+
+Top to bottom:
+- **Perforated top and bottom edges**, like it was just torn off the roll at the register.
+- **Header band**, burgundy, with "LA FORTUNE / du Pot" in brass.
+- **Small illustration**: a copper cocotte overflowing with jetons (cream, burgundy, green), with a wisp of steam.
+- **Foil block**: silver, with "GRATTEZ" embossed.
+- **Footer**: the price in money green on the left, a tiny serial number "N° 041 7…" on the right.
+
+Paper cream ground, a burgundy inner frame and a brass hairline frame, and a hard drop shadow on the shelf. It sits in the scratcher group of the offer row (§2) like any other offer, with the usual hover tag: "Ticket à gratter · $3 · Scratch for a random insert."
+
+### 7.3 Up close (200×280)
+
+Click it and it lifts off the shelf, flips flat and grows to the center, over a darkened counter (same spring as a pack lifting). Same layout as the shelf ticket, bigger:
+- The header and illustration take the top 100 px.
+- **The foil: six windows, find 3 matching symbols.** A 3×2 grid of foil squares, each about 48×46, under a small printed line "3 SYMBOLES IDENTIQUES". This is what makes it feel like a real ticket instead of a loot box with a skin.
+- Under the windows sit three of the prize's emblem plus three decoys. The decoys never make a second triple.
+- **Near-miss tease:** on a non-Grail ticket, two of the decoys are Grail chalices, so you always almost hit it. Real tickets are designed this way. It costs nothing and makes every scratch a little tense.
+- **The footer** is the price, the serial, and the odds as legal small print: "1 chance sur 12 de gagner le Graal". That explains the Grail in one line, so the complexity rule holds.
+
+The fallback, if six windows read too busy at phone size, is one big foil panel with the emblem, name and line under it.
+
+### 7.4 Scratching
+
+- **Your cursor becomes a $1 jeton** (cream, brass ring, F monogram) over the foil. You scratch with a coin, like at the tabac.
+- **The scratch itself:**
+  - **Drag to rub.** The coin erases foil with a round brush about 4 art px wide, with a ragged edge (edge pixels drop out at random), so the scratch looks hand-made, not vector.
+  - The foil is a per-pixel mask over the printed ticket, not a fade.
+  - **Click once without dragging** and the windows clear one after another, about 110 ms apart. That's the fast path for people who don't care.
+  - **Auto-finish:** a window that's about 55% scraped clears the rest by itself, so you never hunt for the last pixels.
+- **The foil:**
+  - It is a 5-step silver ramp (`#5c5c6e` → `#dcdce8`) with a slow diagonal sheen band, and the TABAC diamond embossed every 10 px.
+  - It is outside the master palette on purpose, like the shaders (ART.md §4).
+  - A light-colored top-left edge and a dark bottom-right edge make each window look raised.
+- **Flakes:** scraped pixels spawn silver flakes in the foil's own colors. They hop up, fall with gravity, land on the zinc counter edge under the ticket, sit there a few seconds and fade.
+- **Sound:** a dry scratchy noise loop while dragging, its pitch following the drag speed. Then a tick as each window clears, and the reveal sting on the match.
+- **The match:** when the third matching symbol shows, the three light up in sequence. Then a red **GAGNÉ ! — CODE** rubber stamp slams across the windows at a slight angle, with a thunk, a 1 px push, and the card-scale juice. The one-line rule prints on a paper tag under the ticket.
+
+### 7.5 The four emblems
+
+Each insert gets **one emblem, one color, one silhouette** (CARDS.md §0.5, one visual channel per thing). They're 16×16 sprites: 32×32 in the windows, 48×48 on any big reveal.
+
+| Insert | Emblem | Colors | After the stamp |
+|---|---|---|---|
+| **Code** (40%) | A paper bar chart with rising flame bars | Cream paper, flame orange bars | A little paper chart slides up out of the ticket. The hand type's row ticks up one level: its bar grows, and the Value and Hype numbers count up in their colors. Then it slides away. |
+| **Checklist** (30%) | A playing card with a big heart and a green ✓ stamped on its corner | Cream, burgundy, money green | The deck picker fans out (as today). Pick a card, then pick a suit from four rubber stamps. The stamp thunks the new suit onto the card in fresh ink, which smears for a frame. |
+| **Wishlist** (22%) | A brass shooting star with violet sparkles | Brass, violet | The binder flops open over the counter. Pick a card: it slides out of its sleeve with a twinkle and flies to the deck pile, bottom-left. |
+| **Grail** (8%) | A gold chalice with absinthe green liquid | Brass, absinthe | **The god pull, ticket version.** See 7.6. |
+
+### 7.6 The Grail
+
+The Grail is the only result that breaks the counter's calm. It's the second-biggest moment in the shop, after a god pull in a pack.
+- On the third chalice: a short screen shake, then **light rays** in alternating brass and absinthe green, rotating slowly behind the ticket.
+- Then the **fée verte flash**: an absinthe green radial bloom over the whole view, with a light leak at the edge. It fades over about 2 s.
+- The buraliste **drops his cigarette** and stares, the same reaction as the pack god pull (§1). The cigarette is still lying on the counter when the ticket goes away.
+- The prize rises **out of the ticket**:
+  - A rare collectible floats up and settles into the Vitrine.
+  - A Joker card spins up face-down, flips, and flies to the deck.
+  - If the case is full, the half-price tag shows up as a little paper tag stapled to the ticket.
+- **Callout**: "LE GRAAL !" in the Didone, flame ramp.
+
+### 7.7 Afterward
+
+The spent ticket shrinks back onto the counter, scratched, and stays there next to the register for the rest of the shop: a little pile of losing-looking tickets, the way a real tabac counter looks. It's cleared when you leave. Flakes fade on their own.
+
+### 7.8 Bots and the rival
+
+The rival shops off-screen (§1), so their scratchers are never shown. Nothing to draw.
+
+### 7.9 Fast scratching (multiplayer)
+
+The multiplayer shop is 30s (45s before a tournament round). A full rub with the close-up, the stamp and a Grail beat is easily 8–10s of that. So in multiplayer, scratching has to be about one second and must never block the rest of the shop.
+
+**Scratching is theater, never a round trip.** Buying the ticket is the action: the server rolls the insert inside `step()` and the result is already in the view before any foil comes off. Nothing the client does while scratching talks to the server, so speeding it up or skipping it is a pure client choice. The rule for the UI: **the result is shown no later than the animation finishes, and input is never locked while it plays.**
+
+**The quick scratch** is the multiplayer default, and also the "click once" path in solo:
+- **No close-up.** The ticket scratches **in place on the shelf**, at 72×104.
+- **One click:**
+  - The jeton swipes across the foil block in a single diagonal stroke, about 300 ms, throwing a puff of flakes.
+  - The foil is gone and the result emblem pops up in the block with a small overshoot.
+  - The paper result tag ("Code · Levels up a random hand type") hangs under the ticket.
+  - That's about 0.6s from click to the result being readable.
+- **No six-window search.** The near-miss tease and the GAGNÉ stamp are solo-only. The shelf ticket shows only the single prize emblem.
+- **You can keep shopping during it.** Clicking another offer while the swipe plays finishes the swipe instantly and handles the new click.
+- **The Grail, short version:**
+  - a ~0.8s fée verte flash and rays behind that ticket only, no screen-wide bloom
+  - the buraliste's cigarette drop (it plays while you keep shopping)
+  - the prize flies straight to the Vitrine or the deck
+
+**The picks are the real time sink.** Checklist and Wishlist block the shop until you choose (DESIGN.md, "Scratchers"). To make them one tap:
+- The picker opens **with a suggestion already selected**. For Checklist, it's an off-suit card, with your deck's main suit as the new suit. For Wishlist, it's your most valuable binder card. This is the same logic the bots use, so it's already written.
+- It shows as a small strip over the bottom of the counter, not a full-screen overlay. The strip has the suggested card raised, the rest of the row behind it, and one brass **OK** ticket. Tap OK to accept, or tap a different card first.
+- For Checklist, the four suit stamps sit next to OK, with the suggested suit already inked.
+- **The timeout takes the suggestion**, not the first card / next suit the engine uses today (`defaultAction` in match.ts). An AFK player gets a sensible pick, and the suggestion the UI shows is exactly what the timer will do.
+- If the shop clock hits 0 with a pick open, the suggestion is applied and stamped *auto* on the result tag.
+
+**Solo** keeps the full ritual by default (§7.3–7.6), with a **Quick scratch** toggle in options for players who've seen it enough. The close-up and the six windows are flavor; quick scratch is the same result.
+
+**Engine work this needs:** move the bots' Checklist/Wishlist choice into a shared `suggestInsert(p)` helper, used by the bot, the view's pre-selection and `defaultAction`. Nothing else changes server-side.
 
 ---
 
@@ -179,8 +284,11 @@ Bubble lines are short, flavor only, and never repeat back to back.
 | Counter edge (zinc) | 640×12 | Tiles |
 | Shelf case | 640×146 | Glass front as an overlay layer |
 | Pack art, 3 paid + free | 72×104 each | Parody Belle Époque brands, one per lane (ART.md §7.5) |
-| Collectible easel | 72×104 | Icon from the Vitrine art on top |
-| Scratcher ticket | 72×104, and ~200×280 up close | Foil layer separate |
+| Collectibles | own sizes, max 100×106 | The Vitrine sprites themselves (CARDS.md §14), no easel |
+| Scratcher ticket | 72×104, and ~200×280 up close | La Fortune du Pot (§7). Foil is a separate per-pixel mask layer, drawn by code |
+| Scratcher emblems × 4 | 16×16 (drawn ×2 / ×3) | Code chart, Checklist card + ✓, Wishlist star, Grail chalice (§7.5) |
+| GAGNÉ stamp | ~110×18 | Red ink stamp, insert name by code |
+| Jeton cursor | 16×16 | The $1 jeton (ART.md §10) |
 | Sleeve stand | 72×104 | Velvet stand, "Spécial Table" tag |
 | Price tag | 40×12 | Text by code |
 | VENDU slip | 48×16 | |
@@ -198,5 +306,6 @@ Bubble lines are short, flavor only, and never repeat back to back.
 ## 9. Still open
 
 - ~~The four pack brands~~: done in `art/packaging/boosters/build.py`. Free = Le Perchoir chocolate, Off-Brand = Faux Frère, Repack = Le Roussi biscuits, Collector = Sélène parfums.
-- **Collectible icons:** do all 29 have Vitrine art yet? The easel needs it.
+- **Collectible art:** all 29 are specced in CARDS.md §14, none drawn yet. Check the shelf row still fits when the wide ones (Playmat 100, Triple Threat 100) show up together.
+- **Scratchers:** §7 is Claude's proposal (brand, six windows with the near-miss tease, emblems, Grail beat). Evan to confirm or swap the brand / go to the single panel. Multiplayer quick scratch (§7.9) needs `suggestInsert(p)` in the engine and the timeout default changed to use it.
 - **Phone layout:** the row of 8 at 72 px fits 640 wide, but check it's readable at phone size, or wrap to two rows of 4.

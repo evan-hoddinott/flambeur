@@ -38,47 +38,44 @@ def outline(img, color=INK0):
     return Image.alpha_composite(out, img)
 
 
-def px(d, pts, color):
-    for p in pts:
-        d.point(p, fill=color)
-
-
 def torso():
     img, d = layer()
-    # hunched shoulders and a belly, cut by the counter
-    d.polygon([(18, 172), (22, 136), (34, 118), (62, 106), (86, 102), (114, 102), (138, 106), (166, 118), (178, 136), (182, 172)], fill=G2)
-    # shadow side (light comes from the window, top-left)
-    d.polygon([(140, 108), (166, 118), (178, 136), (182, 172), (150, 172), (152, 130)], fill=G1)
-    d.polygon([(18, 172), (22, 136), (34, 118), (40, 116), (32, 140), (30, 172)], fill=G1)
-    # knit ribs: dark vertical stitches
-    for x in range(30, 176, 6):
-        for y in range(124 + abs(x - 100) // 8, 172, 2):
-            if (x + y) % 4 == 0:
-                d.point((x, y), fill=G1)
-    # shoulder highlight
-    d.line([(40, 115), (62, 108), (82, 105)], fill=G3, width=2)
-    # shirt in the V
-    d.polygon([(82, 102), (118, 102), (108, 150), (100, 164), (92, 150)], fill=CREAM)
-    d.polygon([(100, 112), (118, 102), (108, 150), (100, 164)], fill=SKIN_L)
-    # collar points
-    d.polygon([(80, 101), (94, 104), (88, 122)], fill=WHITE)
-    d.polygon([(120, 101), (106, 104), (112, 122)], fill=SKIN_L)
-    d.line([(80, 101), (88, 122), (94, 104)], fill=SKIN_S)
-    d.line([(120, 101), (112, 122), (106, 104)], fill=SKIN_S)
-    # cardigan edges, placket and brass buttons
-    d.line([(80, 104), (93, 152), (100, 166)], fill=G3, width=3)
-    d.line([(120, 104), (107, 152), (100, 166)], fill=G0, width=3)
-    for y in (138, 152):
-        x = 96 if y == 138 else 98
-        d.rectangle([x - 1, y - 1, x + 1, y + 1], fill=BRASS)
-        d.point((x - 1, y - 1), fill=BRASS_L)
-    # breast pocket with a pack of cigarettes peeking out
-    d.rectangle([126, 128, 146, 144], fill=G1)
-    d.line([(126, 128), (146, 128)], fill=G3)
-    d.rectangle([129, 120, 139, 129], fill=NAVY)
-    d.line([(129, 120), (139, 120)], fill=NAVY_L)
-    d.rectangle([131, 123, 137, 125], fill=CREAM)
-    d.line([(141, 121), (141, 128)], fill=WHITE)  # a loose cigarette
+    # his left shoulder carries the weight, his right shoulder rolls forward
+    d.polygon([(23,165),(26,136),(34,121),(48,114),(67,109),(80,102),(111,100),
+               (130,106),(149,109),(161,116),(171,135),(175,165)], fill=G0)
+    d.polygon([(29,156),(32,134),(40,121),(55,115),(72,111),(83,104),(111,103),
+               (130,109),(147,111),(159,120),(165,138),(160,157),(133,166),(57,167)], fill=G1)
+    d.polygon([(34,140),(41,125),(50,119),(69,113),(80,107),(98,115),(90,132),
+               (70,137),(61,146),(46,145)], fill=G2)
+    d.polygon([(46,122),(51,117),(69,111),(76,108),(73,113),(61,115),(54,119)], fill=G3)
+    d.polygon([(124,108),(143,112),(155,119),(161,128),(150,122),(133,118)], fill=G2)
+    # rumpled shirt with a loose top button under his chin
+    d.polygon([(78,106),(90,102),(110,101),(123,105),(115,126),(94,153),
+               (87,137)], fill=SKIN_S)
+    d.polygon([(80,108),(96,111),(108,106),(118,105),(111,121),(94,146),
+               (89,130)], fill=SKIN_L)
+    d.polygon([(90,108),(96,110),(105,106),(98,118)], fill=SKIN_D)
+    d.polygon([(78,106),(85,102),(96,110),(89,119),(84,115)], fill=CREAM)
+    d.polygon([(99,114),(108,104),(118,102),(113,113),(104,110)], fill=CREAM)
+    d.line([(99,117),(96,129),(95,137)], fill=SKIN_S)
+    d.point((98,122), fill=SKIN_D)
+    # ribbed shawl collar turns back into a wide button band
+    d.polygon([(79,103),(73,107),(77,122),(87,142),(89,154),(95,161),
+               (94,147),(88,130)], fill=G0)
+    d.line([(76,108),(80,120),(86,132)], fill=G3, width=2)
+    d.polygon([(120,102),(128,106),(123,115),(116,122),(101,143),(96,159),
+               (89,162),(89,151),(95,139),(109,121)], fill=G2)
+    d.line([(124,107),(118,116),(111,122),(98,141)], fill=G3)
+    for x,y in [(121,109),(116,116),(111,122),(105,129),(100,136)]:
+        d.line([(x-2,y),(x+1,y+2)], fill=G1)
+    for x,y in [(96,147),(91,159)]:
+        d.ellipse((x-2,y-2,x+2,y+2), fill=INK2)
+        d.point((x-1,y-1), fill=BRASS)
+    # pack sits inside the welt of the sagging pocket
+    d.polygon([(128,125),(139,123),(141,133),(130,136)], fill=NAVY)
+    d.line([(129,126),(138,124)], fill=CREAM, width=2)
+    d.polygon([(124,133),(145,129),(143,143),(134,148),(126,146)], fill=G0)
+    d.line([(125,133),(133,134),(144,130)], fill=G2, width=2)
     return outline(img)
 
 
@@ -95,34 +92,35 @@ def head():
     for x0 in (62, 128):
         d.ellipse([x0, 56, x0 + 10, 76], fill=SKIN_S)
         d.ellipse([x0 + 3, 60, x0 + 7, 72], fill=SKIN_D)
-    # skull: bald dome, wide jowly bottom
-    d.ellipse([67, 20, 133, 84], fill=SKIN)
-    d.polygon([(68, 60), (132, 60), (130, 88), (118, 100), (82, 100), (70, 88)], fill=SKIN)
-    # shading on the right, highlight on the dome
-    d.chord([67, 20, 133, 84], 300, 90, fill=SKIN_S)
-    d.polygon([(124, 60), (132, 60), (130, 88), (118, 100), (112, 98), (124, 84)], fill=SKIN_S)
-    d.ellipse([80, 26, 98, 36], fill=SKIN_L)
-    d.ellipse([84, 28, 90, 31], fill=CREAM)
-    # forehead wrinkles
-    for y, x0, x1 in ((40, 84, 116), (45, 80, 120)):
-        d.line([(x0, y), (x0 + 6, y - 1), (x1 - 6, y - 1), (x1, y)], fill=SKIN_S)
-    # grey hair horseshoe on the sides, in tufts
-    for side in (-1, 1):
-        base, shade = (CREAM, SKIN_L) if side < 0 else (SKIN_L, SKIN)
-        x_in, x_out = 100 + side * 24, 100 + side * 37
-        tufts = [(x_out, 42), (x_out + side * 2, 47), (x_out, 52), (x_out + side * 2, 57), (x_out - side, 62),
-                 (x_in + side * 3, 64), (x_in, 58), (x_in + side, 50), (x_in - side * 2, 43), (x_in + side * 4, 39)]
-        d.polygon(tufts, fill=base)
-        for y in (45, 51, 57):
-            d.line([(x_in + side * 4, y), (x_out - side * 2, y + 2)], fill=shade)
-    # ruddy cheeks
-    for cx in (81, 119):
-        px(d, [(x, y) for x in range(cx - 6, cx + 7) for y in range(72, 81) if (x + y) % 2 == 0 and ((x - cx) / 6) ** 2 + ((y - 76) / 4) ** 2 < 1], FLUSH_D)
-    # jowl lines
-    d.line([(78, 82), (80, 92), (86, 98)], fill=SKIN_S)
-    d.line([(122, 82), (120, 92), (114, 98)], fill=SKIN_D)
-    # chin stubble dots
-    px(d, [(x, y) for x in range(86, 116, 3) for y in (96, 99) if (x + y) % 2], SKIN_S)
+    # broad temples, one sagging cheek and a heavy folded chin
+    d.polygon([(66,53),(68,36),(76,25),(85,19),(103,17),(116,21),(128,32),
+               (133,47),(131,68),(135,77),(133,90),(124,99),(109,106),
+               (88,104),(74,97),(67,86),(65,73)], fill=SKIN_S)
+    d.polygon([(68,50),(71,36),(79,26),(88,21),(104,19),(116,23),(124,31),
+               (128,45),(123,57),(121,70),(129,77),(126,87),(113,96),
+               (95,99),(78,94),(69,85),(67,73)], fill=SKIN)
+    d.polygon([(72,47),(75,35),(83,26),(92,22),(104,21),(115,25),(123,33),
+               (119,37),(109,35),(100,38),(92,36),(82,40)], fill=SKIN_L)
+    d.line([(85,27),(92,24),(102,23),(108,24)], fill=CREAM, width=2)
+    for ridge in ([(80,46),(88,42),(97,43),(104,41),(115,40)],
+                  [(84,51),(92,48),(100,49),(107,46),(115,45)]):
+        d.line([(x,y+1) for x,y in ridge], fill=SKIN_L)
+        d.line(ridge, fill=SKIN_S)
+    for side in (-1,1):
+        def temple(points):
+            return [(100+side*x,y) for x,y in points]
+        d.polygon(temple([(26,49),(27,41),(32,34),(31,40),(37,36),(35,43),
+                          (40,42),(37,48),(39,49),(34,55),(32,67),(28,69)]), fill=SKIN_D)
+        d.polygon(temple([(27,48),(30,41),(36,37),(32,44),(38,43),
+                          (33,49),(30,60),(28,64)]), fill=SKIN_L)
+        d.line(temple([(27,48),(29,43),(32,40)]), fill=CREAM)
+        d.line(temple([(36,63),(34,61),(33,65)]), fill=SKIN_L)
+        d.polygon(temple([(15,73),(21,69),(27,70),(29,75),(25,78),(20,77)]), fill=SKIN_S)
+        d.line(temple([(17,73),(22,71),(26,71)]), fill=SKIN_L)
+        d.line(temple([(20,78),(25,80),(28,86)]), fill=SKIN_D)
+        d.line(temple([(27,81),(30,86),(28,91)]), fill=SKIN_L)
+    d.line([(80,96),(90,101),(104,102),(116,98)], fill=SKIN_D, width=2)
+    d.line([(88,97),(97,99),(106,98)], fill=SKIN_L)
     return outline(img)
 
 
@@ -169,14 +167,14 @@ def nose():
     # a big bulbous nose that sits on top of the mustache
     d.polygon([(97, 58), (103, 58), (107, 70), (93, 70)], fill=SKIN)
     d.line([(103, 60), (107, 69)], fill=SKIN_S)
-    # the bulb: lighter and redder than the face so it pops
-    d.ellipse([88, 66, 112, 83], fill=SKIN_L)
-    d.chord([88, 66, 112, 83], 330, 110, fill=SKIN)
-    d.ellipse([92, 68, 98, 73], fill=CREAM)
-    px(d, [(x, y) for x in range(96, 110) for y in range(71, 82) if (x + y) % 2 == 0 and (x - 103) ** 2 + (y - 76) ** 2 < 26], FLUSH)
-    # nostrils
-    d.line([(92, 80), (96, 82)], fill=SKIN_D)
-    d.line([(104, 82), (108, 80)], fill=SKIN_D)
+    d.polygon([(94,60),(99,58),(102,60),(103,68),(109,69),(113,73),(111,79),
+               (104,83),(95,82),(89,79),(87,75),(89,71),(94,69)], fill=SKIN_S)
+    d.polygon([(96,60),(99,60),(100,69),(106,70),(109,74),(106,78),(99,80),
+               (91,77),(90,73),(95,70)], fill=SKIN)
+    d.polygon([(96,61),(99,61),(98,69),(103,71),(101,74),(94,75),(92,72),(96,69)], fill=SKIN_L)
+    d.line([(94,72),(97,70),(99,70)], fill=CREAM)
+    d.line([(89,77),(93,78),(95,80)], fill=SKIN_D)
+    d.line([(104,80),(107,77),(111,76)], fill=SKIN_D)
     return outline(img, INK1)
 
 
@@ -184,13 +182,15 @@ def mustache(mood):
     # a big walrus mustache. 'grump' droops, 'puff' bristles up when he exhales
     img, d = layer()
     lift = -2 if mood == 'puff' else 0
-    d.polygon([(100, 81), (110, 80), (120, 83 + lift), (126, 90 + lift), (124, 96), (116, 92), (108, 91), (100, 92),
-               (92, 91), (84, 92), (76, 96), (74, 90 + lift), (80, 83 + lift), (90, 80)], fill=CREAM)
-    d.polygon([(104, 88), (116, 86), (124, 92), (124, 96), (116, 92), (104, 91)], fill=SKIN_L)
-    d.polygon([(76, 96), (74, 90 + lift), (78, 88), (84, 92)], fill=SKIN_L)
-    for x in range(80, 122, 3):
-        d.line([(x, 84), (x + (1 if x > 100 else -1), 90)], fill=SKIN_L if x < 100 else SKIN)
-    d.line([(100, 82), (100, 90)], fill=SKIN)
+    for side in (-1,1):
+        def whiskers(points):
+            return [(100+side*x, y+lift*min(x,20)//20+(1 if side<0 and x>12 else 0)) for x,y in points]
+        d.polygon(whiskers([(0,82),(8,79),(17,80),(23,83),(29,90),(31,99),
+                            (26,96),(27,101),(20,95),(15,94),(10,90),(4,91),(0,88)]), fill=SKIN_D)
+        d.polygon(whiskers([(0,83),(9,80),(16,81),(22,84),(27,90),(29,96),
+                            (23,91),(24,96),(17,90),(13,91),(8,87),(3,89)]), fill=SKIN_L)
+        d.polygon(whiskers([(2,83),(10,81),(16,82),(20,85),(13,84),(17,88),(9,85),(5,86)]), fill=CREAM)
+        d.line(whiskers([(14,84),(20,87),(23,91)]), fill=SKIN)
     return outline(img)
 
 
@@ -203,44 +203,88 @@ def lip():
 
 def cigarette(lit=True):
     img, d = layer()
-    # hangs from the right corner of his mouth, tipped down
-    d.line([(108, 93), (126, 99)], fill=WHITE, width=3)
-    d.line([(108, 92), (125, 98)], fill=WHITE)
-    d.line([(109, 95), (126, 100)], fill=SKIN_L)
+    # a twist of paper caught under the right half of his moustache
+    d.line([(111,93),(118,94),(141,101)], fill=INK1, width=3)
+    d.line([(112,93),(118,94)], fill=SKIN_S, width=2)
+    d.line([(118,94),(136,99)], fill=SKIN_L, width=2)
+    d.line([(119,93),(135,98)], fill=WHITE)
+    d.line([(138,99),(142,100)], fill=SKIN_S, width=2)
+    d.point((141,99), fill=CREAM)
     if lit:
-        d.rectangle([125, 97, 128, 101], fill=EMBER)
-        d.point((127, 98), fill=EMBER_L)
-        d.point((128, 99), fill=SKIN_S)
-    return outline(img)
+        d.line([(137,98),(136,100)], fill=EMBER)
+        d.point((137,99), fill=EMBER_L)
+    return img
 
 
 def arms():
     img, d = layer()
-    for side in (-1, 1):
-        fill, rib = (G1, G0) if side > 0 else (G2, G1)
-        shoulder, elbow, wrist = (100 + side * 66, 124), (100 + side * 76, 160), (100 + side * 44, 158)
-        d.line([shoulder, elbow, wrist], fill=fill, width=20, joint="curve")
-        d.ellipse([elbow[0] - 10, elbow[1] - 10, elbow[0] + 10, elbow[1] + 10], fill=fill)
-        # cuff
-        d.line([(wrist[0] + side * 4, 150), (wrist[0] + side * 4, 166)], fill=rib, width=3)
-        for y in range(130, 158, 4):
-            d.point((shoulder[0] + side * 4, y), fill=rib)
+    # the outer sleeve runs from each shoulder to the elbow on the counter
+    for contour, face, seam, crease in [
+        ([(54,113),(42,116),(33,122),(26,131),(19,142),(18,151),(22,157),
+          (34,158),(44,150),(47,137),(52,129),(61,121)],
+         [(50,116),(41,119),(34,125),(28,135),(25,142),(32,139),(37,131),(46,127)],
+         [(36,123),(42,120),(48,118)], [(25,141),(30,138),(36,138)]),
+        ([(146,110),(157,113),(166,120),(172,131),(178,141),(177,150),
+          (171,155),(158,152),(153,144),(150,131),(142,122)],
+         [(148,112),(156,115),(164,121),(169,131),(163,126),(156,124),(152,119)],
+         [(151,114),(158,117),(163,122)], [(166,132),(171,136),(173,139)])]:
+        d.polygon(contour, fill=G1)
+        d.polygon(face, fill=G2)
+        d.line(seam, fill=G3)
+        d.line(crease, fill=G0, width=2)
+    return outline(img)
+
+
+def forearms():
+    img, d = layer()
+    # one elbow planted, the other tucked back as he holds up the sports page
+    d.polygon([(18,144),(24,140),(32,139),(41,142),(57,139),(62,141),
+               (65,151),(51,156),(34,160),(25,160),(18,156),(16,151)], fill=G0)
+    d.polygon([(18,145),(25,141),(33,141),(42,144),(55,141),(59,148),
+               (49,152),(31,156),(22,155),(18,152)], fill=G2)
+    d.line([(19,146),(25,143),(31,143)], fill=G3)
+    d.line([(23,152),(28,149),(35,149)], fill=G1, width=2)
+    d.polygon([(50,141),(58,138),(63,141),(66,150),(57,154)], fill=G1)
+    for x in (52,55,58):
+        d.line([(x,142),(x+4,151)], fill=G0)
+    d.polygon([(139,132),(145,129),(153,132),(166,138),(172,137),(177,140),
+               (179,146),(176,152),(170,155),(161,154),(146,147),(137,144)], fill=G0)
+    d.polygon([(145,131),(153,134),(164,139),(171,140),(175,139),(177,144),
+               (175,149),(170,152),(161,150),(147,144),(141,140)], fill=G2)
+    d.line([(152,135),(164,141),(170,142)], fill=G3)
+    d.line([(164,146),(171,144),(175,145)], fill=G1, width=2)
+    d.polygon([(140,130),(150,132),(149,139),(145,146),(137,143)], fill=G1)
+    for x in (141,144,147):
+        d.line([(x,133),(x-3,143)], fill=G0)
     return outline(img)
 
 
 def hands():
     img, d = layer()
-    for side in (-1, 1):
-        cx = 100 + side * 40
-        # back of the hand, fingers curled over the top edge of the paper
-        d.rounded_rectangle([cx - 8, 146, cx + 8, 156], 3, fill=SKIN)
-        d.rectangle([cx - 8, 153, cx + 8, 156], fill=SKIN_S)
-        for i in (-4, 0, 4):
-            d.line([(cx + i, 152), (cx + i, 156)], fill=SKIN_D)
-        d.line([(cx - 6, 147), (cx + 2, 147)], fill=SKIN_L)
-        # thumb
-        tx = cx - side * 9
-        d.rounded_rectangle([tx - 3, 149, tx + 3, 156], 2, fill=SKIN_S)
+    # left index follows the score column, with the other fingers curled below it
+    d.polygon([(58,143),(63,138),(68,136),(72,137),(76,140),(85,141),(89,144),
+               (88,146),(77,145),(79,148),(77,151),(75,151),(73,154),(69,154),
+               (66,155),(61,152),(58,149)], fill=SKIN_S)
+    d.polygon([(59,143),(65,139),(69,138),(74,141),(81,142),(86,143),(87,145),
+               (76,143),(72,145),(68,143),(63,147),(61,149)], fill=SKIN)
+    d.line([(64,140),(68,138),(71,139)], fill=SKIN_L, width=2)
+    d.line([(79,142),(85,143)], fill=SKIN_L)
+    d.polygon([(65,144),(70,142),(75,144),(80,149),(79,151),(77,151),(73,147),(69,146)], fill=SKIN)
+    d.polygon([(63,147),(67,145),(72,147),(76,152),(74,154),(70,150),(67,149)], fill=SKIN)
+    d.line([(68,145),(72,145),(75,148)], fill=SKIN_L)
+    d.line([(64,148),(67,147),(70,149)], fill=SKIN_L)
+    d.line([(73,146),(78,151)], fill=SKIN_D)
+    d.line([(71,150),(73,153)], fill=SKIN_D)
+    d.line([(84,143),(86,144)], fill=SKIN_L)
+    # his other thumb pins the page; only the tips curl around its edge
+    d.polygon([(144,133),(141,130),(138,128),(134,127),(131,128),(130,131),
+               (132,133),(127,135),(126,138),(128,140),(135,136),
+               (133,141),(135,144),(140,144),(143,141),(146,137)], fill=SKIN_S)
+    d.polygon([(143,133),(138,129),(134,128),(132,129),(134,131),(139,133),
+               (135,133),(129,136),(128,138),(131,137),(137,135),(140,138)], fill=SKIN)
+    d.line([(134,129),(137,129),(140,131)], fill=SKIN_L)
+    d.line([(128,138),(131,136)], fill=SKIN_L)
+    d.line([(137,139),(135,142)], fill=SKIN_D)
     return outline(img)
 
 
@@ -250,21 +294,40 @@ def paper():
     d.polygon([(52, 150), (148, 150), (152, 172), (48, 172)], fill=SKIN_L)
     d.polygon([(100, 150), (148, 150), (152, 172), (100, 172)], fill=CREAM)
     d.line([(100, 150), (100, 172)], fill=SKIN_S)
-    # masthead and columns
-    d.rectangle([60, 153, 92, 157], fill=RED)
-    px(d, [(x, 155) for x in range(62, 91, 3)], CREAM)
-    for y in range(160, 172, 3):
-        d.line([(58, y), (94, y)], fill=SKIN_S)
-        d.line([(106, y), (144, y)], fill=SKIN_S)
-    d.rectangle([108, 153, 122, 158], fill=SKIN)  # a photo
-    return outline(img)
+    # the fold breaks the headline across two slightly different stocks
+    d.rectangle([65,151,97,157], fill=RED)
+    letters = ["100100100100111","111100110100111","111101101101111",
+               "101101101101111","111010010010111","110101110100100","111100110100111"]
+    for i, glyph in enumerate(letters):
+        for j, bit in enumerate(glyph):
+            if bit == "1":
+                d.point((67+i*4+j%3,152+j//3), fill=CREAM)
+    d.line([(54,159),(97,159)], fill=INK3)
+    for left,right in [(54,66),(69,81),(84,96),(119,145)]:
+        for y in range(161,172,2):
+            d.line([(left,y),(right-(y%3),y)], fill=SKIN_S)
+    d.rectangle([103,152,116,168], fill=SKIN_S)
+    d.polygon([(104,167),(108,162),(109,158),(108,155),(111,154),(113,156),
+               (112,159),(115,161),(114,163),(112,161),(110,164),(108,167)], fill=INK3)
+    d.line([(119,157),(143,157)], fill=INK2, width=2)
+    # left leaf bows at the spine; the right edge is lifted in his hand
+    sheet = Image.new("RGBA", (W, H))
+    for x in range(48,153):
+        col = img.crop((x,150,x+1,H))
+        lift = round((x-48)*0.11) if x<100 else round(6+(x-100)*0.30)
+        sheet.paste(col, (x,149-lift))
+    d = ImageDraw.Draw(sheet)
+    d.line([(52,149),(97,144),(101,144),(147,129)], fill=CREAM)
+    return outline(sheet)
 
 
 def compose(look='down', brow='grump', stache='grump', lit=True, front=True):
     # front = the paper and his hands, which rest on the counter top and draw over it
-    parts = [torso(), arms(), neck(), head(), eyes(look), brows(brow), nose(), mustache(stache), lip(), cigarette(lit)]
+    parts = [torso(), arms(), neck(), head(), nose(), lip(), eyes(look), brows(brow), mustache(stache)]
+    if lit:
+        parts.append(cigarette())
     if front:
-        parts += [paper(), hands()]
+        parts += [forearms(), paper(), hands()]
     out = Image.new("RGBA", (W, H))
     for p in parts:
         out = Image.alpha_composite(out, p)
@@ -272,7 +335,7 @@ def compose(look='down', brow='grump', stache='grump', lit=True, front=True):
 
 
 def front():
-    return Image.alpha_composite(paper(), hands())
+    return Image.alpha_composite(Image.alpha_composite(forearms(), paper()), hands())
 
 
 def proof():
