@@ -1,3 +1,4 @@
+import { juiceAt } from './motion.ts'
 // the title: one tall world you pan down through, like the side of an ant farm (docs/ART.md 7.1).
 // the street up top holds the logo, the cellar under it holds solo play, the sewers at the bottom hold online.
 // everything is drawn on one canvas on the duel's 640-wide stage, buttons are the duel's tickets.
@@ -191,7 +192,7 @@ function layout(): void {
 
 window.addEventListener('resize', () => layout())
 
-const live = () => !!root?.isConnected && !document.querySelector('.overlay')
+const live = () => !!root?.isConnected
 
 // any click or key skips the intro. the click still reaches whatever it was on
 function skip(): void {
@@ -517,15 +518,7 @@ function hit(key: string, x: number, y: number, w: number, h: number, act: () =>
 
 // the duel's juiceUp: a quick scale and wobble that settles in ~0.3 s
 function juiced(key: string): { s: number; r: number } {
-  const t0 = juice.get(key)
-  if (t0 === undefined) return { s: 1, r: 0 }
-  const t = (now - t0) / 1000
-  if (t > 0.5) {
-    juice.delete(key)
-    return { s: 1, r: 0 }
-  }
-  const e = Math.exp(-t * 10)
-  return { s: 1 + 0.18 * e, r: 0.1 * Math.sin(t * 34) * e }
+  return juiceAt(juice,key,now)
 }
 
 const breath = () => 0.5 - 0.5 * Math.cos((now / 1200) * Math.PI * 2)

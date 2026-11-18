@@ -49,15 +49,15 @@ export function lose(): void {
   ;[392, 330, 262].forEach((f, i) => tone(f, 300, 'sawtooth', 0.04, i * 120))
 }
 
-export function flip(rare: boolean): void {
+export function flip(rare: boolean, step = 0): void {
   if (rare) {
     ;[784, 988, 1175, 1568].forEach((f, i) => tone(f, 200, 'triangle', 0.07, i * 70))
   } else {
-    tone(520, 60, 'square', 0.03)
+    tone(520 * 1.08 ** step, 60, 'square', 0.03)
   }
 }
 
-export function rip(): void {
+export function rip(volume = 0.15): void {
   const a = audio()
   if (!a) return
   const len = Math.floor(a.sampleRate * 0.25)
@@ -66,7 +66,7 @@ export function rip(): void {
   for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len)
   const src = a.createBufferSource()
   const g = a.createGain()
-  g.gain.value = 0.15
+  g.gain.value = volume
   src.buffer = buf
   src.connect(g).connect(a.destination)
   src.start()
@@ -119,4 +119,10 @@ export function scratch(speed: number): void {
   src.buffer = buf
   src.connect(filter).connect(g).connect(a.destination)
   src.start()
+}
+
+export function creak(): void {
+  tone(82, 170, 'sawtooth', .018)
+  tone(112, 85, 'triangle', .035, 100)
+  tone(170, 28, 'square', .017, 230)
 }

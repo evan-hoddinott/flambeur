@@ -1,18 +1,24 @@
+import { progress, mix, whipPan } from './motion.ts'
 import { laneArt } from './lanes.ts'
 import { collectible, drawCollectible, opaque } from './collectibles.ts'
 // the tabac: first person at the counter, the buraliste behind it, the offers on a glass shelf under him.
-// layout is the art proof's (art/shop/counter.py), in 640x360 stage units. spec: docs/SHOP.md.
+// layout is the art proof's (art/shop/counter.py), in 640x360 stage units. spec: docs/SHOP.md, frame zones: docs/UX.md §2.
 // main.ts owns the game, this file only draws a ShopState and reports clicks back through it
-import { cardCanvas, sprite, tinted, ctx2d, backCanvas, blit, canvas } from './art.ts'
-import { drawText, measure, wrapText, type TextStyle } from './font.ts'
-import { describe, getDef } from '../engine/collectibles.ts'
+import { cardCanvas, sprite, ctx2d, blit, canvas, nineSlice } from './art.ts'
+import { drawText, measure, plainText, wrapText, type TextStyle } from './font.ts'
 import { rankLabel, SUIT_GLYPH, type Card } from '../engine/cards.ts'
 import { getKeeper, INSERTS, type Insert } from '../engine/shop.ts'
-import { getSleeve, type Stonks } from '../engine/sleeves.ts'
-import { tableOf } from '../engine/economy.ts'
-import { twistName } from '../engine/twists.ts'
+import { insertFace, insertMark } from './placeholders.ts'
+import { type Stonks } from '../engine/sleeves.ts'
+import { ROUNDS_PER_TABLE, STONKS_MULT, tableOf } from '../engine/economy.ts'
+import { getRival, type RivalId } from '../engine/rivals.ts'
+import { cardEntry, entry, KEYWORDS, type Entry } from '../engine/glossary.ts'
 import type { SeatView, ShopOfferView } from '../engine/match.ts'
 import * as sfx from './sound.ts'
+import { drawBand, runStrip } from './frame.ts'
+import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
+import { drawDrawer, drawerKey, drawerOpen, drawerPointer, openDrawer, setDrawerHover, type DrawerThing } from './drawer.ts'
+import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
 
 export type ShopState = {
   view: SeatView
@@ -52,13 +58,6 @@ const BLUE = '#3e66a0'
 const BRASS = '#c99a3a'
 const GREY = '#43342e'
 
-// one line per offer, shown when you hover it (complexity rule: it explains itself where you see it)
-const PACK_LINE: Record<string, [string, string]> = {
-  offbrand: ['Off-Brand', '5 cards: stamps and knockoffs'],
-  repack: ['Repack', '4 cards: flambéed, Jumbos, Rookies, Jokers'],
-  collector: ['Collector', '3 cards, a code card and a rare slot'],
-}
-
 let cv: HTMLCanvasElement | null = null
 let g: CanvasRenderingContext2D
 let k = 1
@@ -68,6 +67,8 @@ let state: ShopState | null = null
 let running = false
 let now = 0
 let mouse = { x: -1, y: -1 }
+let overDrawer = false // the bifold has the mouse: the scene doesn't see it
+let detachFiche: (() => void) | null = null
 let lastInput = 0 // for "Alors ?" after a long browse
 type Hit = { x: number; y: number; w: number; h: number; onClick: () => void; mask?: (x: number, y: number) => boolean }
 let hits: Hit[] = []
@@ -84,12 +85,87 @@ let bellAt = -9999
 let sighAt = -9999
 let pressed: { key: string; t: number } | null = null
 
+let shipAt = -Infinity
+let parcelShipper = 'poste'
+let sale: { cards: Card[]; at: number } | null = null
+let parcel: { card: Card; at: number | null; stamped: boolean } | null = null
+let saltyAt = -Infinity
+export function gradingReturn(card: Card): void {
+  parcel = { card, at: null, stamped: false }
+}
+export function clearGradingReturn(): void {
+  parcel = null
+  parcelShipper = 'poste'
+}
+
+function sales(): void {
+  if (!sale) return
+  const age = now - sale.at
+  sale.cards.forEach((c, i) => {
+    const t = progress(age - i * 45, 520)
+    if (t >= 1) return
+    const x = mix(321, PLATE.x + 35, t)
+    const y = mix(215, PLATE.y + 32, t) - 32 * Math.sin(t * Math.PI)
+    if (t < 0.45) g.drawImage(cardCanvas(c), x - 12, y - 17, 24, 34)
+    else for (let j = 0; j < 3; j++) g.drawImage(imageOf('scratch/jeton'), x + j * 4, y - j * 3, 8, 8)
+  })
+  if (age >= 520 + sale.cards.length * 45) sale = null
+}
+
+function gradingCounter(st: ShopState): void {
+  const away = st.view.me.shipping
+  if (away) {
+    const age = reducedMotion.matches ? Infinity : now - shipAt
+    const insert = progress(age, 220)
+    const move = progress(age - 470, 320)
+    const x = 160 + move * 39
+    const y = 143 - move * 13
+    const size = 1 - 0.65 * move
+    if (Number.isFinite(age) && age < 850) {
+      g.drawImage(imageOf('shop/grading/guichet'), 182, 85, 56, 60)
+      g.drawImage(cardCanvas(away.card), x + 8, 105 + 44 * insert, 22, 30)
+    }
+    if (age < 850 || !Number.isFinite(shipAt)) {
+      g.drawImage(imageOf('shop/parcel/' + away.shipper), x, y, 41 * size, 27 * size)
+      if (age >= 220) {
+        const slam = 1 + 1.3 * (1 - progress(age - 220, 150))
+        g.drawImage(imageOf('shop/grading/postmark'), x + 16, y + 6, 13 * size * slam, 12 * size * slam)
+      }
+    }
+    tip(() => ({ ...cardEntry(away.card), foot: `back at round ${away.back}'s shop` }), 160, 143, 41, 27)
+  }
+  if (!parcel) return
+  const item = parcel
+  if (item.at === null) {
+    g.drawImage(imageOf('shop/parcel/' + parcelShipper), 155, 140, 48, 29)
+    text('OPEN', 179, 150, { font: 'tiny', align: 'center', color: INK })
+    hit(155, 136, 48, 35, () => {
+      item.at = performance.now()
+      sfx.rip(0.06)
+    })
+  } else {
+    const elapsed = Math.max(0, now - item.at)
+    const lift = reducedMotion.matches ? 1 : progress(elapsed, 270)
+    const h = 38 + 36 * lift
+    const grade = item.card.grade!
+    const shown = reducedMotion.matches ? grade : Math.min(grade, 1 + Math.floor(elapsed / 65))
+    const stamp = reducedMotion.matches ? 0 : Math.sin(Math.PI * progress(elapsed-(grade-1)*65,150))
+    g.drawImage(cardCanvas({ ...item.card, grade: shown }), 154-stamp, 164-h+2*stamp, h*.72+2*stamp, h-2*stamp)
+    if (shown === grade && !item.stamped) {
+      item.stamped = true
+      sfx.gradeUp()
+    }
+    if (elapsed > 1900) parcel = null
+  }
+}
+
 export function showShop(app: HTMLElement, next: ShopState): void {
   const previous = state
   const arriving = !cv?.isConnected || enteredRound !== next.view.round
   now = performance.now()
   state = next
   if (!cv || !cv.isConnected) {
+    whipPan(app.querySelector('canvas.stage'),-1)
     app.innerHTML = ''
     cv = document.createElement('canvas')
     cv.className = 'stage'
@@ -99,6 +175,7 @@ export function showShop(app: HTMLElement, next: ShopState): void {
       const p = toStage(e)
       if (lotto && dragging) rubLine(mouse, p)
       mouse = p
+      overDrawer = !lotto && drawerPointer(p.x, p.y, false)
       lastInput = now
     }
     cv.onpointerdown = e => {
@@ -109,11 +186,26 @@ export function showShop(app: HTMLElement, next: ShopState): void {
       rubLine(mouse, mouse)
     }
     cv.onpointerup = () => { dragging = false }
-    cv.onpointerleave = () => { mouse = { x: -1, y: -1 } }
+    cv.onpointerleave = () => {
+      mouse = { x: -1, y: -1 }
+      overDrawer = drawerPointer(-1, -1, false)
+    }
     cv.onclick = e => click(toStage(e))
+    detachFiche?.()
+    detachFiche = ficheInput(cv, toStage)
+    setKeywords(KEYWORDS)
+    // the bifold's own hovers (a card in the Étui, an insert, a collectible) get the same Fiche as the scene's
+    setDrawerHover((thing, anchor) => {
+      const e = thing && drawerEntry(thing)
+      if (e) fiche(e, anchor)
+    })
     resize()
   }
   if (arriving || !previous) {
+    shipAt = -Infinity
+    sale = null
+    saltyAt = next.view.me.shop?.rolledOver ? -Infinity : Infinity
+    cigAt = Infinity
     enteredRound = next.view.round
     enteredAt = lastInput = now
     stockAt = reducedMotion.matches ? -Infinity : now
@@ -140,6 +232,12 @@ export function keeperSays(text: string): void {
 function updateBeats(before: ShopState, after: ShopState): void {
   const prev = before.view.me.shop!
   const next = after.view.me.shop!
+  if(!prev.rolledOver && next.rolledOver) { saltyAt=now; keeperSays('Ma marchandise vous plaît pas ?') }
+  if(!before.view.me.shipping && after.view.me.shipping) { shipAt=now; parcelShipper=after.view.me.shipping.shipper }
+  if(before.view.me.binder.length>after.view.me.binder.length && after.view.me.bankroll>before.view.me.bankroll && !reducedMotion.matches) {
+    const sold=before.view.me.binder.filter(c=>!after.view.me.binder.some(other=>c.id===other.id))
+    sale={cards:[...(sale?.cards ?? []),...sold],at:now}
+  }
   const stockChanged = prev.offers.length !== next.offers.length || prev.offers.some((o, i) => {
     const n = next.offers[i]
     return (o.sold && !n.sold) || JSON.stringify({ ...o, sold: false }) !== JSON.stringify({ ...n, sold: false })
@@ -194,8 +292,8 @@ function counterInsert(): void {
   g.translate(x, y)
   g.rotate(Math.sin(u * Math.PI) * .18)
   if (shopInsert.card) g.drawImage(cardCanvas(shopInsert.card), -12, -17, 24, 34)
-  else pin('insert/face/' + shopInsert.id, -12, -17)
-  pin('scratch/' + shopInsert.id, 4, 0, .12)
+  else pin(insertFace(shopInsert.id), -12, -17)
+  pin(insertMark(shopInsert.id), 4, 0, .12)
   g.restore()
 }
 
@@ -267,7 +365,7 @@ function shelfBeat(): void {
   for (const p of purchases) {
     const age = now - p.at
     const t = Math.min(1, age / 250)
-    if (t < 1) {
+    if (t < 1 && p.offer.type !== 'pack') {
       g.save()
       g.globalAlpha = 1 - t * t
       g.translate(p.center, SLOT.top + SLOT.h - 8 * Math.sin(Math.PI * t))
@@ -279,8 +377,8 @@ function shelfBeat(): void {
     for (let i = 0; i < Math.min(4, Math.max(2, p.offer.price)); i++) {
       const u = (age - 35 * i) / 318
       if (u <= 0 || u >= 1) continue
-      const x = Math.round(p.center + (58 - p.center) * ease(u))
-      const y = Math.round(296 + 38 * u - (15 + 3 * i) * Math.sin(Math.PI * u))
+      const x = Math.round(mix(PLATE.x+32,p.center,ease(u)))
+      const y = Math.round(mix(PLATE.y+28,296,ease(u)) - (15 + 3 * i) * Math.sin(Math.PI * u))
       g.fillStyle = '#6b4a1a'
       g.fillRect(x - 2, y, 5, 3)
       g.fillStyle = BRASS
@@ -312,6 +410,8 @@ function toStage(e: MouseEvent): { x: number; y: number } {
 function click(p: { x: number; y: number }): void {
   lastInput = now
   if (lotto) return lottoClick()
+  if (drawerPointer(p.x, p.y, true)) return
+  if (panelClick(p)) return
   for (let i = hits.length - 1; i >= 0; i--) {
     const h = hits[i]
     if (inside(h, p)) return h.onClick()
@@ -319,7 +419,10 @@ function click(p: { x: number; y: number }): void {
 }
 
 window.addEventListener('keydown', e => {
-  if (e.key !== 'Escape' || !cv?.isConnected) return
+  if (!cv?.isConnected) return
+  if (!lotto && drawerKey(e.key)) return e.preventDefault()
+  if (!lotto && panelKey(e.key)) return e.preventDefault()
+  if (e.key !== 'Escape') return
   if (lotto) {
     for (const w of lotto.wins) clearWindow(w)
     lottoClick()
@@ -347,9 +450,20 @@ function frame(t: number): void {
   g.beginPath()
   g.rect(0, 0, W, H)
   g.clip()
+  // under a panel or the bifold the scene doesn't see the mouse, so nothing behind it lights up
+  const real = mouse
+  const away = { x: -1, y: -1 }
+  const drawer = !lotto && (drawerOpen() || overDrawer)
+  if (panelOpen() || drawer) mouse = away
   draw(state)
+  mouse = real
   g.restore()
-  cv.style.cursor = jeton ? 'none' : lotto || over() ? 'pointer' : 'default'
+  drawPanel(g, now, drawer ? away : mouse)
+  sales()
+  drawDrawer(g, state.view, now)
+  drawBand(g, now,state.view.me.shop?.open ? 76 : 195)
+  drawFiche(g)
+  cv.style.cursor = jeton ? 'none' : lotto || drawer || (panelOpen() ? panelHover(mouse) : over()) ? 'pointer' : 'default'
 }
 
 function over(): boolean {
@@ -395,26 +509,7 @@ function outline(art: HTMLCanvasElement, x: number, y: number, w = art.width, h 
 }
 
 function nine(name: string, x: number, y: number, w: number, h: number, tint?: string): void {
-  const s = sprite(name)
-  const img = tint ? tinted(name, tint) : s.img
-  const sx0 = tint ? 0 : s.x
-  const sy0 = tint ? 0 : s.y
-  const m = s.center
-  if (!m) throw new Error(`${name} has no 9-slice center`)
-  const sx = [0, m.x, m.x + m.w, s.w]
-  const sy = [0, m.y, m.y + m.h, s.h]
-  const dx = [0, m.x, w - (s.w - m.x - m.w), w]
-  const dy = [0, m.y, h - (s.h - m.y - m.h), h]
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      const sw = sx[c + 1] - sx[c]
-      const sh = sy[r + 1] - sy[r]
-      const tw = dx[c + 1] - dx[c]
-      const th = dy[r + 1] - dy[r]
-      if (sw <= 0 || sh <= 0 || tw <= 0 || th <= 0) continue
-      g.drawImage(img, sx0 + sx[c], sy0 + sy[r], sw, sh, x + dx[c], y + dy[r], tw, th)
-    }
-  }
+  nineSlice(g, name, x, y, w, h, tint)
 }
 
 function text(s: string, x: number, y: number, o: TextStyle = {}): void {
@@ -469,30 +564,29 @@ function draw(st: ShopState): void {
   glow(320, 142, 124, 'rgba(202,135,55,.085)')
   bell(st)
   sign(v)
-  roundNote(v)
-  if (shop.services.bulkBin) pin('shop/bulk/bin', 223, 125)
+  const twistBox = runStrip(g, v)
+  const twist = v.twist ?? v.nextTwist?.twist
+  if (twistBox && twist) tip(() => entry('twist', twist.id, twist), twistBox.x, twistBox.y, twistBox.w, twistBox.h)
+  if (shop.services.bulkBin) {
+    pin('shop/bulk/bin', 223, 125)
+    tip(() => entry('hud', 'bulk-bin'), 223, 125, 50, 40)
+  }
   counterBeat()
   registerTickets(st)
   spentPile()
-  sleeveOnZinc(st)
-  if (v.scout) {
-    dossierFolder()
-    text('Nouvelle table ce soir', 571, 86, { font: 'tiny', color: CREAM, align: 'center', outline: INK })
-  }
-  if (v.me.shipping) {
-    g.drawImage(imageOf('shop/parcel/' + v.me.shipping.shipper), 160, 143, 41, 27)
-    g.drawImage(imageOf('shop/grading/postmark'), 178, 147, 13, 12)
-  }
+  gradingCounter(st)
   pin('shop/case', 0, 172)
   caseLight()
   outgoingRow()
   const hover = offers(st)
   glassBands()
   bottomBar(st)
+  plate(v)
   shelfBeat()
+  rivalTag(v)
   if (!lotto) {
-    if (hover) hoverTag(hover.offer, hover.x, hover.lift)
-    signTag(v)
+    // above the offer, so it never lands on the action stack
+    if (hover) fiche(offerEntry(hover.offer), hover.box, { above: true })
     if (v.scout && dossierOpen) dossier(v)
     toast(st.toast) // would give the scratcher away
   }
@@ -533,12 +627,13 @@ function room(st: ShopState): void {
   pin('shop/pendant', 288, 0)
   glow(320, 14, 65, 'rgba(255,203,104,.15)')
   if (st.view.me.shop?.kind === 'big') patron(st) // under the vitrine tab, so the tab stays clickable
-  // the vitrine tab, same as the duel: your collectibles, sell them from here
+  // the vitrine tab, same as the duel: a shortcut to the bifold's Vitrine page
   const tab = sprite('hud/vitrine/tab')
-  const overTab = hit(8, 0, tab.w, tab.h, st.onVitrine)
+  const overTab = hit(8, 0, tab.w, tab.h, () => openDrawer('vitrine'))
   if (overTab) outline(imageOf('hud/vitrine/tab'), 8, 2)
   pin('hud/vitrine/tab', 8, overTab ? 2 : 0)
-  stonks(st.view.stonks, st.view.stonksNext)
+  tip(() => entry('hud', 'vitrine'), 8, 0, tab.w, tab.h)
+  stonks(st.view)
   const clock = st.clock()
   if (clock) {
     pin('shop/clock', 452, 14)
@@ -551,23 +646,31 @@ function room(st: ShopState): void {
 }
 
 // "cote du jour": the hot rank, suit or finish, chalked up. code writes the chalk
-function stonks(hot: Stonks, next: Stonks | null): void {
+function stonks(v: SeatView): void {
   const x = 508
   const y = 12
+  const hot = v.stonks
+  const hotMarket = v.me.sleeves.includes('hot_market')
+  const rule = entry('hud', 'stonks', { stonks: hot, hotMarket })
   pin('shop/stonks', x, y)
   text('Cote du jour', x + 62, y + 8, { font: 'chalk', color: PAPER, align: 'center' })
-  const [big, mult] = stonksBig(hot)
+  const [big, mult] = stonksBig(hot, hotMarket)
   if (big.length <= 2) text(big, x + 40, y + 28, { color: CREAM, scale: 3, align: 'center' })
   else text(big, x + 40, y + 34, { font: 'chalk', color: CREAM, align: 'center' })
-  text(mult, x + 68, y + 34, { font: 'chalk', color: '#e8c260' })
-  text('se vend', x + 68, y + 47, { font: 'chalk', color: '#bfa77e' })
-  if (next) text(`Demain : ${stonksBig(next)[0]}`, x + 62, y + 70, { color: '#bfa77e', align: 'center' })
+  text(mult, x + 68, y + 31, { font: 'chalk', color: '#e8c260' })
+  text('se vend', x + 68, y + 43, { font: 'chalk', color: '#bfa77e' })
+  // french is flavor, english is the rule (from the Fiche map, so the board and its Fiche say the same thing)
+  wrapText(plainText(rule.text[0]), 112, 'tiny').slice(0, 2).forEach((row, i) => text(row, x + 62, y + 56 + i * 7, { font: 'tiny', color: PAPER, align: 'center' }))
+  // the register stands in front of the board from y 94, so tomorrow's line stays tiny and above it
+  if (v.stonksNext) text(`Demain : ${stonksBig(v.stonksNext, hotMarket)[0]}`, x + 62, y + 72, { font: 'tiny', color: '#bfa77e', align: 'center' })
+  tip(() => rule, x, y, 124, 92)
 }
 
-function stonksBig(s: Stonks): [string, string] {
-  if (s.kind === 'rank') return [rankLabel(s.rank), '×3']
-  if (s.kind === 'suit') return [SUIT_GLYPH[s.suit], '×3']
-  return [s.finish, '×2']
+function stonksBig(s: Stonks, hotMarket: boolean): [string, string] {
+  const mult = `×${STONKS_MULT[s.kind] + (hotMarket ? 1 : 0)}`
+  if (s.kind === 'rank') return [rankLabel(s.rank), mult]
+  if (s.kind === 'suit') return [SUIT_GLYPH[s.suit], mult]
+  return [s.finish, mult]
 }
 
 // idle: reads, glances at you, sighs after a long browse. a 1px breath
@@ -586,16 +689,18 @@ function buraliste(): void {
   pin(`bur/eyes/${sighing ? 'shut' : glance ? 'you' : 'down'}`, BUR.x, y)
   pin('bur/brows/grump', BUR.x, y)
   pin(`bur/stache/${sighing ? 'puff' : 'grump'}`, BUR.x, y)
-  pin('bur/cig', BUR.x, y)
+  const fall = ease((now-cigAt)/400)
+  pin('bur/cig', BUR.x + 12*fall, y + 49*fall)
   // the ember breathes too
   g.fillStyle = (now % 900) < 450 ? '#ffb03a' : '#e8501a'
-  g.fillRect(BUR.x + 137, y + 99, 1, 1)
+  g.fillRect(BUR.x + 137 + 12*fall, y + 99 + 49*fall, 1, 1)
 }
 
 function bell(st: ShopState): void {
   const age = now - bellAt
   const wobble = age < 500 ? Math.sin(age / 30) * 0.25 * (1 - age / 500) : 0
   const overBell = st.canRestock && hit(192, 134, 24, 18, st.onRestock)
+  tip(() => entry('hud', 'restock'), 192, 134, 24, 18)
   if (overBell) outline(imageOf('shop/bell'), 192, 135)
   pin('shop/bell', 204, 153 - (overBell ? 1 : 0), wobble)
 }
@@ -609,35 +714,19 @@ function sign(v: SeatView): void {
   pin('shop/sign', -48, -26)
   v.keeper.forEach((id, i) => text(`· ${getKeeper(id).name}`, -42, -10 + i * 11, { color: INK }))
   g.restore()
-}
-
-// hovering the sign shows each trait's rule
-function signTag(v: SeatView): void {
-  if (!(mouse.x >= 530 && mouse.x <= 628 && mouse.y >= 115 && mouse.y <= 170)) return
-  const lines = v.keeper.map(id => `${getKeeper(id).name}: ${getKeeper(id).text}`)
-  const w = Math.max(...lines.map(l => measure(l, 'sans'))) + 12
-  const x = 634 - w
-  paper(x, 178, w, lines.length * 12 + 6)
-  lines.forEach((l, i) => text(l, x + 6, 181 + i * 12, { color: INK }))
+  if(v.me.shop?.rolledOver) {
+    const u=reducedMotion.matches?1:progress(now-saltyAt,220)
+    g.save()
+    g.translate(504,143-32*(1-u))
+    g.rotate(-.08+.22*(1-u))
+    pin('shop/note/salty',-21,-15)
+    g.restore()
+  }
+  // each posted trait has its own Fiche (the sign is tilted ~1°, close enough for a hover row)
+  v.keeper.forEach((id, i) => tip(() => entry('keeper', id), 530, 131 + i * 11, 98, 11))
 }
 
 // round and the next tournament twist, pinned under the window. the shop before a boss is prep
-function roundNote(v: SeatView): void {
-  g.save()
-  g.translate(96, 134)
-  g.rotate(-.025)
-  g.translate(-96, -134)
-  paper(8, 122, 176, 24, PAPER)
-  g.fillStyle = '#bfa77e'
-  g.fillRect(86, 120, 19, 4)
-  g.fillRect(178, 141, 5, 4)
-  g.fillStyle = CREAM
-  g.fillRect(179, 141, 3, 2)
-  text(`Manche ${v.round} · Table ${tableOf(v.round)}`, 14, 124, { color: INK })
-  const t = v.nextTwist
-  if (t) text(`${t.round === v.round ? 'Ce soir' : `Manche ${t.round}`} : ${twistName(t.twist)}`, 14, 135, { color: '#7a1a2c' })
-  g.restore()
-}
 
 function slotOrder(offers: ShopOfferView[]): number[] {
   const rank = (o: ShopOfferView) => ({ pack: 0, collectible: 1, scratcher: 2, sleeve: 3 })[o.type]
@@ -652,11 +741,23 @@ function registerTickets(st: ShopState): void {
   tickets.forEach(({ offer, slot }, i) => {
     const x = 410 + i * 41
     const over = hit(x, 151, 40, 19, () => { if (st.canBuy(slot)) st.onBuy(slot) })
+    tip(() => offerEntry(offer), x, 151, 40, 19, true)
     const y = over ? 149 : 151
     g.drawImage(imageOf('scratch/shelf-paper'), x, y, 40, 19)
     text(`$${offer.price}`, x + 20, y + 5, { font: 'sans', color: CREAM, outline: INK, align: 'center', bold: true })
   })
 }
+
+// the offers stay right of the plate and the bifold (zones B and E), centered ~40 px right of the middle
+const SHELF = { left: 166, right: 632, center: 360 }
+
+export function shelfCenter(list: ShopOfferView[], slot: number): number {
+  const place = offerLayout(list).find(item => item.slot === slot)
+  return place ? place.x + place.w/2 : 320
+}
+
+let cigAt = Infinity
+export function dropCigarette(): void { cigAt = performance.now() }
 
 function offerLayout(list: ShopOfferView[]): { slot: number; x: number; w: number }[] {
   const ordered = slotOrder(list).filter(slot => list[slot].type !== 'scratcher')
@@ -665,13 +766,15 @@ function offerLayout(list: ShopOfferView[]): { slot: number; x: number; w: numbe
     return o.type === 'collectible' ? Math.max(40, sprite(o.owned.id).w) : SLOT.w
   })
   const gaps: number[] = ordered.map((slot, i) => i === 0 ? 0 : ordered.length === 3 ? 46 : list[ordered[i-1]].type === list[slot].type ? 4 : 13)
-  // the big shop's 9 offers can run wider than the shelf: the gaps go first, then every slot narrows a little
+  // the big shop's offers can run wider than the shelf: the gaps go first, then every slot narrows a little
+  const room = SHELF.right - SHELF.left
   const natural = widths.reduce((sum, w) => sum + w, 0)
-  const squeeze = Math.min(1, (W - 20) / natural)
+  const squeeze = Math.min(1, room / natural)
   const width = natural * squeeze
   const gapWidth = gaps.reduce((sum, w) => sum + w, 0)
-  const scale = Math.max(0, Math.min(1, (W - 20 - width) / Math.max(1, gapWidth)))
-  let x = Math.round((W - width - gapWidth * scale) / 2)
+  const scale = Math.max(0, Math.min(1, (room - width) / Math.max(1, gapWidth)))
+  const total = width + gapWidth * scale
+  let x = Math.round(Math.max(SHELF.left, Math.min(SHELF.right - total, SHELF.center - total / 2)))
   return ordered.map((slot, i) => {
     x += Math.round(gaps[i] * scale)
     const w = Math.round(widths[i] * squeeze)
@@ -749,7 +852,7 @@ function glassBands(): void {
 }
 
 const hoverMotion = new Map<number, { lift: number; tilt: number; vel: number; spin: number; time: number }>()
-function offers(st: ShopState): { offer: ShopOfferView; x: number; lift: number } | null {
+function offers(st: ShopState): { offer: ShopOfferView; box: { x: number; y: number; w: number; h: number } } | null {
   const list = st.view.me.shop!.offers
   let hovered = null
   for (const [i, pos] of offerLayout(list).entries()) {
@@ -816,7 +919,7 @@ function offers(st: ShopState): { offer: ShopOfferView; x: number; lift: number 
     g.rotate(motion.tilt)
     paintOffer(o, slot, 0, art.height / 2, over)
     g.restore()
-    if (over) hovered = { offer: o, x, lift: motion.lift }
+    if (over) hovered = { offer: o, box: { x: center - art.width / 2, y: floor - art.height - motion.lift, w: art.width, h: art.height } }
     priceTag(o.price, center - 20, 295, ok)
   }
   return hovered
@@ -855,32 +958,27 @@ function priceTag(price: number, x: number, y: number, ok: boolean): void {
   g.restore()
 }
 
-function hoverTag(o: ShopOfferView, x: number, lift: number): void {
-  const [name, line] = offerLines(o)
-  const head = `${name} · ${o.price ? `$${o.price}` : 'free'}`
-  const w = Math.max(measure(head, 'sans'), measure(line, 'sans')) + 12
-  const tx = Math.min(Math.max(4, x), W - w - 4)
-  g.save()
-  g.translate(0, SLOT.top + SLOT.h - 2)
-  g.scale(1, .64 + Math.min(1, lift / 4) * .36)
-  g.translate(0, -(SLOT.top + SLOT.h - 2))
-  paper(tx, SLOT.top + SLOT.h - 2, w, 26)
-  text(head, tx + 6, SLOT.top + SLOT.h, { color: INK })
-  text(line, tx + 6, SLOT.top + SLOT.h + 12, { color: '#5c4a36' })
-  g.restore()
+// what an offer is, from the Fiche map. the footer is today's price, which keeper traits and restocks can move
+function offerEntry(o: ShopOfferView): Entry {
+  const price = o.price ? `$${o.price}` : 'free'
+  if (o.type === 'pack') return { ...entry('hud', 'pack-' + o.kind), tag: undefined, foot: price }
+  if (o.type === 'collectible') return { ...entry('collectible', o.owned.id, o.owned), foot: price }
+  if (o.type === 'scratcher') return { ...entry('hud', 'scratcher'), foot: price }
+  return { ...entry('pochette', o.id), foot: price }
 }
 
-function offerLines(o: ShopOfferView): [string, string] {
-  if (o.type === 'pack') return PACK_LINE[o.kind]
-  if (o.type === 'collectible') return [getDef(o.owned.id).name, describe(o.owned)]
-  if (o.type === 'scratcher') return ['Scratcher', 'A random insert, up your Sleeve (2 slots)']
-  const sl = getSleeve(o.id)
-  return [`Pochette · ${sl.name}`, `For the rest of the run: ${sl.text}`]
+// the bifold's hovers: a card in the Étui or Classeur, an insert in the Sleeve, a collectible in the Vitrine
+function drawerEntry(thing: DrawerThing): Entry {
+  const me = state!.view.me
+  if (thing.kind === 'card' && thing.card) return cardEntry(thing.card)
+  if (thing.kind === 'insert' && thing.id) return entry('insert', thing.id, me.sleeve.find(c => c.id === thing.id))
+  if (thing.kind === 'collectible' && thing.id) return entry('collectible', thing.id, me.display.find(o => o.id === thing.id))
+  throw new Error(`no fiche for drawer thing ${thing.kind}`)
 }
 
-// ---------- bottom bar: plate, deck, tickets, binder, sortir ----------
+// ---------- bottom bar: the service tickets, sortir. the plate is zone B, the deck and binder live in the bifold ----------
 
-type Ticket = { key: string; label: string; price?: string; face: string; plinth: string; ink: string; enabled: boolean; primary?: boolean; onClick: () => void }
+type Ticket = { key: string; label: string; price?: string; face: string; plinth: string; ink: string; enabled: boolean; primary?: boolean; onClick: () => void; fiche?: string }
 
 function bottomBar(st: ShopState): void {
   const v = st.view
@@ -891,37 +989,53 @@ function bottomBar(st: ShopState): void {
   g.fillStyle = calm
   g.fillRect(458, 314, 182, 46)
 
-  nine('hud/plate/frame', 6, 317, 93, 40)
-  nine('hud/plate/paper', 10, 321, 85, 32)
-  text('Vous', 16, 323, { color: INK })
-  text(`$${plateMoney(v.me.bankroll)}`, 88, 328, { font: 'didone', color: BLUE, align: 'right' })
-
-  const count = v.me.pile.length + v.me.discard.length
-  const stack = Math.min(7, Math.ceil(count / 5))
-  const overPile = hit(103, 310, 51, 50, st.onPile)
-  const back = backCanvas(v.me.starter)
-  for (let i = 0; i < stack; i++) {
-    const y = 313 - (overPile ? 2 : 0) - i
-    if (overPile && i === stack - 1) outline(back, 109, y, 33, 45)
-    g.drawImage(back, 109, y, 33, 45)
-  }
-  text(overPile ? `Deck · ${count}` : String(count), 126, 350, { font: 'tiny', color: CREAM, outline: INK0, align: 'center' })
-
   const spend = { face: MONEY, plinth: '#1e4a24', ink: CREAM }
   const tickets: [number, number, Ticket][] = [
-    [158, 104, { key: 'restock', label: 'Restock', price: shop.restockPrice ? `$${shop.restockPrice}` : 'free', ...spend, enabled: st.canRestock, onClick: st.onRestock }],
+    [158, 104, { key: 'restock', label: 'Restock', price: shop.restockPrice ? `$${shop.restockPrice}` : 'free', ...spend, enabled: st.canRestock, onClick: st.onRestock, fiche: 'restock' }],
     // a small shop has one service: the grading desk at a table's 1st, the bulk bin at its 2nd. the big shop has both
-    [268, 104, { key: 'bulk', label: 'Bin Bulk', price: !shop.services.bulkBin ? 'not today' : shop.bulkInDeck ? `$${shop.bulkPrice}` : 'none', ...spend, enabled: st.canBinBulk, onClick: st.onBinBulk }],
-    [378, 96, { key: 'grade', label: 'Grading', price: shop.services.grading ? '$2+' : 'not today', face: '#7a4ab0', plinth: '#2a1440', ink: CREAM, enabled: st.canGrade, onClick: st.onGrading }],
+    [268, 118, { key: 'bulk', label: 'Bin Bulk', price: !shop.services.bulkBin ? 'not today' : shop.bulkInDeck ? `$${shop.bulkPrice}` : 'none', ...spend, enabled: st.canBinBulk, onClick: st.onBinBulk, fiche: 'bulk-bin' }],
+    [392, 96, { key: 'grade', label: 'Grading', price: shop.services.grading ? '$2+' : 'not today', ...spend, enabled: st.canGrade, onClick: st.onGrading, fiche: 'grading' }],
     [538, 96, { key: 'leave', label: 'Sortir', face: BRASS, plinth: '#3d2a10', ink: INK, enabled: true, primary: true, onClick: st.onLeave }],
   ]
-  for (const [x, w, t] of tickets) ticket(t, x, 326, w)
-  // the binder: sell from here
-  const overBinder = hit(475, 315, 60, 44, st.onBinder)
-  const binderY = 315 - (overBinder ? 2 : 0)
-  if (overBinder) outline(imageOf('shop/binder'), 475, binderY)
-  pin('shop/binder', 475, binderY)
-  text(String(v.me.binder.length), 509, binderY + 15, { color: '#e8c260', align: 'center' })
+  for (const [x, w, t] of tickets) {
+    ticket(t, x, 326, w)
+    const id = t.fiche
+    if (id) tip(() => entry('hud', id), x, 322, w, 30, true)
+  }
+}
+
+// zone B: your plate, the duel's spot and look, directly above the bifold. le patron's note hangs off it
+const PLATE = { x: 8, y: 144, w: 150, h: 58 }
+
+function plate(v: SeatView): void {
+  const { x, y, w, h } = PLATE
+  nine('hud/plate/frame', x, y, w, h)
+  nine('hud/plate/paper', x + 5, y + 5, w - 10, h - 10)
+  pin(`mask/${myMask(v)}/icon`, x + 20, y + 17)
+  text(v.me.name === 'You' ? 'Vous' : v.me.name, x + 34, y + 9, { color: INK })
+  text(`$${plateMoney(v.me.bankroll)}`, x + 12, y + 24, { font: 'didone', color: BLUE })
+  tip(() => entry('hud', 'bankroll'), x + 8, y + 22, 56, 22)
+  // the shop has no hand or discards, so only the Sleeve's icon, in the duel's first icon slot
+  const ix = x + 70
+  pin('icon/sleeve', ix, y + 35)
+  text(String(v.me.sleeve.length), ix + 11, y + 33, { color: INK })
+  tip(() => entry('hud', 'plate-sleeve'), ix, y + 30, 22, 16)
+  marker(v)
+}
+
+// le patron's marker, where the duel pins it: the next payment and the round he collects it at the door
+function marker(v: SeatView): void {
+  const due = v.me.marker
+  if (!due) return
+  const x = 100
+  const y = 186
+  pin('hud/marker/note', x, y, reducedMotion.matches ? 0 : Math.sin(now / 800) * 0.018)
+  text('Le Patron', x + 4, y + 3, { font: 'tiny', color: '#5c4a36' })
+  text(`$${due.due}`, x + 4, y + 12, { color: '#7a1a2c', bold: true })
+  // tables 1–3 pay at the next table's big shop, the last one after round 12
+  const round = due.table >= 4 ? (v.lastRound ?? 12) : due.table * ROUNDS_PER_TABLE + 1
+  text(`M${round}`, x + 54, y + 14, { font: 'tiny', color: '#5c4a36', align: 'right' })
+  tip(() => entry('hud', 'marker', due.due), x, y, 58, 26)
 }
 
 const breath = () => 0.5 - 0.5 * Math.cos((now / 1200) * Math.PI * 2)
@@ -936,7 +1050,9 @@ function ticket(t: Ticket, x: number, y: number, w: number): void {
   if (!t.enabled) {
     nine('hud/ticket/face', 0, 3, w, 24, GREY)
     text(t.label, 11, 8, { font: 'chalk', color: TAN, bold: true })
-    if (t.price) text(t.price, w - 8, 9, { color: TAN, align: 'right' })
+    // "not today" next to a long label drops to the tiny so the two don't run into each other
+    const room = w - 22 - measure(t.label, 'chalk', true)
+    if (t.price) text(t.price, w - 8, 9, { font: measure(t.price, 'sans') <= room ? 'sans' : 'tiny', color: TAN, align: 'right' })
     g.fillStyle = TAN
     g.fillRect(8, 14, w - 14, 1)
     g.restore()
@@ -987,28 +1103,39 @@ function speech(): void {
   text(bubble.text, x + 7, y + 4, { color: INK })
 }
 
+// the latest message sits in the action column above Sortir, where the duel puts it
 function toast(s: string): void {
   if (!s) return
-  text(s, W / 2, 4, { color: CREAM, outline: INK0, align: 'center' })
+  const rows = wrapText(s, 150, 'sans').slice(-3)
+  // it sits over the shelf's price tags, so it gets a dark card to read on
+  const w = Math.max(...rows.map(r => measure(r, 'sans'))) + 8
+  g.fillStyle = 'rgba(14,11,10,0.82)'
+  g.fillRect(638 - w, 309 - rows.length * 10, w, rows.length * 10 + 4)
+  rows.forEach((row, i) => text(row, 634, 312 - (rows.length - i) * 10, { color: CREAM, outline: INK0, align: 'right' }))
 }
 
 // ---------- the big shop: le patron at the door, the scouting dossier ----------
 
 // le patron in the doorway on the left wall, his ledger on the counter. he already collected at the door
+const PATRON_DROP = 30
+const LEDGER_Y = 98 // his ledger on the counter, clear of your plate below it
+
 function patron(st: ShopState): void {
   const age = Math.max(0, now - enteredAt)
   const paid = st.patronPaid
   const motion = paid !== null && !reducedMotion.matches
   const exit = motion ? ease((age - 1710) / 550) : 0
   const tap = motion ? Math.max(0, 1 - Math.min(Math.abs(age - 250), Math.abs(age - 490)) / 110) : 0
-  const tip = motion ? Math.sin(Math.PI * ease((age - 1350) / 400)) : 0
-  pin('patron/body', -26 - exit * 100, 16 + 2 * tip)
-  pin(`patron/cigar/${[0, 1, 2, 1][Math.floor(now / 380) % 4]}`, 54 - exit * 100, 52 + 2 * tip)
-  pin('patron/ledger', 86, 78)
-  pin('patron/hand', 70 - exit * 100 - 43 * tip, 76 + 4 * tap - 52 * tip)
-  text('Le Patron', 121, 82, { font: 'tiny', color: '#5c4a36', align: 'center' })
+  const tipHat = motion ? Math.sin(Math.PI * ease((age - 1350) / 400)) : 0
+  // he stands a little low in the doorway, so the run strip doesn't cover his face
+  pin('patron/body', -26 - exit * 100, 16 + PATRON_DROP + 2 * tipHat)
+  pin(`patron/cigar/${[0, 1, 2, 1][Math.floor(now / 380) % 4]}`, 54 - exit * 100, 52 + PATRON_DROP + 2 * tipHat)
+  pin('patron/ledger', 86, LEDGER_Y)
+  tip(() => entry('hud', 'marker', st.view.me.marker?.due), 86, LEDGER_Y, 70, 44)
+  pin('patron/hand', 70 - exit * 100 - 43 * tipHat, 76 + PATRON_DROP + 4 * tap - 52 * tipHat)
+  text('Le Patron', 121, LEDGER_Y + 4, { font: 'tiny', color: '#5c4a36', align: 'center' })
   if (paid !== null) {
-    text(`$${paid}`, 121, 95, { color: '#7a1a2c', align: 'center', bold: true })
+    text(`$${paid}`, 121, LEDGER_Y + 17, { color: '#7a1a2c', align: 'center', bold: true })
     if (motion && age > 540 && age < 1150) {
       for (let i = 0; i < 4; i++) {
         const u = ease((age - 540 - i * 65) / 340)
@@ -1017,42 +1144,64 @@ function patron(st: ShopState): void {
     }
     if (!motion || age > 1030) {
       const slam = motion ? 1 + 0.5 * Math.exp(-Math.max(0, age - 1030) / 70) : 1
-      g.drawImage(imageOf('hud/marker/paid'), 106, 104, 36 * slam, 12 * slam)
+      g.drawImage(imageOf('hud/marker/paid'), 106, LEDGER_Y - 4, 36 * slam, 12 * slam)
     }
   }
 
 }
 
-let dossierOpen = false
-let dossierAt = -Infinity
+// ---------- zone D: the next rival, top right where the duel has the rival's plate ----------
 
-// the folder on the zinc. hover or click it for the next rival's report
-function dossierFolder(): void {
-  const x = 84
-  const y = 152
-  const open = () => {
-    if (!dossierOpen) dossierAt = now
-    dossierOpen = true
-  }
-  const over = hit(x, y, 48, 20, open)
-  if (over) open()
-  else if (mouse.x < 140 || mouse.x > 500 || mouse.y < 60 || mouse.y > 180) dossierOpen = false
-  g.drawImage(imageOf('shop/dossier'), x, y, 48, 20)
-  pin('hud/marker/seal', x + 35, y + 4)
-  text('Dossier', x + 4, y + 5, { font: 'tiny', color: INK })
+// solo only: the scout names the next table's rival, otherwise it's the one at this table
+function nextRival(v: SeatView): RivalId | null {
+  return v.scout?.rival ?? v.others[0]?.rival ?? null
 }
 
-// the scouting report: the next rival's mask, lane, case, deck size, stack and the boss twist
+// your plate's mask, the same pick main.ts makes for the duel: never the rival's own
+function myMask(v: SeatView): string {
+  return nextRival(v) === 'domino_red' ? 'domino' : 'domino_red'
+}
+
+let dossierOpen = false
+let dossierAt = -Infinity
+const DOSSIER = { x: 272, y: 18, w: 360, h: 120 }
+
+// a small tag hanging from the top edge. hover it for the rival's Fiche, or in the big shop for the scouting dossier
+function rivalTag(v: SeatView): void {
+  const rival = nextRival(v)
+  if (!rival) return
+  const big = !!v.scout
+  const label = `Next: ${getRival(rival).name}`
+  const w = measure(label, 'sans') + (big ? 40 : 28)
+  const x = 632 - w
+  const over = !lotto && mouse.x >= x && mouse.x < x + w && mouse.y >= 0 && mouse.y < 16
+  const lift = over ? 1 : 0
+  nine('hud/plate/paper', x, -3, w, 19 + lift, PAPER)
+  pin(`mask/${rival}/icon`, x + 12, 7 + lift)
+  text(label, x + 22, 3 + lift, { color: INK })
+  if (!big) return tip(() => entry('rival', rival, tableOf(v.round)), x, 0, w, 16)
+  pin('hud/marker/seal', x + w - 15, 3 + lift)
+  // touch has no hover: a tap toggles it
+  hit(x, 0, w, 16, () => { dossierOpen = !dossierOpen })
+  const inBox = mouse.x >= DOSSIER.x && mouse.x < DOSSIER.x + DOSSIER.w && mouse.y >= DOSSIER.y && mouse.y < DOSSIER.y + DOSSIER.h
+  if (over && !dossierOpen) {
+    dossierOpen = true
+    dossierAt = now
+  } else if (!over && !inBox && mouse.x >= 0) dossierOpen = false
+}
+
+// the scouting report under the tag: the next rival's mask, lane, case, deck size, stack and the boss twist.
+// its rules (bets, the bust bonus) are the rival's Fiche beside it
 function dossier(v: SeatView): void {
   const s = v.scout!
-  const x = 140
-  const y = 60
-  const w = 360
-  const h = 120
+  const { x, y, w, h } = DOSSIER
   g.save()
+  // grows out of the tag's corner
   const open = reducedMotion.matches ? 1 : ease((now - dossierAt) / 210)
-  g.translate((x + 20) * (1 - open), (y + 110) * (1 - open))
-  g.scale(0.7 + 0.3 * open, 0.7 + 0.3 * open)
+  const sc = 0.7 + 0.3 * open
+  g.translate(x + w, y)
+  g.scale(sc, sc)
+  g.translate(-(x + w), -y)
   paper(x, y, w, h)
   const folderX = x + w - 154
   pin('shop/dossier', folderX, y + 6)
@@ -1075,33 +1224,19 @@ function dossier(v: SeatView): void {
   }
   line(`${s.lane} · ${s.leans}`)
   line(`Deck ${s.deckSize} cards · stack $${s.stack}`)
-  if (s.twist) line(`Boss twist: ${twistName(s.twist)}`, '#a82a38')
-  for (const row of wrapText('Bust it and its Table ends early, with a bonus for every round you skip.', 185, 'tiny')) {
-    text(row, x + 12, lineY + 6, { font: 'tiny', color: '#5c4a36' })
-    lineY += 7
+  if (s.twist) {
+    const t = entry('twist', s.twist.id, s.twist)
+    line(`Boss twist: ${t.name}. ${plainText(t.text[0])}`, '#a82a38')
   }
   g.restore()
+  fiche(entry('rival', s.rival, tableOf(v.round)), DOSSIER, { side: 'below' })
 }
 
-// your Sleeve: the inserts you're holding, lying on the zinc. click for the sleeve (use a code or wishlist, toss one)
-function sleeveOnZinc(st: ShopState): void {
-  const me = st.view.me
-  const cards = [...me.sleeve, ...(me.overflow ? [me.overflow] : [])]
-  const over = hit(14, 150, 66, 36, st.onSleeve)
-  text('Sleeve', 60, 158, { font: 'tiny', color: CREAM, outline: INK0 })
-  for (let i = 0; i < Math.max(2, cards.length); i++) {
-    const c = cards[i]
-    const x = 16 + i * 22
-    if (!c) {
-      g.fillStyle = 'rgba(14,11,10,.35)'
-      g.fillRect(x, 152, 18, 26)
-      continue
-    }
-    const name = over ? `insert/face/${c.id}` : 'insert/back'
-    const s = sprite(name)
-    g.drawImage(s.img, s.x, s.y, s.w, s.h, x, 150 - (over ? 2 : 0), 18, 26)
-  }
-  if (me.overflow) text('full!', 48, 178, { font: 'tiny', color: '#ff7a24', outline: INK0, align: 'center' })
+// the Fiche for whatever the mouse is on. above = over the thing instead of beside it: everything low on the stage
+// goes above, so a Fiche never lands on the action stack (UX §2 C)
+function tip(e: () => Entry, x: number, y: number, w: number, h: number, above = false): void {
+  if (lotto || mouse.x < x || mouse.x >= x + w || mouse.y < y || mouse.y >= y + h) return
+  fiche(e(), { x, y, w, h }, { above })
 }
 
 // ---------- the scratcher up close (SHOP.md §7) ----------
@@ -1278,7 +1413,7 @@ function drawTicket(t: Lotto): void {
     const y = TICKET.y + WINDOWS[i].y
     const pop = w.clearedAt < 0 ? 1 : 1 + 0.25 * Math.max(0, 1 - (now - w.clearedAt) / 140)
     const size = 32 * pop
-    g.drawImage(imageOf('scratch/' + w.symbol), x + 24 - size / 2, y + 23 - size / 2, size, size)
+    g.drawImage(imageOf(insertMark(w.symbol)), x + 24 - size / 2, y + 23 - size / 2, size, size)
     if (w.clearedAt < 0) g.drawImage(w.foil, x, y)
   })
   if (won) {

@@ -1,8 +1,7 @@
 import { getDef, type Owned } from '../engine/collectibles.ts'
-import { blit, canvas, canvasUrl, ctx2d, faceCanvas, sprite, tinted } from './art.ts'
+import { blit, canvas, ctx2d, faceCanvas, sprite, tinted } from './art.ts'
 
 const frames = new Map<string, { art: HTMLCanvasElement; alpha: Uint8ClampedArray; halo: HTMLCanvasElement | null }>()
-const strips = new Map<string, string>()
 const phases = new Map<string, number>()
 
 function phase(o: Owned, slot: number): number {
@@ -85,19 +84,4 @@ export function drawCollectible(g: CanvasRenderingContext2D, f: Frame, x: number
     g.restore()
   }
   g.drawImage(f.art, x, y)
-}
-
-// DOM overlays use the same four cels without a second animation loop
-export function collectibleHtml(o: Owned, slot: number): string {
-  const { w, h } = sprite(o.id)
-  const key = o.id + '|' + o.param
-  let url = strips.get(key)
-  if (!url) {
-    const sheet = canvas((w + 6) * 4, h + 6)
-    const ctx = ctx2d(sheet)
-    for (let i = 0; i < 4; i++) drawCollectible(ctx, frame(o, i), i * (w + 6) + 3, 3, i * 220)
-    url = canvasUrl(sheet)
-    strips.set(key, url)
-  }
-  return `<span class="collectible-art" aria-hidden="true" style="width:${w+6}px;height:${h+6}px;background-image:url(${url});animation-delay:-${phase(o, slot)}ms"></span>`
 }

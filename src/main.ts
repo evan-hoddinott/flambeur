@@ -1,11 +1,11 @@
 // the game ui. the table is the pixel art duel scene (ui/duel.ts), the shop is the tabac (ui/shop.ts),
-// the other screens (and the shop's binder, grading and pack overlays) are still the throwaway dom harness.
+// the draft, starter box and results are panels on the bare duel table, the shop's pack, binder and grading are panels in the tabac.
 // it renders only from a SeatView: offline it runs step() itself, online the server does and sends the view over net.ts
-import { JOKERS, SUITS, SUIT_GLYPH, cardName, playSlots, rankLabel, stuckMate, traitName, type Card, type Trait } from './engine/cards.ts'
+import { JOKERS, SUITS, SUIT_GLYPH, sellPrice as cardSellPrice, cardName, rankLabel, stuckMate, type Card, type Trait } from './engine/cards.ts'
 import { describe, getDef } from './engine/collectibles.ts'
-import { COLLECTIBLE_PRICE, PLAY_SIZE, SHIPPERS, tableOf, type Shipper } from './engine/economy.ts'
+import { COLLECTIBLE_PRICE, PLAY_SIZE, SHIPPERS, SLEEVE_SLOTS, tableOf, type Shipper } from './engine/economy.ts'
 import { DRAFT_PICKS, getStarter, type StarterId } from './engine/starters.ts'
-import { HAND_NAMES, type HandType } from './engine/hands.ts'
+import { HAND_NAMES } from './engine/hands.ts'
 import { randomSeed } from './engine/rng.ts'
 import { autoKeep, forgePlan, type ForgePlan } from './engine/forge.ts'
 import { getRival } from './engine/rivals.ts'
@@ -15,19 +15,24 @@ import {
 } from './engine/match.ts'
 import { api, connect, type PlayerInfo, type ServerMsg, type Status } from './net.ts'
 import type { Appraisal } from './engine/scoring.ts'
-import { INSERTS, type PackKind } from './engine/shop.ts'
-import { twistName, twistText } from './engine/twists.ts'
-import { getSleeve, type Stonks } from './engine/sleeves.ts'
+import { INSERTS, type SleeveCard } from './engine/shop.ts'
+import { KEYWORDS, entry, glossaryIds, traitEntry, type Entry, type Kind } from './engine/glossary.ts'
+import { stonksMult } from './engine/sleeves.ts'
+import { progress, land, mix, still, whipPan } from './ui/motion.ts'
 import * as sfx from './ui/sound.ts'
-import { partCanvas, loadArt, cardCanvas, stockScale, canvasUrl, backCanvas } from './ui/art.ts'
-import { collectibleHtml } from './ui/collectibles.ts'
-import { loadFonts } from './ui/font.ts'
+import { loadArt, faceCanvas, backCanvas, cardCanvas, tinted } from './ui/art.ts'
+import { loadFonts, measure, plainText, wrapText } from './ui/font.ts'
 import { loadLogo } from './ui/logo.ts'
 import { loadTitle, panTo, showTitle, type TitleOnline } from './ui/title.ts'
-import { albumPage, recordPull } from './ui/album.ts'
+import { albumSeen, ALBUM_SETS, recordPull } from './ui/album.ts'
 import { spoilPicked } from './ui/spoils.ts'
-import { showDuel, insertUsed, countUp as duelCountUp, cardInfo, cardTags, type HandSort, type Slip } from './ui/duel.ts'
-import { showShop, shopInsertUsed, keeperSays, type Scratch } from './ui/shop.ts'
+import { showBareTable, rivalBusted, showDuel, insertUsed, countUp as duelCountUp, type HandSort, type Slip } from './ui/duel.ts'
+import { showShop, shelfCenter, gradingReturn, clearGradingReturn, dropCigarette, shopInsertUsed, keeperSays, type Scratch } from './ui/shop.ts'
+import { setPanel, grid, fit, CARD_H, type Panel, type Ui } from './ui/panels.ts'
+import { closeCompare, closeDrawer, openDrawer, setCompareHover, setDrawerActions, setGlossary, type Compare } from './ui/drawer.ts'
+import { setKeywords } from './ui/fiche.ts'
+import { announce, bandShowing, type Tone } from './ui/frame.ts'
+import { twistName } from './engine/twists.ts'
 
 const app = document.getElementById('app') as HTMLElement
 const ME = 0
@@ -41,15 +46,14 @@ let netStatus: Status = 'offline'
 let room: string | null = null // a room I made, waiting for a friend
 let joinCode = location.pathname.match(/^\/r\/([A-Z]+)$/i)?.[1]?.toUpperCase() ?? null // came in on a room link
 let notice = '' // last server message for the title screen
-let autoSent = new Set<string>() // round-1 auto moves already sent this match, so a reject can't loop them
 let difficulty: Difficulty = 'medium'
 let best = { total: 0, hand: '' }
 let busy = false // true while bots act or animations run, so clicks don't double-fire
 let counting = false // meters start at 0 while the count-up runs
 // ui-only state. never game state: that all lives in the match
 let selected = new Set<number>()
-let pack: { ripped: boolean; discoveries: Set<number>; flipped: Set<number>; toDeck: Set<number> } | null = null
-const justFlipped = new Set<number>() // pulls flipped since the last draw, the only ones that play the flip animation
+let pack: ReturnType<typeof newRip> | null = null
+let packShelfX = 320
 let log: string[] = []
 let scratchShow: Scratch | null = null // a scratcher being rubbed in the shop scene, the card pick waits for it
 let scratchKey = 0
@@ -60,16 +64,25 @@ let insertSlot: number | null = null // the Sleeve slot picked up during a deal
 let grindPick = false // flamber with no pair: waiting for the card that gets +1 Value
 let patronMissed = false
 let patronPaid: number | null = null // le patron just collected this at the big shop door
-let sleeveOpen = false // the shop's Sleeve overlay
 let lastLocked: Card[] = [] // my locked cards, so a fold or forge result can still show them
-let binderOpen = false // the shop's binder overlay, kept open across renders while you sell
+let binderOpen = false // the shop's binder sheet, kept open across renders while you sell
 let binderPicked = new Set<number>()
-let vitrineOpen = false
-let deckOpen = false // the deck viewer, kept open across renders so a bot move doesn't close it
 let handSort: HandSort = 'rank' // how your hand fans out. display only, the engine's order never changes
+let overflowOpened = false // the Sleeve already popped open for the insert waiting on room
+let docked: Compare | null = null // this render's compare dock, set by the screen that offers a choice
+let announced = new Set<string>() // band callouts already made this run, so a redraw doesn't repeat one
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+const rule = (kind: Kind, id: string, line = 0, ctx?: unknown) => plainText(entry(kind, id, ctx).text[line])
 const fmt = (n: number) => n.toLocaleString('en-US')
+
+// zone F, once per key per run. these belong to the phase on screen, so they only queue when the band is free:
+// queued behind another callout they'd land after the phase is over. a later render of the same phase tries again
+function announceOnce(key: string, fr: string, en: string, tone: Tone = 'plain'): void {
+  if (announced.has(key) || bandShowing()) return
+  announced.add(key)
+  announce(fr, en, tone)
+}
 const v = (): SeatView => online?.view ?? view(match!, ME)
 const mySeat = () => v().me.seat
 
@@ -102,6 +115,7 @@ async function dispatch(action: Action): Promise<void> {
   if (online) {
     // false = socket not open. the click is dropped and the reconnect brings a fresh view
     if (net!.act(action)) busy = true
+    else { resetPendingMotion(); render() }
     return
   }
   if (!match) return
@@ -157,7 +171,7 @@ async function runBots(): Promise<void> {
     if (before && action.type === 'spoils') spoilPicked(before, action.cardId, !!before.spoils?.picks.length)
     match = res.match
     onEvents(res.events.filter(e => e.to === ME || e.to === 'all').map(e => e.event))
-    if (dealing && match.phase === 'deal') log = [`Round ${match.round} · the rival has <b>$${v().others[0].bankroll}</b>.`]
+    if (dealing && match.phase === 'deal') log = [`Round ${match.round} · the rival has $${v().others[0].bankroll}.`]
     if (betting) {
       render()
       await beat(1000) // their ticket lands on the felt and sits a beat before anything else moves
@@ -167,7 +181,7 @@ async function runBots(): Promise<void> {
 
 function onEvents(events: Event[]): void {
   for (const e of events) {
-    if (e.kind === 'packOpened') pack = { ripped: false, discoveries: new Set(), flipped: new Set(), toDeck: new Set(e.contents.cards.filter(defaultToDeck).map(c => c.id)) }
+    if (e.kind === 'packOpened') pack = newRip(e.contents.cards)
     if (e.kind === 'showdown') {
       resultHold = true
       tallyHold = false
@@ -175,30 +189,36 @@ function onEvents(events: Event[]): void {
       const mine = e.showdown.mine
       if (mine && mine.total > best.total) best = { total: mine.total, hand: handLabel(mine) }
     }
+    if (e.kind === 'busted' && e.seat !== mySeat()) rivalBusted(e.seat)
     if (e.kind === 'roundEnd') {
       tallyHold = true
       const r = e.result
-      if (r.outcome === 'loss' && r.margin < 0) log.push(`Lost round ${r.round} by <b>${fmt(-r.margin)}</b>.`)
-      else if (r.outcome === 'win') log.push(`Took round ${r.round}${r.ko ? ' by knockout' : ''}, by <b>${fmt(r.margin)}</b>.`)
+      if (r.outcome === 'loss' && r.margin < 0) log.push(`Lost round ${r.round} by ${fmt(-r.margin)}.`)
+      else if (r.outcome === 'win') log.push(`Took round ${r.round}${r.ko ? ' by knockout' : ''}, by ${fmt(r.margin)}.`)
     }
     if (e.kind === 'patron' && e.seat === mySeat()) {
       patronMissed = !e.paid
       patronPaid = e.paid ? e.due : null
-      log.push(e.paid ? `Le Patron collected <b>$${e.due}</b>.` : `Couldn't cover Le Patron's <b>$${e.due}</b>.`)
+      if (e.paid) announce('Le Patron est payé', 'You covered his marker', 'good')
+      else announce('Impayé', "You couldn't cover Le Patron's marker", 'bad')
     }
-    if (e.kind === 'rival' && e.seat !== mySeat()) log.push(`${getRival(e.rival).name} sits down.`)
+    if (e.kind === 'rival' && e.seat !== mySeat()) {
+      const r = getRival(e.rival)
+      announce(`${r.name} s'installe`, `A new rival sits down: ${r.lane}`)
+    }
     if (e.kind === 'insertUsed') {
       insertUsed(e.insert, e.cards)
       shopInsertUsed(e.insert, e.cards)
     }
-    if (e.kind === 'insertUsed') log.push(`Used <b class="gold">${INSERTS[e.insert].name}</b>${e.cards.length ? ` on ${e.cards.map(cardName).join(', ')}` : ''}.`)
+    if (e.kind === 'insertUsed') log.push(`Used ${INSERTS[e.insert].name}${e.cards.length ? ` on ${e.cards.map(cardName).join(', ')}` : ''}.`)
     if (e.kind === 'scratched') {
       const what = e.hand ? `: ${HAND_NAMES[e.hand]} +1 level` : e.collectible ? `: ${getDef(e.collectible.id).name}` : e.joker ? `: ${JOKERS[e.joker.joker!].name} (${cardName(e.joker)})` : ', into your Sleeve'
-      log.push(`Scratched a <b class="gold">${INSERTS[e.insert].name}</b>${what}.`)
+      log.push(`Scratched a ${INSERTS[e.insert].name}${what}.`)
       const prize = e.hand ? `${HAND_NAMES[e.hand]} +1 level` : e.collectible ? getDef(e.collectible.id).name : e.joker ? `${JOKERS[e.joker.joker!].name} (${cardName(e.joker)})` : 'into your Sleeve'
       scratchShow = { key: ++scratchKey, insert: e.insert, prize }
     }
-    if (e.kind === 'graded') log.push(`Back from grading: <b>${cardName(e.card)}</b> came back a <b class="gold">${e.card.grade}</b>.`)
+    if (e.kind === 'graded') gradingReturn(e.card)
+    if (e.kind === 'graded') log.push(`Back from grading: ${cardName(e.card)} came back a ${e.card.grade}.`)
   }
 }
 
@@ -209,15 +229,22 @@ function startNet(): void {
   net = connect(onServer, s => {
     netStatus = s
     // an action in flight on a dead socket never gets its ok/reject
-    if (s !== 'online') busy = false
-    const dot = document.getElementById('netdot')
-    if (dot) dot.textContent = s
+    if (s !== 'online') {
+      busy = false
+      resetPendingMotion()
+    }
     if (s === 'online' && joinCode) {
       net!.joinRoom(joinCode)
       joinCode = null
       history.replaceState(null, '', '/')
     }
   })
+}
+
+function resetPendingMotion(): void {
+  if (pack?.sent) { pack.sent=false; pack.doneAt=null }
+  if (pickedBox?.sent) pickedBox=null
+  sweepAt=null
 }
 
 function onServer(msg: ServerMsg): void {
@@ -233,6 +260,7 @@ function onServer(msg: ServerMsg): void {
     leaveOnline()
   } else if (msg.t === 'reject' || msg.t === 'error') {
     busy = false
+    resetPendingMotion()
     const why = msg.t === 'reject' ? msg.reason : msg.error
     if (online) log.push(`Server said no: ${why}`)
     else notice = why
@@ -260,6 +288,9 @@ function onView(next: SeatView, deadlines: (number | null)[], events: Event[]): 
   if (!prev) {
     // a fresh join: start clean. old events are already in the view, replaying them would rerun old count-ups
     match = null
+    clearGradingReturn()
+    receiptAt=null
+    receiptLine=-1
     best = { total: 0, hand: '' }
     log = []
     resultHold = false
@@ -267,17 +298,22 @@ function onView(next: SeatView, deadlines: (number | null)[], events: Event[]): 
     toCount = false
     pack = null
     selected = new Set()
-    autoSent = new Set()
+    boxRip = null
+    boxOpened = false
+    pickedBox = null
+    sweepAt = null
+    boxesShown = 0
+    draftPicks = null
   }
   online = { view: next, deadlines }
   const rival = next.others[0] // the rival's bets show up on the felt, from the view (duel.ts)
-  if (prev && prev.phase !== 'deal' && next.phase === 'deal') log = [`Round ${next.round} · ${rival.name} has <b>$${rival.bankroll}</b>.`]
+  if (prev && prev.phase !== 'deal' && next.phase === 'deal') log = [`Round ${next.round} · ${rival.name} has $${rival.bankroll}.`]
   if (prev?.spoils && next.spoils && next.spoils.picks.length > prev.spoils.picks.length) {
     spoilPicked(prev, next.spoils.picks.at(-1)?.card?.id ?? null, next.spoils.picks.length === 2)
   }
   if (prev) onEvents(events)
   // the rival's moves in a phase you both play at once only change `others`, which these screens don't show.
-  // skipping the redraw keeps open overlays (draft picks, the deck viewer) from resetting under you
+  // skipping the redraw keeps an open panel (draft picks, a pack sort) from resetting under you
   const quiet = prev && !events.length && ['draft', 'shop'].includes(next.phase)
     && JSON.stringify({ ...prev, others: null }) === JSON.stringify({ ...next, others: null })
   if (!quiet) render()
@@ -287,180 +323,6 @@ function leaveOnline(): void {
   online = null
   net?.forgetMatch()
   renderTitle()
-}
-
-// my seat's server clock, ticking in the top bar
-setInterval(() => {
-  const el = document.getElementById('clock')
-  if (!el || !online || !net) return
-  const d = online.deadlines[online.view.me.seat]
-  el.textContent = d === null ? '' : `${Math.max(0, Math.ceil(net.msLeft(d) / 1000))}s`
-}, 250)
-
-// ---------- small render helpers ----------
-function cardChips(card: Card): string {
-  return cardTags(card).map(t => `<span class="card-chip" style="--ink:${t.color}">${t.label}</span>`).join(' · ')
-}
-
-function cardHtml(card: Card, cls = ''): string {
-  const info = cardInfo(card)
-  const img = cardCanvas(card)
-  const scale = stockScale(card) * (cls.includes('mini') ? .75 : cls.includes('big') ? 2 : 1.5)
-  return `<div class="card art ${cls}" style="width:${img.width*scale}px;height:${img.height*scale}px" data-id="${card.id}" title="${cardName(card)}${info ? ` · ${info}` : ''}"><img src="${canvasUrl(img)}" alt="${cardName(card)}">${info && !cls.includes('mini') ? `<span class="tag">${cardChips(card)}</span>` : ''}</div>`
-}
-
-function caseHtml(sellable: boolean): string {
-  const me = v().me
-  const slots = me.display.map((o, i) => {
-    const def = getDef(o.id)
-    const sell = sellable ? `<button class="ghost" data-sellcol="${i}">Sell $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}</button>` : ''
-    return `<div class="item ${def.rarity}" data-slot="${i}">${collectibleHtml(o, i)}<b>${def.name}</b><span>${describe(o)}</span><div class="rar">${def.rarity}</div>${sell}</div>`
-  })
-  for (let i = me.display.length; i < me.displaySlots; i++) slots.push('<div class="item empty">empty slot</div>')
-  return `<div class="panel"><h3 style="margin-bottom:10px">Display case</h3><div class="case">${slots.join('')}</div></div>`
-}
-
-function sideHtml(): string {
-  const me = v().me
-  const lv = Object.entries(me.levels).filter(([, n]) => n > 0)
-  const parts: string[] = []
-  if (me.sleeves.length) parts.push(`<h3 style="margin-bottom:6px">Sleeves</h3>${me.sleeves.map(id => `<div class="muted"><b class="gold">${getSleeve(id).name}</b> · ${getSleeve(id).text}</div>`).join('')}`)
-  if (lv.length) parts.push(`<h3 style="margin:8px 0 6px">Code cards</h3>${lv.map(([h, n]) => `<div class="muted">${HAND_NAMES[h as HandType]} lv${n + 1}</div>`).join('')}`)
-  return caseHtml(v().phase === 'shop') + (parts.length ? `<div class="panel" style="margin-top:12px">${parts.join('')}</div>` : '')
-}
-
-function stonksText(st: Stonks): string {
-  if (st.kind === 'rank') return `${rankLabel(st.rank)}s ×3`
-  if (st.kind === 'suit') return `${SUIT_GLYPH[st.suit]} ×3`
-  return `${st.finish} ×2`
-}
-
-function topHtml(): string {
-  const view_ = v()
-  const t = view_.nextTwist
-  const twistChip = t ? `<span class="chip" title="${twistText(t.twist)}">${t.round === view_.round ? 'This round' : `Round ${t.round}`}: <b class="gold">${twistName(t.twist)}</b></span>` : ''
-  return `<div class="top">
-    <h2>FLAM<span class="gold">BEUR</span></h2>
-    <div class="chips">
-      <span class="chip">Round <b>${view_.round}/${view_.lastRound ?? '∞'}</b> · Table <b>${tableOf(view_.round)}</b></span>
-      <span class="chip">Bankroll <b>$${view_.me.bankroll}</b></span>
-      <span class="chip">Ante/Max <b>$${view_.blinds.ante}/$${view_.blinds.max}</b></span>
-      <button class="chip" id="deckview" style="cursor:pointer;color:inherit;min-height:0">Deck <b>${view_.me.pile.length}</b> pile / <b>${view_.me.discard.length}</b> discard · Binder <b>${view_.me.binder.length}</b></button>
-      <span class="chip">STONKS <b class="hot">${stonksText(view_.stonks)}</b></span>
-      ${match ? `<span class="chip">Seed <b>${match.config.seed}</b></span>` : ''}
-      ${view_.me.starter ? `<span class="chip">Box <b>${getStarter(view_.me.starter).name}</b></span>` : ''}
-      <span class="chip">${match ? `Rival · ${DIFFICULTIES[difficulty].name}` : `${view_.mode} vs <b>${view_.others[0].name}</b>`}</span>
-      ${online ? '<span class="chip" id="clock"></span><span class="chip" id="netdot">' + netStatus + '</span>' : ''}
-      ${twistChip}
-    </div>
-  </div>`
-}
-
-// pile, discard and binder. the view already sorts the pile so it never shows draw order
-function showDeckViewer(): void {
-  deckOpen = true
-  render()
-}
-
-// a deck button for the dom overlays (packs, binder, grading). the canvas scenes use the pile
-const deckButton = () => '<button class="ghost" data-deck style="position:absolute;top:10px;right:10px;min-height:0;padding:4px 10px">Deck</button>'
-document.addEventListener('click', e => {
-  if ((e.target as HTMLElement).closest('[data-deck]')) showDeckViewer()
-})
-// d opens or closes your deck from anywhere in a run, escape closes it
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && deckOpen) {
-    deckOpen = false
-    return render()
-  }
-  if (e.key !== 'd' || e.ctrlKey || e.metaKey || e.altKey || (e.target as HTMLElement).closest('input, textarea')) return
-  if (!(match || online) || !v().me.starter) return
-  deckOpen = !deckOpen
-  render()
-})
-
-// balatro's deck view: stats on the left, one row per suit high to low, big cards that overlap only when a row runs long.
-// full deck dims what's out of the pile (in hand or played this Table), so you can see what's left to draw
-type DeckTab = 'full' | 'pile' | 'binder'
-let deckTab: DeckTab = 'full'
-const ROW_SUITS = ['S', 'H', 'C', 'D'] as const
-
-function drawDeckViewer(): void {
-  const me = v().me
-  const outIds = new Set([...me.hand, ...me.discard].map(c => c.id))
-  const cards = deckTab === 'binder' ? me.binder : deckTab === 'pile' ? me.pile : [...me.pile, ...me.hand, ...me.discard]
-  const byValue = (a: Card, b: Card) => b.rank - a.rank || b.tier - a.tier || cardName(a).localeCompare(cardName(b))
-  const rows = ROW_SUITS.map(su => ({ label: SUIT_GLYPH[su], red: su === 'H' || su === 'D', cards: cards.filter(c => !c.bulk && !c.joker && c.suit === su).sort(byValue) }))
-    .filter(r => r.cards.length)
-  const other = cards.filter(c => c.bulk || c.joker)
-  if (other.length) rows.push({ label: '✦', red: false, cards: other.sort((a, b) => Number(a.bulk) - Number(b.bulk)) })
-  // the biggest whole-ish scale that fits every row on screen
-  const avail = innerHeight - 40 // the overlay's padding
-  const scale = [2, 1.75, 1.5, 1.25, 1].find(s => rows.length * (88 * s + 14) + 20 <= avail) ?? 1
-  const w = 64 * scale
-
-  const plain = cards.filter(c => !c.bulk && !c.joker)
-  const rankCounts = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2].map(r => `<span>${rankLabel(r)}</span><b>${plain.filter(c => c.rank === r).length}</b>`).join('')
-  const suitCounts = ROW_SUITS.map(su => `<span class="${su === 'H' || su === 'D' ? 'red' : ''}">${SUIT_GLYPH[su]} <b>${plain.filter(c => c.suit === su).length}</b></span>`).join('')
-  const tab = (id: DeckTab, label: string, n: number) => `<button class="${deckTab === id ? '' : 'ghost'}" data-tab="${id}">${label} <b>${n}</b></button>`
-  const note = deckTab === 'full' ? `<p class="muted small">Dimmed: in your hand or played this Table. They come back when the next Table shuffles.</p>`
-    : deckTab === 'pile' ? `<p class="muted small">What you can still draw this Table.</p>`
-    : `<p class="muted small">Never drawn. Sell from it at the shop.${me.shipping ? ` ${cardName(me.shipping.card)} is away at grading.` : ''}</p>`
-  const rowHtml = rows.map(r => `<div class="dv-row"><span class="dv-suit ${r.red ? 'red' : ''}">${r.label}</span>
-    <div class="dv-cards" style="grid-template-columns:repeat(${r.cards.length}, minmax(0, ${w + 6}px))">
-      ${r.cards.map(c => `<div class="dv-card ${deckTab === 'full' && outIds.has(c.id) ? 'out' : ''}" data-id="${c.id}" style="width:${cardCanvas(c).width * stockScale(c) * scale}px;height:${cardCanvas(c).height * stockScale(c) * scale}px"><img src="${canvasUrl(cardCanvas(c))}" alt="${cardName(c)}"></div>`).join('')}
-    </div></div>`).join('')
-
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay deckview'
-  overlay.style.zIndex = '60'
-  overlay.innerHTML = `<div class="dv">
-    <div class="dv-side">
-      <h2>Your deck</h2>
-      <div class="dv-tabs">${tab('full', 'Full deck', me.pile.length + me.hand.length + me.discard.length)}${tab('pile', 'Left to draw', me.pile.length)}${tab('binder', 'Binder', me.binder.length)}</div>
-      ${note}
-      <div class="dv-ranks">${rankCounts}</div>
-      <div class="dv-suits">${suitCounts}</div>
-      ${other.length ? `<p class="muted small">✦ ${cards.filter(c => c.bulk).length} bulk · ${cards.filter(c => c.joker).length} joker</p>` : ''}
-      <div class="dv-info" id="dvinfo">Hover a card to read it.</div>
-      <button id="closeview">Close <span class="muted small">(D)</span></button>
-    </div>
-    <div class="dv-main">${rows.length ? rowHtml : '<p class="muted">Nothing here.</p>'}</div>
-  </div>`
-  document.body.appendChild(overlay)
-  const info = document.getElementById('dvinfo')!
-  overlay.querySelectorAll<HTMLElement>('.dv-card').forEach(el => {
-    el.onmouseenter = () => {
-      const c = cards.find(x => x.id === Number(el.dataset.id))!
-      const extra = cardChips(c)
-      const where = deckTab !== 'full' ? '' : me.hand.some(x => x.id === c.id) ? ' · in your hand' : me.discard.some(x => x.id === c.id) ? ' · played this Table' : ''
-      info.innerHTML = `<b>${cardName(c)}</b>${where}${extra ? `<br><span class="muted">${extra}</span>` : ''}`
-    }
-  })
-  overlay.querySelectorAll<HTMLElement>('[data-tab]').forEach(el => {
-    el.onclick = () => {
-      deckTab = el.dataset.tab as DeckTab
-      render()
-    }
-  })
-  overlay.onclick = e => {
-    if (e.target === overlay) document.getElementById('closeview')!.click()
-  }
-  document.getElementById('closeview')!.onclick = () => {
-    deckOpen = false
-    overlay.remove()
-  }
-}
-
-function bindCommon(): void {
-  const dv = document.getElementById('deckview')
-  if (dv) dv.onclick = () => showDeckViewer()
-  app.querySelectorAll<HTMLElement>('[data-sellcol]').forEach(el => {
-    el.onclick = () => {
-      sfx.coin()
-      void dispatch({ type: 'sellCollectible', slot: Number(el.dataset.sellcol) })
-    }
-  })
 }
 
 // ---------- title + leaderboard ----------
@@ -489,11 +351,6 @@ function saveScore(): void {
   } catch {
     // private window etc, the leaderboard just doesn't persist
   }
-}
-
-function lbTable(title: string, lb: Score[]): string {
-  if (!lb.length) return ''
-  return `<div class="panel lb"><b>${title}</b><table>${lb.map((e, i) => `<tr><td>#${i + 1}</td><td><b>${fmt(e.score ?? 0)}</b> pts</td><td>$${e.bankroll}</td><td>${e.won ? 'won' : 'lost'}</td><td>best ${fmt(e.best)}</td></tr>`).join('')}</table></div>`
 }
 
 let artReady = false // the title is drawn from the atlases, so it waits for them
@@ -607,19 +464,11 @@ async function loadTitleBoard(): Promise<void> {
   if (!match && !online) renderTitle()
 }
 
-// the run-end screen's copy of the server's daily board: best run and first try
-async function fillBoard(): Promise<void> {
-  const lb = await api<DailyBoard>(`/api/daily?difficulty=${difficulty}`)
-  const el = document.getElementById('board')
-  if (!el) return
-  const table = (title: string, rows: BoardRow[]) => `<div class="panel lb" style="margin-top:10px"><b>${title}</b>${rows.length
-    ? `<table>${rows.slice(0, 10).map((r, i) => `<tr><td>#${i + 1}</td><td>${r.name}</td><td><b>${fmt(r.score)}</b> pts</td>${r.attempts ? `<td>${r.attempts} tr${r.attempts === 1 ? 'y' : 'ies'}</td>` : ''}</tr>`).join('')}</table>`
-    : '<p class="muted small">Nobody yet. Be first.</p>'}</div>`
-  el.innerHTML = table(`Online daily ${lb.day} · ${DIFFICULTIES[difficulty].name} · best run`, lb.best) + table('First try', lb.first)
-}
-
 function startRun(seed: string, autoplay = false): void {
-  autoSent = new Set()
+  announced = new Set()
+  clearGradingReturn()
+  receiptAt=null
+  receiptLine=-1
   best = { total: 0, hand: '' }
   log = []
   resultHold = false
@@ -628,6 +477,14 @@ function startRun(seed: string, autoplay = false): void {
   patronPaid = null
   patronMissed = false
   pack = null
+  boxRip = null
+  boxOpened = false
+  pickedBox = null
+  sweepAt = null
+  boxesShown = 0
+  draftPicks = null
+  dailyBoard = null
+  boardAsked = false
   // dev only: ?quick&wild makes the rival bet at random, so folds and flambés come up fast for testing
   const wild = QUICK && new URLSearchParams(location.search).has('wild') ? { style: 'random' } : {}
   match = newMatch({ mode: 'solo', seed, seats: [{ kind: 'human', name: 'You', ...(autoplay ? { style: 'house' } : {}) }, { kind: 'bot', name: 'Rival', difficulty, ...wild }] })
@@ -677,202 +534,517 @@ async function show(): Promise<void> {
   draw()
 }
 
+// shop lines (a scratch, a grading return, an insert used at the counter) don't follow you to the table
+let lastPhase: SeatView['phase'] | null = null
+const SHOP_LINE = /^(Back from grading|Scratched|Used)/
+
 function draw(): void {
-  document.querySelectorAll('.overlay').forEach(o => o.remove())
+  const phase = match || online ? v().phase : null
+  if (lastPhase === 'shop' && phase !== 'shop') log = log.filter(l => !SHOP_LINE.test(l))
+  lastPhase = phase
+  docked = null
+  setDrawerActions({})
   drawScreen()
-  if (deckOpen && (match || online) && v().me.starter && v().phase !== 'over') drawDeckViewer()
+  // compare mode: the bifold docks beside whatever choice this screen offers, and folds away when it's over
+  if (docked) openDrawer('etui', docked)
+  else closeCompare()
 }
 
 function drawScreen(): void {
-  if (!match && !online) return renderTitle()
+  if (!match && !online) {
+    setPanel(null)
+    return renderTitle()
+  }
   const view_ = v()
   if (resultHold && view_.showdown) return renderTable()
-  if (view_.phase === 'over') return renderOver()
+  // the screens with no hand to play sit on the bare duel table
+  const bare = (panel: Panel) => {
+    showBareTable(app, view_)
+    setPanel(panel)
+  }
+  if (view_.phase === 'over') return bare(overPanel())
   // online, you can finish the draft or shop before the other player does
   if (view_.me.done && (view_.phase === 'draft' || view_.phase === 'shop')) {
-    app.innerHTML = `${topHtml()}<div class="panel" style="margin-top:12px"><p class="center muted">Waiting on ${view_.others[0].name}…</p></div>`
-    return bindCommon()
+    return bare({ title: 'Waiting', help: `Waiting on ${view_.others[0].name}…`, body: () => {}, buttons: [] })
   }
-  if (view_.phase === 'draft') return view_.me.starter ? renderDraft() : renderStarterBox()
-  if (view_.phase === 'shop') {
-    const shop = view_.me.shop!
-    if (shop.open) {
-      renderShop()
-      return renderPack()
-    }
-    return renderShop()
-  }
+  if (view_.phase === 'draft') return bare(view_.me.starter ? draftPanel() : starterPanel())
+  if (view_.phase === 'shop') return renderShop()
   if (view_.phase === 'deal' && view_.me.forge) {
     renderTable()
-    return renderForgePick(view_.me.forge)
+    return setPanel(forgePanel(view_.me.forge))
   }
   return renderTable()
 }
 
 // ---------- draft ----------
-function starterArt(id: StarterId | 'sealed'): string {
-  const url = new URL(`../art/packaging/starters/${id}.png`, import.meta.url).href
-  return `<span class="box-tray"><img src="${url}" width="88" height="112" alt=""></span>`
-}
+// both on the bare duel table: rip the sealed starter box and choose one, then keep 3 of its rows
 
-function renderStarterBox(): void {
-  const offer = v().me.draft!.offer
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  document.body.appendChild(overlay)
-  let ripped = false
-  const paint = () => {
-    const body = !ripped
-      ? `<button class="package-button" id="srip" aria-label="Open starter box">${starterArt('sealed')}</button><p class="muted">Open your starter box.</p>`
-      : `<p class="muted">Choose a starter box.</p>
-        <div class="starter-tray">${offer.map(id => {
-          const s = getStarter(id)
-          return `<button class="starter-choice reveal" data-starter="${id}">${starterArt(id)}<strong>${s.name}</strong><span>${s.deckText}</span><span class="starter-twist">${s.twist}</span></button>`
-        }).join('')}</div>`
-    overlay.innerHTML = `<div class="packbox"><h2>${match ? `Seed ${match.config.seed}` : 'Starter box'}</h2>${body}</div>`
-    const rip = overlay.querySelector<HTMLButtonElement>('#srip')
-    if (rip) rip.onclick = async () => {
-      rip.disabled = true
-      rip.classList.add('shake')
-      sfx.rip()
-      await sleep(450)
-      ripped = true
-      sfx.flip(true)
-      paint()
-    }
-    overlay.querySelectorAll<HTMLElement>('[data-starter]').forEach(el => {
-      el.onclick = () => void dispatch({ type: 'pickBox', box: el.dataset.starter as StarterId })
-    })
+// art/packaging/starters/*.png, loaded on first use. null until it has loaded (the scene redraws every frame)
+const boxArt = new Map<string, HTMLImageElement>()
+function boxImage(id: string): HTMLImageElement | null {
+  let img = boxArt.get(id)
+  if (!img) {
+    img = new Image()
+    img.src = new URL(`../art/packaging/starters/${id}.png`, import.meta.url).href
+    boxArt.set(id, img)
   }
-  paint()
+  return img.complete && img.naturalWidth ? img : null
 }
 
-function renderDraft(): void {
+function drawBoxArt(g: CanvasRenderingContext2D, id: string, x: number, y: number, w: number, h: number): void {
+  const img = boxImage(id)
+  if (!img) return
+  g.save()
+  g.imageSmoothingEnabled = false
+  g.drawImage(img, Math.round(x), Math.round(y), w, h)
+  g.restore()
+}
+
+const FELT_TEXT = { color: '#f6ecd2', outline: '#0e0b0a' } as const
+
+let boxRip: number | null = null // when the sealed box got clicked, it shakes open
+let boxOpened = false
+let pickedBox: { id: StarterId; at: number; x: number; sent: boolean } | null = null
+let dealAt = 0
+let sweepAt: number | null = null
+let boxesShown = 0
+const tray = new Image()
+tray.src = new URL('../art/packaging/tray.png',import.meta.url).href
+let draftPicks: Set<number> | null = null
+
+function drawTray(g: CanvasRenderingContext2D, x: number, y: number, w: number): void {
+  if (!tray.complete || !tray.naturalWidth) return
+  // keep the walnut end caps square when the tray spans several boxes
+  const end = 15
+  g.drawImage(tray, 0, 0, end, 144, x, y, end, 132)
+  g.drawImage(tray, end, 0, 120 - 2 * end, 144, x + end, y, w - 2 * end, 132)
+  g.drawImage(tray, 120 - end, 0, end, 144, x + w - end, y, end, 132)
+}
+
+function starterPanel(): Panel {
+  const offer = v().me.draft!.offer
+  for (const id of [
+    'sealed',
+    'sealed-tear-1',
+    'sealed-tear-2',
+    'sealed-base',
+    'sealed-lid',
+    ...offer,
+    ...offer.map(id => id + '-open'),
+  ])
+    boxImage(id)
+  const rip = () => {
+    if (boxRip !== null) return
+    boxRip = performance.now()
+    sfx.rip()
+    render()
+  }
+  if (!boxOpened)
+    return {
+      title: match ? `Seed ${match.config.seed}` : 'Starter box',
+      help: 'Open your starter box.',
+      felt: true,
+      body: (ui, box) => {
+        const w = 132
+        const h = 168
+        const x = box.x + (box.w - w) / 2
+        const y = box.y + (box.h - h) / 2 - 14
+        const over = ui.hit(x, y, w, h, rip)
+        const t = boxRip === null ? 0 : ui.now - boxRip
+        const shake = boxRip !== null ? Math.sin(t / 25) * 4 * Math.max(0, 1 - t / 450) : over ? Math.sin(ui.now / 40) * 1.5 : 0
+        if (t >= 650) {
+          const rise = land(progress(t - 650, 400))
+          drawTray(ui.g, box.x, box.y + 20 + 100 * (1 - rise), box.w)
+        }
+        ui.g.save()
+        ui.g.translate(x + w / 2 + shake, y + h / 2 - (over ? 3 : 0))
+        ui.g.rotate(shake * 0.02)
+        const lift = progress(t - 650, 400)
+        if (t < 650) drawBoxArt(ui.g, t < 450 ? 'sealed' : t < 550 ? 'sealed-tear-1' : 'sealed-tear-2', -w / 2, -h / 2, w, h)
+        else {
+          ui.g.globalAlpha = 1 - lift
+          drawBoxArt(ui.g, 'sealed-base', -w / 2, -h / 2 + 20 * lift, w, h)
+          ui.g.globalAlpha = 1
+          drawBoxArt(ui.g, 'sealed-lid', -w / 2, -h / 2 - 200 * land(lift), w, h)
+        }
+        if (t > 450 && t < 850) {
+          const u = progress(t - 450, 400)
+          for (let i = 0; i < 6; i++)
+            fit(ui.g, 'pack/scrap/' + ((i % 4) + 1), { x: (i - 2.5) * (8 + 15 * u), y: -35 - 55 * u + 90 * u * u, w: 6, h: 8 })
+        }
+        if (boxRip !== null && (lift === 1 || still.matches)) {
+          boxOpened = true
+          render()
+        }
+        ui.g.restore()
+      },
+      buttons: [{ label: 'Open', kind: 'go', enabled: boxRip === null, onClick: rip }],
+    }
+  return {
+    title: 'Choose a starter box',
+    felt: true,
+    body: (ui, box) => {
+      const n = offer.length
+      const cw = Math.floor((box.w - (n - 1) * 8) / n)
+      const leave = pickedBox ? (still.matches ? 1 : progress(ui.now - pickedBox.at, 400)) : 0
+      drawTray(ui.g, box.x, box.y + 16 + leave * 100, box.w)
+      offer.forEach((id, i) => {
+        const s = getStarter(id)
+        const x = box.x + i * (cw + 8)
+        const y = box.y + 20
+        const intro = still.matches ? 1 : progress(ui.now - (boxRip ?? 0) - 1050 - i * 60, 260)
+        if (intro > 0 && boxesShown <= i) {
+          boxesShown = i + 1
+          sfx.flip(false, i)
+        }
+        const over =
+          !pickedBox &&
+          intro === 1 &&
+          ui.hit(x, y, cw, box.h - 20, () => {
+            if (!pickedBox) pickedBox = { id, at: performance.now(), x: x + cw / 2, sent: false }
+          })
+        const chosen = pickedBox?.id === id
+        ui.g.save()
+        ui.g.translate(x + cw / 2, y + 56)
+        ui.g.translate(0, (1 - land(intro)) * 56 - (over ? 6 : 0) + leave * (chosen ? -18 : 100))
+        ui.g.rotate(over ? (ui.mouse.x - x - cw / 2) * 0.002 : 0)
+        ui.g.globalAlpha = intro * (chosen ? 1 : 1 - leave)
+        if (chosen) ui.g.drawImage(backCanvas(id), -22, -45 - 38 * leave, 44, 60)
+        drawBoxArt(ui.g, chosen ? id + '-open' : id, -44, -56, 88, 112)
+        ui.g.restore()
+        if (chosen && leave === 1 && pickedBox && !pickedBox.sent && !busy) {
+          pickedBox.sent = true
+          dealAt = performance.now()
+          void dispatch({ type: 'pickBox', box: id })
+        }
+        let ty = y + 118
+        ui.text(s.name, x + cw / 2, ty, { align: 'center', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
+        ty += 13
+        ty += ui.lines(s.deckText, x + cw / 2, ty, cw, { align: 'center', ...FELT_TEXT }) + 4
+        ui.lines(s.twist, x + cw / 2, ty, cw, { align: 'center', color: '#e8c260', outline: FELT_TEXT.outline })
+        if (id !== 'standard') ui.fiche(entry('hud', `box-${id}`), x, y, cw, box.h - 20)
+      })
+    },
+    buttons: [],
+  }
+}
+
+// the rows on the felt. click a row to keep or drop it, the compare dock adds up what you'd keep
+function draftPanel(): Panel {
   const me = v().me
   const rows = me.draft!.rows!
-  const picked = new Set<number>([0, 1, 2])
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  document.body.appendChild(overlay)
-  const paint = () => {
-    overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>${getStarter(me.starter!).name}</h2>
-      <p class="muted">Keep ${DRAFT_PICKS} rows. That's your ${DRAFT_PICKS * rows[0].cards.length} card deck.</p>
-      ${rows.map((row, i) => `<div class="panel" data-row="${i}" style="margin-top:10px;cursor:pointer;${picked.has(i) ? 'border-color:var(--gold)' : 'opacity:.5'}">
-        <div class="muted small">${picked.has(i) ? '★ ' : ''}${row.label}</div>
-        <div class="hand" style="margin-top:6px">${row.cards.map(c => cardHtml(c)).join('')}</div></div>`).join('')}
-      <div class="row" style="justify-content:center;margin-top:12px"><button id="keeprows" ${picked.size !== DRAFT_PICKS ? 'disabled' : ''}>Keep these ${picked.size}/${DRAFT_PICKS}</button></div>
-    </div>`
-    overlay.querySelectorAll<HTMLElement>('[data-row]').forEach(el => {
-      el.onclick = () => {
-        const i = Number(el.dataset.row)
-        if (picked.has(i)) picked.delete(i)
-        else picked.add(i)
-        paint()
-      }
-    })
-    document.getElementById('keeprows')!.onclick = () => {
-      if (picked.size === DRAFT_PICKS) void dispatch({ type: 'draft', rows: [...picked].sort() })
-    }
+  const picks = draftPicks ?? (draftPicks = new Set(rows.slice(0, DRAFT_PICKS).map((_, i) => i)))
+  const toggle = (i: number) => {
+    if (sweepAt !== null || (!still.matches && performance.now() - dealAt < 950)) return
+    if (picks.has(i)) picks.delete(i)
+    else picks.add(i)
+    sfx.flip(false)
+    render()
   }
-  paint()
+  docked = { offers: rows.filter((_, i) => picks.has(i)).flatMap(r => r.cards), dest: 'deck' }
+  return {
+    title: getStarter(me.starter!).name,
+    help: `Keep ${DRAFT_PICKS} rows. That's your ${DRAFT_PICKS * rows[0].cards.length} card deck.`,
+    felt: true,
+    docked: true,
+    body: (ui, box) => {
+      const n = Math.max(...rows.map(r => r.cards.length))
+      const gap = 4
+      // the felt ends at the table's rail, ~20 above the sheet's bottom
+      const rowH = Math.floor((box.h - 20) / rows.length)
+      const w = Math.min(40, Math.floor((box.w - (n - 1) * gap) / n), Math.floor(((rowH - 13) * 64) / 88))
+      rows.forEach((row, i) => {
+        const y = box.y + i * rowH
+        const on = picks.has(i)
+        const left = Math.round(box.x + (box.w - (row.cards.length * w + (row.cards.length - 1) * gap)) / 2)
+        ui.hit(box.x, y, box.w, rowH - 2, () => toggle(i))
+        ui.text(`${on ? '★ ' : ''}${row.label}`, left, y, {
+          font: 'tiny',
+          color: on ? '#e8c260' : FELT_TEXT.color,
+          outline: FELT_TEXT.outline,
+        })
+        row.cards.forEach((c, j) => {
+          const arrive = still.matches ? 1 : land(progress(ui.now - dealAt - (i * n + j) * 30, 250))
+          const fly = sweepAt === null ? 0 : land(progress(ui.now - sweepAt - j * 12, 400))
+          const dx = mix(mix(pickedBox?.x ?? 320, left + j * (w + gap), arrive), on ? box.x : box.x + j * w, fly)
+          const dy = mix(mix(70, y + (on ? 11 : 13), arrive), on ? box.y + box.h - 18 : -80, fly)
+          if (arrive !== 1 || sweepAt !== null) {
+            const size = on ? mix(w,22,fly) : w
+            ui.g.drawImage(cardCanvas(c), dx, dy, size, CARD_H(size))
+          } else ui.card(c, dx, dy, w, { picked: on, dim: !on, onClick: () => toggle(i) })
+        })
+      })
+    },
+    buttons: [
+      {
+        label: `Keep these ${picks.size}/${DRAFT_PICKS}`,
+        kind: 'go',
+        enabled: picks.size === DRAFT_PICKS,
+        onClick: () => {
+          if (picks.size !== DRAFT_PICKS || sweepAt !== null || (!still.matches && performance.now() - dealAt < 950)) return
+          const at = (sweepAt = performance.now())
+          setTimeout(
+            () => {
+              if (sweepAt !== at || (!match && !online) || v().phase !== 'draft' || v().me.done) return
+              draftPicks = null
+              closeCompare()
+              void dispatch({ type: 'draft', rows: [...picks].sort() })
+            },
+            still.matches ? 0 : 500,
+          )
+        },
+      },
+    ],
+  }
 }
 
 // ---------- pack opening ----------
-const PACK_NAMES: Record<PackKind, string> = { offbrand: 'Off-Brand', repack: 'Repack', collector: 'Collector Pack' }
-
-function glowFor(card: Card): string {
-  if (card.finish === 'prism') return 'var(--gold)'
-  if (card.finish || card.stamp) return card.stamp ? 'var(--green)' : 'var(--blue)'
-  return '#e8e8e8'
+// the pack, ripped on the zinc: flip each pull, then raise the ones that go in your deck. the rest go to the binder
+function topPull(c: Card): boolean {
+  return c.finish === 'prism' || (c.stamp !== null && c.stamp !== 'damaged') || c.joker !== null || c.tier > 0
 }
 
-function renderPack(): void {
-  const open = v().me.shop!.open!
-  if (!pack) pack = { ripped: false, discoveries: new Set(), flipped: new Set(), toDeck: new Set(open.cards.filter(defaultToDeck).map(c => c.id)) }
-  const p = pack
-  // older servers sent the contents without the lane. each lane has a unique collation.
-  const kind = open.kind
-  const allFlipped = open.cards.every(c => p.flipped.has(c.id))
-  let body: string
-  if (!p.ripped) {
-    const url = new URL(`../art/packaging/boosters/${kind}.png`, import.meta.url).href
-    body = `<button class="package-button" id="rip" aria-label="Rip open ${PACK_NAMES[kind]}"><img src="${url}" width="144" height="208" alt=""></button><p class="muted">Rip it open.</p>`
-  } else {
-    const back = canvasUrl(backCanvas(v().me.starter)) // your deck's back, so the pulls look like your cards
-    const pulls = open.cards.map(c => {
-      if (!p.flipped.has(c.id)) return `<div class="pull"><span class="pull-tag hidden">?</span><img class="glowback" src="${back}" style="--glow:${glowFor(c)}" data-flip="${c.id}" alt="face-down card"></div>`
-      const deck = p.toDeck.has(c.id)
-      return `<div class="pull ${deck ? 'to-deck' : ''} ${justFlipped.has(c.id) ? 'reveal' : ''}" data-sort="${c.id}">${p.discoveries.has(c.id) ? `<img class="album-new" src="${canvasUrl(partCanvas('hud/album/new'))}" alt="New to your Album">` : ''}<span class="pull-tag">${deck ? 'Deck' : 'Binder'}</span>${cardHtml(c, 'big')}</div>`
-    })
-    justFlipped.clear()
-    const sorting = open.cards.some(c => p.flipped.has(c.id))
-    if (allFlipped && open.codeCard) pulls.push(`<div class="pull reveal"><div class="extra code">CODE CARD<br>${HAND_NAMES[open.codeCard]} +1 level</div><span class="muted small">auto-applied</span></div>`)
-    if (allFlipped && open.collectible) {
-      const def = getDef(open.collectible.id)
-      const room = v().me.display.length < v().me.displaySlots
-      pulls.push(`<div class="pull reveal"><div class="extra col">${collectibleHtml(open.collectible, 0)}${def.name}<br><span class="small" style="color:#d5cde8">${describe(open.collectible)}</span></div><span class="muted small">${room ? 'goes in your case' : `case full, sells for $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}`}</span></div>`)
-    }
-    body = `<p class="muted pull-help">${sorting ? 'Raised cards go in your <b class="gold">deck</b>, the rest in your binder. Click a card to switch.' : 'Click a card to flip it.'}</p>
-      <div class="pulls">${pulls.join('')}</div>
-      <div class="row" style="justify-content:center">${allFlipped ? '<button id="done">Done</button>' : '<button class="ghost" id="all">Reveal all</button>'}</div>`
-  }
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  overlay.innerHTML = `<div class="packbox packview" style="position:relative">${deckButton()}<h2>${PACK_NAMES[kind]}</h2>${body}</div>`
-  document.body.appendChild(overlay)
+function pullRank(c: Card): number {
+  if (topPull(c)) return 3
+  if (c.variant || c.finish || c.knockoff || c.stamp) return 2
+  return 1
+}
 
-  const ripEl = overlay.querySelector<HTMLButtonElement>('#rip')
-  if (ripEl) ripEl.onclick = async () => {
-    ripEl.disabled = true
-    ripEl.classList.add('shake')
-    sfx.rip()
-    await sleep(450)
-    p.ripped = true
-    render()
+function newRip(cards: Card[]) {
+  return {
+    at: performance.now(),
+    burst: false,
+    fastAt: null as number | null,
+    doneAt: null as number | null,
+    settled: false,
+    sent: false,
+    cards: [...cards].sort((a, b) => pullRank(a) - pullRank(b)),
+    discoveries: new Set<number>(),
+    flipped: new Set<number>(),
+    toDeck: new Set(cards.filter(defaultToDeck).map(c => c.id)),
   }
-  const flip = (id: number) => {
-    if (p.flipped.has(id)) return
-    const card = open.cards.find(c => c.id === id)!
-    p.flipped.add(id)
-    if (recordPull(card)) p.discoveries.add(id)
-    justFlipped.add(id)
-    sfx.flip(card.finish === 'prism' || card.stamp !== null)
+}
+
+function packPanel(): Panel {
+  const open = v().me.shop!.open!
+  const p = (pack ??= newRip(open.cards))
+  const back = v().me.starter
+  const cards = p.cards
+  const last = cards.length - 1
+  const fanAt = 1050
+  const first = fanAt + 300 + last * 40
+  const flipStart = (i: number) => {
+    const regular = first + i * 250 + (i === last ? 500 : 0)
+    if (p.fastAt === null) return regular
+    const start = Math.max(first, p.fastAt)
+    const next = Math.max(0, Math.ceil((start - first) / 250))
+    return Math.min(regular, start + Math.max(0, i - next) * 120 + (i === last ? 500 : 0))
   }
-  overlay.querySelectorAll<HTMLElement>('[data-flip]').forEach(el => {
-    el.onclick = () => {
-      flip(Number(el.dataset.flip))
-      render()
-    }
-  })
-  // switched in place, not re-rendered, so the card slides up or down
-  overlay.querySelectorAll<HTMLElement>('[data-sort]').forEach(el => {
-    el.onclick = () => {
-      const id = Number(el.dataset.sort)
-      const deck = !p.toDeck.has(id)
-      if (deck) p.toDeck.add(id)
-      else p.toDeck.delete(id)
-      el.classList.remove('reveal')
-      el.classList.toggle('to-deck', deck)
-      el.querySelector('.pull-tag')!.textContent = deck ? 'Deck' : 'Binder'
-      sfx.flip(false)
-    }
-  })
-  const allEl = document.getElementById('all')
-  if (allEl) allEl.onclick = async () => {
-    for (const c of open.cards) {
-      if (p.flipped.has(c.id)) continue
-      flip(c.id)
-      render()
-      await sleep(220)
-    }
+  const skip = () => {
+    if (p.settled || p.doneAt !== null) return
+    const t = performance.now() - p.at
+    if (t < 900) p.at -= 900 - t
+    p.fastAt ??= performance.now() - p.at
   }
-  const doneEl = document.getElementById('done')
-  if (doneEl) doneEl.onclick = () => {
-    const toDeck = [...p.toDeck]
-    pack = null
-    sfx.coin()
-    void dispatch({ type: 'sortPack', toDeck })
+  if (p.settled) docked = { offers: cards.filter(c => p.toDeck.has(c.id)), dest: 'deck' }
+  return {
+    title: entry('hud', 'pack-' + open.kind).name,
+    felt: true,
+    docked: p.settled,
+    help: p.settled ? 'Click a card to switch its pile.' : undefined,
+    scrim: now => 0.7 * progress(now - p.at, 300) * (p.doneAt === null ? 1 : 1 - progress(now - p.doneAt, 400 + last * 50)),
+    body: (ui, box) => {
+      const g = ui.g
+      const t = still.matches ? Math.max(ui.now - p.at, flipStart(last) + 900) : ui.now - p.at
+      const cx = box.x + box.w / 2
+      const cy = box.y + box.h * 0.43
+      if (t < fanAt + 500) {
+        const lift = land(progress(t, 300))
+        const shake = progress(t - 300, 600)
+        const burst = progress(t - 900, 350)
+        g.save()
+        if (t >= 900 && t < 1050) g.translate(Math.sin(t * 0.15) * 2 * (1 - progress(t - 900, 150)), 0)
+        g.translate(mix(packShelfX, cx, lift) + Math.sin(t * 0.13) * 4 * shake * (1 - burst), mix(245, cy, lift))
+        g.rotate(Math.sin(t * 0.09) * 0.055 * shake * (1 - burst))
+        g.scale(1, 1 - (Math.floor(t / 50) % 4 === 0 ? 0.035 * shake : 0))
+        const w = mix(65, 126, lift),
+          h = w * 1.42
+        if (t < 900) fit(g, 'shop/pack/' + open.kind, { x: -w / 2, y: -h / 2, w, h })
+        else {
+          if (!p.burst) {
+            p.burst = true
+            sfx.rip()
+          }
+          g.globalAlpha = 1 - burst
+          for (const [half, sign] of [
+            ['top', -1],
+            ['bottom', 1],
+          ] as const) {
+            g.save()
+            g.translate(sign * 95 * burst, sign * 70 * burst)
+            g.rotate(sign * burst)
+            fit(g, `pack/${open.kind}/${half}`, { x: -w / 2, y: -h / 2, w, h })
+            g.restore()
+          }
+          g.globalAlpha = 1 - progress(t - 1220, 330)
+          const u = progress(t - 900, 650)
+          for (let i = 0; i < 10; i++) {
+            g.save()
+            g.translate(Math.cos(i * 2.4) * 105 * u, -45 + ((i % 4) - 5) * 38 * u + 220 * u * u)
+            g.rotate(i + u * 6)
+            const ink = { offbrand: '#e8c260', collector: '#3e66a0', repack: '#a82a38' }[open.kind]
+            g.drawImage(tinted('pack/scrap/' + ((i % 4) + 1), ink), -4, -4)
+            g.restore()
+          }
+        }
+        g.restore()
+      }
+      if (t < fanAt) {
+        ui.hit(0, 0, 640, 360, skip)
+        return
+      }
+      const w = Math.min(64, (box.w - 12) / cards.length - 4)
+      const rare = topPull(cards[last])
+      const peak = t - flipStart(last) - 125
+      const pilesY = box.y + box.h - 38
+      cards.forEach((c, i) => {
+        const fan = land(progress(t - fanAt - i * 40, 300))
+        const offset = i - last / 2
+        let x = mix(cx, cx + offset * (w + 4), fan)
+        let y = mix(cy + 20, cy + offset ** 2 * 2, fan)
+        const deck = p.toDeck.has(c.id)
+        if (rare && peak >= 0 && peak < 250 && !still.matches) x += 3 * Math.sin(peak * 0.095) * (1 - peak / 250)
+        const flip = progress(t - flipStart(i), p.fastAt === null || i === last ? 250 : 120)
+        if (flip >= 0.5 && !p.flipped.has(c.id)) {
+          p.flipped.add(c.id)
+          if (recordPull(c)) p.discoveries.add(c.id)
+          sfx.flip(topPull(c), i)
+          if (i === last && rare) {
+            announce('La fée verte !', cardName(c), 'good')
+            dropCigarette()
+          }
+        }
+        const flight = p.doneAt === null ? 0 : progress(ui.now - p.doneAt - i * 50, 400)
+        if (p.doneAt !== null) {
+          const fly = land(flight)
+          x = mix(x, deck ? box.x + 30 : box.x + box.w - 30, fly)
+          y = mix(y, pilesY, fly)
+        }
+        if (!p.settled && i === last && flip === 0 && t > first + (last - 1) * 250) x += Math.sin(t * 0.12) * 1.4
+        if (!p.settled && i === last && rare && peak >= 0 && peak < 600 && !still.matches) {
+          g.save()
+          g.translate(x, y)
+          g.rotate(peak * 0.001)
+          g.globalAlpha = 0.55 * (1 - peak / 600)
+          fit(g, 'fx/rays', { x: -84, y: -84, w: 168, h: 168 })
+          g.restore()
+        }
+        if (p.settled && p.doneAt === null) {
+          ui.card(c, x - w / 2, y - CARD_H(w) / 2, w, {
+            picked: deck,
+            tag: (p.discoveries.has(c.id) ? 'New · ' : '') + (deck ? 'Deck' : 'Binder'),
+            onClick: () => {
+              if (p.toDeck.has(c.id)) p.toDeck.delete(c.id)
+              else p.toDeck.add(c.id)
+              sfx.flip(false)
+              render()
+            },
+          })
+        } else {
+          g.save()
+          g.translate(x, y)
+          g.rotate(offset * 0.052 * fan * (1-flight))
+          const scale = mix(1,22/w,flight)
+          g.scale(scale,scale)
+          const landing = progress(t - flipStart(i) - 250, 230)
+          const pop = still.matches || pullRank(c) === 1 ? 1 : 1 + 0.1 * Math.sin(Math.PI * landing) * (1 - landing)
+          g.scale(pop * Math.max(0.02, Math.abs(Math.cos(Math.PI * flip))), pop * (1 + Math.sin(Math.PI * flip) * 0.07))
+          const ink = glowInk(c)
+          if (i === last && rare && flip === 0 && ink) {
+            g.globalAlpha = 0.5 + 0.4 * Math.sin(t * 0.012)
+            g.fillStyle = ink
+            g.fillRect(-w / 2 - 2, -CARD_H(w) / 2 - 2, w + 4, CARD_H(w) + 4)
+            g.globalAlpha = 1
+          }
+          g.drawImage(flip < 0.5 ? backCanvas(back) : cardCanvas(c), -w / 2, -CARD_H(w) / 2, w, CARD_H(w))
+          if (flip === 1 && p.discoveries.has(c.id) && t - flipStart(i) < 900)
+            fit(g, 'hud/album/new', { x: w / 2 - 16, y: -CARD_H(w) / 2 - 4, w: 24, h: 14 })
+          g.restore()
+        }
+      })
+      if (!p.settled && rare && peak >= 0 && peak < 600 && !still.matches) {
+        g.save()
+        g.globalCompositeOperation = 'lighter'
+        g.globalAlpha = 0.32 * (1 - progress(peak, 120))
+        g.fillStyle = '#3a8040'
+        g.fillRect(0, 0, 640, 360)
+        g.globalAlpha = 0.45 * (1 - peak / 600)
+        fit(g, 'fx/leak', { x: -160 + (800 * peak) / 600, y: 0, w: 160, h: 360 })
+        g.restore()
+      }
+      if (!p.settled && t >= flipStart(last) + (rare ? 725 : 250)) {
+        p.settled = true
+        render()
+      }
+      if (p.settled) {
+        for (const [label, x] of [
+          ['Deck', box.x + 30],
+          ['Binder', box.x + box.w - 30],
+        ] as const) {
+          if (label === 'Binder') fit(g, 'shop/binder', { x: x - 18, y: pilesY - 14, w: 36, h: 30 })
+          else
+            for (let layer = 2; layer >= 0; layer--) g.drawImage(backCanvas(back), x - 11 + layer, pilesY - 14 + layer * 2, 22, 30)
+          ui.text(label, x, pilesY + 16, { align: 'center', ...FELT_TEXT })
+        }
+        let y = cy + CARD_H(w) / 2 + 24
+        if (open.codeCard) {
+          ui.text(`Code: ${HAND_NAMES[open.codeCard]} +1 level`, cx, y, { align: 'center', ...FELT_TEXT })
+          y += 12
+        }
+        if (open.collectible) {
+          const def = getDef(open.collectible.id)
+          y += ui.lines(`${def.name}: ${describe(open.collectible)}`, cx, y, box.w, { align: 'center', ...FELT_TEXT })
+          ui.text(
+            v().me.display.length < v().me.displaySlots
+              ? 'Goes in your case.'
+              : `Case full, sells for $${Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)}.`,
+            cx,
+            y,
+            { align: 'center', ...FELT_TEXT },
+          )
+        }
+      } else ui.hit(0, 0, 640, 360, skip)
+      if (p.doneAt !== null && !p.sent && !busy && (still.matches || ui.now - p.doneAt >= 400 + last * 50)) {
+        p.sent = true
+        closeCompare()
+        sfx.coin()
+        void dispatch({ type: 'sortPack', toDeck: [...p.toDeck] })
+      }
+    },
+    buttons: p.settled
+      ? [
+          {
+            label: 'Done',
+            kind: 'go',
+            enabled: p.doneAt === null,
+            onClick: () => {
+              p.doneAt ??= performance.now()
+              render()
+            },
+          },
+        ]
+      : [{ label: 'Reveal all', kind: 'back', enabled: true, onClick: skip }],
+    onCardHover: c => setCompareHover(c, c && p.toDeck.has(c.id) ? 'deck' : 'binder'),
   }
+}
+
+// a face-down pull hints at what's under it
+function glowInk(card: Card): string | undefined {
+  if (card.joker || card.tier) return '#b088e0'
+  if (card.finish === 'prism') return '#e8c260'
+  if (card.stamp) return '#3a8040'
+  if (card.finish) return '#3e66a0'
+  return undefined
 }
 
 // ---------- shop ----------
@@ -881,7 +1053,10 @@ function renderShop(): void {
   const view_ = v()
   const me = view_.me
   const shop = me.shop!
-  const toast = log.filter(l => l.startsWith('Back from grading') || l.startsWith('Scratched')).at(-1)?.replace(/<[^>]+>/g, '') ?? ''
+  if (!shop.open) pack=null
+  // only the newest line, so a table-side insert from last round doesn't show up here
+  const last = log.at(-1) ?? ''
+  const toast = SHOP_LINE.test(last) ? last : ''
   showShop(app, {
     view: view_,
     toast,
@@ -894,21 +1069,22 @@ function renderShop(): void {
     canRestock: can({ type: 'restock' }),
     canBinBulk: can({ type: 'binBulk' }),
     canGrade: shop.services.grading && !shop.shipped && !me.shipping,
-    onBuy: slot => void dispatch({ type: 'buy', slot }),
+    onBuy: slot => {
+      packShelfX = shelfCenter(shop.offers,slot)
+      void dispatch({ type: 'buy', slot })
+    },
     onRestock: () => void dispatch({ type: 'restock' }),
     onBinBulk: () => void dispatch({ type: 'binBulk' }),
-    onGrading: () => pickDeckCardToGrade(),
-    onBinder: () => {
-      binderOpen = true
-      binderPicked = new Set()
+    onGrading: () => {
+      gradeOpen = true
       render()
     },
-    onVitrine: () => {
-      vitrineOpen = true
-      render()
-    },
-    onPile: () => showDeckViewer(),
+    onBinder: () => openDrawer('classeur'),
+    onVitrine: () => openDrawer('vitrine'),
+    onPile: () => openDrawer('etui'),
     onLeave: () => {
+      whipPan(app.querySelector('canvas.stage'),1)
+      sfx.doorBell()
       patronPaid = null
       void dispatch({ type: 'leaveShop' })
     },
@@ -917,196 +1093,254 @@ function renderShop(): void {
       scratchShow = null
       render()
     },
-    onSleeve: () => {
-      sleeveOpen = true
-      render()
-    },
+    onSleeve: () => openDrawer('sleeve'),
     patronPaid,
   })
-  // a scratch with a full Sleeve: use or toss one before anything else
-  if ((sleeveOpen || me.overflow) && !scratchShow) showSleeve()
-  else if (binderOpen) showBinder()
-  if (vitrineOpen) showVitrine()
+  setDrawerActions({
+    useInsert: shopInsert,
+    canUse: slot => {
+      const c = heldInsert(me, slot)
+      const when = INSERTS[c.id].when
+      if (when === 'shop') return me.binder.length > 0
+      return when === 'anytime' && can({ type: 'useInsert', slot, cardIds: [], suit: null })
+    },
+    tossInsert: slot => {
+      closeDrawer()
+      void dispatch({ type: 'tossInsert', slot })
+    },
+    sellBinder: () => {
+      closeDrawer()
+      binderOpen = true
+      binderPicked = new Set()
+      render()
+    },
+    openAlbum: () => {
+      closeDrawer()
+      binderOpen = true
+      albumOpen = true
+      render()
+    },
+    sellCollectible: slot => {
+      sfx.coin()
+      void dispatch({ type: 'sellCollectible', slot })
+    },
+    collectiblePrice: slot => collectibleSell(view_, slot),
+  })
+  // a scratch with a full Sleeve: the Sleeve opens once on it, use or toss one before buying anything else
+  if (!me.overflow) overflowOpened = false
+  else if (!scratchShow && !overflowOpened) {
+    overflowOpened = true
+    openDrawer('sleeve')
+  }
+  setPanel(shop.open ? packPanel()
+    : wishSlot !== null ? wishPanel()
+    : gradeOpen ? gradingPanel()
+    : binderOpen ? binderPanel()
+    : null)
 }
 
-// the binder over the counter: tap cards to pick them, then sell them all. stonks-hot cards say so
-function showBinder(): void {
+// slot 2 is the insert waiting for room
+function heldInsert(me: SeatView['me'], slot: number): SleeveCard {
+  const c = slot === SLEEVE_SLOTS ? me.overflow : me.sleeve[slot]
+  if (!c) throw new Error(`no insert in slot ${slot}`)
+  return c
+}
+
+// the Sleeve page's Use in the shop: a code levels its hand here, a wishlist picks a binder card first
+function shopInsert(slot: number): void {
+  const c = heldInsert(v().me, slot)
+  closeDrawer()
+  if (c.id === 'wishlist') {
+    wishSlot = slot
+    return render()
+  }
+  void dispatch({ type: 'useInsert', slot, cardIds: [], suit: null })
+}
+
+// half what a collectible costs today, the same math as the engine's sellCollectible
+function collectibleSell(view_: SeatView, slot: number): number {
+  const rarity = getDef(view_.me.display[slot].id).rarity
+  const adj = (view_.keeper.includes('grumpy') ? 1 : 0) - (view_.keeper.includes('closing') ? tableOf(view_.round) - 1 : 0)
+  return Math.floor(Math.max(1, COLLECTIBLE_PRICE[rarity] + adj) / 2)
+}
+
+// the binder over the counter: pick cards, then sell them all. stonks-hot cards say so
+let albumOpen = false
+function binderPanel(): Panel {
   const view_ = v()
   const me = view_.me
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  document.body.appendChild(overlay)
   for (const id of binderPicked) if (!me.binder.some(c => c.id === id)) binderPicked.delete(id)
-  const paint = () => {
-    const cards = me.binder.map(c => {
-      const ok = can({ type: 'sell', cardId: c.id })
-      return `<div class="slot" data-pick="${c.id}" style="cursor:${ok ? 'pointer' : 'not-allowed'};opacity:${ok ? 1 : 0.5}">${cardHtml(c, `mini ${binderPicked.has(c.id) ? 'sel' : ''}`)}</div>`
-    })
-    const n = binderPicked.size
-    overlay.innerHTML = `<div class="packbox" style="max-width:900px;position:relative">${deckButton()}<h2>Binder · ${me.binder.length}</h2>
-      <p class="muted">Tap cards to pick them, then sell. Today's hot: <span class="hot">${stonksText(view_.stonks)}</span>.</p>
-      ${cards.length ? `<div class="binder" style="justify-content:center">${cards.join('')}</div>` : '<p class="muted">Empty. Pulls you send to the binder land here.</p>'}
-      <div class="row" style="justify-content:center;margin-top:12px">
-        <button data-buy id="sellpicked" ${n ? '' : 'disabled'}>Sell ${n || ''} picked</button>
-        <button class="ghost" id="openalbum">Album</button><button class="ghost" id="closebinder">Close</button>
-      </div></div>`
-    overlay.querySelectorAll<HTMLElement>('[data-pick]').forEach(el => {
-      el.onclick = () => {
-        const id = Number(el.dataset.pick)
-        if (!can({ type: 'sell', cardId: id })) return
-        if (binderPicked.has(id)) binderPicked.delete(id)
-        else binderPicked.add(id)
-        paint()
-      }
-    })
-    overlay.querySelector<HTMLButtonElement>('#openalbum')!.onclick = () => {
-      overlay.innerHTML = `<div class="packbox"><h2>Album</h2>${albumPage()}<button id="backbinder">Back to binder</button></div>`
-      overlay.querySelector<HTMLButtonElement>('#backbinder')!.onclick = paint
-    }
-    document.getElementById('closebinder')!.onclick = () => {
-      binderOpen = false
-      overlay.remove()
-    }
-    document.getElementById('sellpicked')!.onclick = async () => {
-      const ids = [...binderPicked]
-      binderPicked = new Set()
-      sfx.coin()
-      keeperSays('Mouais.')
-      for (const id of ids) await dispatch({ type: 'sell', cardId: id })
-    }
+  const close = () => {
+    binderOpen = false
+    albumOpen = false
+    render()
   }
-  paint()
-}
-
-function shopCaseHtml(): string {
-  const me = v().me
-  if (!me.display.length) return '<p class="muted">The case is empty.</p>'
-  const objects = me.display.map((o, i) => {
-    const def = getDef(o.id)
-    const price = Math.floor(COLLECTIBLE_PRICE[def.rarity] / 2)
-    return `<div class="vitrine-piece" tabindex="0" aria-label="${def.name}. ${describe(o)}">
-      ${collectibleHtml(o, i)}
-      <span class="vitrine-caption">${def.name} · ${describe(o)}</span>
-      <button class="ghost" aria-label="Sell ${def.name} for $${price}" data-sellcol="${i}">Sell $${price}</button>
-    </div>`
-  })
-  return `<div class="vitrine-tray">${objects.join('')}</div>`
-}
-
-// your collectibles, sellable while you're in the shop
-function showVitrine(): void {
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  overlay.innerHTML = `<div class="packbox" style="max-width:900px"><h2>La Vitrine</h2>${shopCaseHtml()}
-    <div class="row" style="justify-content:center;margin-top:12px"><button class="ghost" id="closevitrine">Close</button></div></div>`
-  document.body.appendChild(overlay)
-  overlay.querySelectorAll<HTMLElement>('[data-sellcol]').forEach(el => {
-    el.onclick = () => {
-      sfx.coin()
-      void dispatch({ type: 'sellCollectible', slot: Number(el.dataset.sellcol) })
-    }
-  })
-  document.getElementById('closevitrine')!.onclick = () => {
-    vitrineOpen = false
-    overlay.remove()
+  if (albumOpen) return {
+    title: 'Album',
+    help: 'Every card and modifier you have ever pulled, across all your runs.',
+    body: (ui, box) => drawAlbum(ui, box),
+    buttons: [{ label: 'Binder', kind: 'back', enabled: true, onClick: () => { albumOpen = false; render() } }],
+    onEscape: close,
   }
-}
-
-function pickDeckCardToGrade(): void {
-  const me = v().me
-  let shipper: Shipper = 'poste'
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  document.body.appendChild(overlay)
-  const paint = () => {
-    const cards = [...me.pile, ...me.discard, ...me.binder].filter(c => can({ type: 'ship', cardId: c.id, shipper }))
-    const shippers = (Object.keys(SHIPPERS) as Shipper[]).map(id => {
-      const sh = SHIPPERS[id]
-      return `<button class="${id === shipper ? '' : 'ghost'}" data-shipper="${id}" ${sh.price < me.bankroll ? '' : 'disabled'}><img style="image-rendering:pixelated" src="${canvasUrl(partCanvas('shop/parcel/' + id))}" alt=""><br>${sh.name} $${sh.price}<br><span class="small">${sh.text}</span></button>`
-    }).join('')
-    overlay.innerHTML = `<div class="packbox" style="max-width:900px;position:relative">${deckButton()}<img src="${canvasUrl(partCanvas('shop/grading/guichet'))}" alt="" width="244" style="image-rendering:pixelated"><h2>Grading desk</h2>
-      <p class="muted">Ship one card. It's away for a round and comes back graded 1–10 at the next shop. Fresh pulls grade higher. One per shop.</p>
-      <div class="row" style="justify-content:center;gap:8px;flex-wrap:wrap">${shippers}</div>
-      <div class="binder" style="justify-content:center;margin-top:12px">${cards.map(c => `<div class="slot" data-pickgrade="${c.id}" style="cursor:pointer">${cardHtml(c, 'mini')}</div>`).join('')}</div>
-      <div class="row" style="justify-content:center;margin-top:12px"><button class="ghost" id="cancelgrade">Cancel</button></div></div>`
-    document.getElementById('cancelgrade')!.onclick = () => overlay.remove()
-    overlay.querySelectorAll<HTMLElement>('[data-shipper]').forEach(el => {
-      el.onclick = () => {
-        shipper = el.dataset.shipper as Shipper
-        paint()
-      }
-    })
-    overlay.querySelectorAll<HTMLElement>('[data-pickgrade]').forEach(el => {
-      el.onclick = () => {
+  const n = binderPicked.size
+  const total = [...binderPicked].reduce((sum, id) => sum + sellPrice(me.binder.find(c => c.id === id)!), 0)
+  return {
+    title: `Binder · ${me.binder.length}`,
+    help: me.binder.length ? `Pick cards, then sell them. STONKS: ${rule('hud', 'stonks', 0, { stonks: view_.stonks, hotMarket: me.sleeves.includes('hot_market') })}.` : 'Empty. Pulls you send to the binder land here.',
+    body: (ui, box) => {
+      const w = 40
+      grid(me.binder.length, { ...box, y: box.y + 6 }, w, 6, 14).forEach((at, i) => {
+        const c = me.binder[i]
+        const ok = can({ type: 'sell', cardId: c.id })
+        ui.card(c, at.x, at.y, w, { picked: binderPicked.has(c.id), dim: !ok, tag: `$${sellPrice(c)}`, onClick: ok ? () => {
+          if (binderPicked.has(c.id)) binderPicked.delete(c.id)
+          else binderPicked.add(c.id)
+          render()
+        } : undefined })
+      })
+    },
+    buttons: [
+      { label: 'Album', kind: 'back', enabled: true, onClick: () => { albumOpen = true; render() } },
+      { label: 'Close', kind: 'back', enabled: true, onClick: close },
+      { label: n ? `Sell ${n}` : 'Sell', price: n ? `+$${total}` : undefined, kind: 'buy', enabled: n > 0, onClick: async () => {
+        const ids = [...binderPicked]
+        binderPicked = new Set()
         sfx.coin()
-        void dispatch({ type: 'ship', cardId: Number(el.dataset.pickgrade), shipper })
-      }
-    })
+        keeperSays('Mouais.')
+        for (const id of ids) await dispatch({ type: 'sell', cardId: id })
+      } },
+    ],
+    onEscape: close,
   }
-  paint()
 }
 
-// the Sleeve in the shop: a code levels its hand here, a wishlist pulls a binder card back into the deck.
-// in-hand inserts wait for a deal. with a full Sleeve, the new one (slot 2) has to be used or something tossed
-function showSleeve(): void {
-  const me = v().me
-  let wish: number | null = null // the slot of a wishlist picking its binder card
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  document.body.appendChild(overlay)
-  const held = [...me.sleeve.map((c, slot) => ({ c, slot })), ...(me.overflow ? [{ c: me.overflow, slot: 2 }] : [])]
-  const paint = () => {
-    const rows = held.map(({ c, slot }) => {
-      const def = INSERTS[c.id]
-      const head = c.hand ? `${def.name}: ${HAND_NAMES[c.hand]}` : def.name
-      const use = def.when === 'anytime' || def.when === 'shop'
-      const ok = def.when === 'shop' ? me.binder.length > 0 : can({ type: 'useInsert', slot, cardIds: [], suit: null })
-      return `<div class="row" style="justify-content:space-between;gap:12px;margin:6px 0">
-        <span style="text-align:left">${slot === 2 ? '<b class="gold">New:</b> ' : ''}<b>${head}</b><br><span class="muted">${def.text}${use ? '' : '. Use it on your cards during a hand'}</span></span>
-        <span class="row">${use ? `<button data-use="${slot}" ${ok ? '' : 'disabled'}>Use</button>` : ''}<button class="ghost" data-toss="${slot}">Toss</button></span></div>`
-    }).join('')
-    const pick = wish === null ? '' : `<p class="muted">Pick a binder card to shuffle into your deck.</p>
-      <div class="binder" style="justify-content:center">${me.binder.map(c => `<div class="slot" data-wish="${c.id}" style="cursor:pointer">${cardHtml(c, 'mini')}</div>`).join('')}</div>`
-    overlay.innerHTML = `<div class="packbox panel" style="max-width:640px">
-      <h2>Your Sleeve</h2><p class="muted">${me.overflow ? 'Your Sleeve holds 2. Use or toss one to make room.' : 'Up to 2 inserts, used before you lock a hand.'}</p>
-      ${rows || '<p class="muted">Empty. Scratchers fill it.</p>'}${pick}
-      ${me.overflow ? '' : '<div class="row" style="justify-content:center;margin-top:10px"><button class="ghost" id="close">Close</button></div>'}</div>`
-    overlay.querySelectorAll<HTMLElement>('[data-use]').forEach(el => {
-      el.onclick = () => {
-        const slot = Number(el.dataset.use)
-        const c = held.find(h => h.slot === slot)!.c
-        if (c.id === 'wishlist') {
-          wish = slot
-          return paint()
-        }
-        sleeveOpen = false
-        void dispatch({ type: 'useInsert', slot, cardIds: [], suit: null })
-      }
-    })
-    overlay.querySelectorAll<HTMLElement>('[data-toss]').forEach(el => {
-      el.onclick = () => {
-        sleeveOpen = false
-        void dispatch({ type: 'tossInsert', slot: Number(el.dataset.toss) })
-      }
-    })
-    overlay.querySelectorAll<HTMLElement>('[data-wish]').forEach(el => {
-      el.onclick = () => {
-        sleeveOpen = false
-        void dispatch({ type: 'useInsert', slot: wish!, cardIds: [Number(el.dataset.wish)], suit: null })
-      }
-    })
-    const close = document.getElementById('close')
-    if (close) close.onclick = () => {
-      sleeveOpen = false
-      overlay.remove()
+// what a binder card sells for right now, from the engine's own pricing
+// the same math as the engine's binderPrice, from the view
+function sellPrice(c: Card): number {
+  const view_ = v()
+  const fan = (view_.keeper.includes('collector') && c.grade !== null) || (view_.keeper.includes('nostalgic') && c.stamp === 'first')
+  return cardSellPrice(c) * stonksMult(c, view_.stonks, view_.me.sleeves.includes('hot_market')) * (fan ? 2 : 1)
+}
+
+// the album: 52 faces, lit once you've pulled them, then the modifier sets by their engine names. hover a found one to read it
+const ALBUM_KIND: Record<string, { kind: Kind; label: string }> = {
+  finish: { kind: 'finish', label: 'Finishes' }, stamp: { kind: 'stamp', label: 'Stamps' }, type: { kind: 'variant', label: 'Card types' },
+  joker: { kind: 'joker', label: 'Jokers' }, knock: { kind: 'knockoff', label: 'Knockoffs' },
+}
+
+function drawAlbum(ui: Ui, box: { x: number; y: number; w: number; h: number }): void {
+  const seen = albumSeen()
+  const w = 20
+  const h = CARD_H(w)
+  const left = box.x + (box.w - 13 * (w + 3)) / 2
+  SUITS.forEach((suit, row) => {
+    for (let i = 0; i < 13; i++) {
+      const rank = i + 2
+      ui.g.save()
+      ui.g.imageSmoothingEnabled = true
+      ui.g.globalAlpha = seen.has(rank + suit) ? 1 : 0.18
+      ui.g.drawImage(faceCanvas(rank, suit), left + i * (w + 3), box.y + row * (h + 4), w, h)
+      ui.g.restore()
     }
+  })
+  let y = box.y + 4 * (h + 4) + 8
+  for (const [group, ids] of ALBUM_SETS) {
+    const { kind, label } = ALBUM_KIND[group]
+    const found = ids.filter(id => seen.has(group + '/' + id)).length
+    ui.text(`${label} ${found}/${ids.length}`, box.x, y, { font: 'tiny', color: '#7a1a2c' })
+    y += 10
+    let x = box.x
+    for (const id of ids) {
+      const has = seen.has(group + '/' + id)
+      const name = has ? entry(kind, id).name : '?'
+      const cw = measure(name, 'sans') + 8
+      if (x + cw > box.x + box.w) {
+        x = box.x
+        y += 12
+      }
+      ui.nine('hud/plate/paper', x, y, cw, 11, has ? '#fff6dc' : '#bfa77e')
+      ui.text(name, x + 4, y + 1, { color: has ? '#2e2320' : '#8c7656' })
+      if (has) ui.fiche(entry(kind, id), x, y, cw, 11)
+      x += cw + 3
+    }
+    y += 16
   }
-  paint()
+}
+
+// grading: pick a shipper, then the card. away for a round, back graded at the next shop
+let gradeOpen = false
+let shipper: Shipper = 'poste'
+function gradingPanel(): Panel {
+  const me = v().me
+  const cards = [...me.pile, ...me.discard, ...me.binder].filter(c => can({ type: 'ship', cardId: c.id, shipper }))
+  const close = () => {
+    gradeOpen = false
+    render()
+  }
+  return {
+    title: entry('hud', 'grading').name,
+    help: entry('hud', 'grading').text.map(plainText).join('. ') + '. One per shop.',
+    body: (ui, box) => {
+      const ids = Object.keys(SHIPPERS) as Shipper[]
+      const bw = Math.floor((box.w - 8) / 3)
+      ids.forEach((id, i) => {
+        const sh = SHIPPERS[id]
+        const x = box.x + i * (bw + 4)
+        const on = id === shipper
+        const ok = sh.price < me.bankroll
+        const over = ui.hit(x, box.y, bw, 54, () => { if (ok) { shipper = id; render() } })
+        ui.fiche(entry('hud', `ship-${id}`), x, box.y, bw, 54)
+        ui.nine('hud/plate/paper', x, box.y, bw, 54, on ? '#e8c260' : over && ok ? '#fff6dc' : undefined)
+        fit(ui.g, 'shop/parcel/' + id, { x: x + 4, y: box.y + 4, w: 30, h: 20 })
+        const big = measure(sh.name, 'sans', true) <= bw - 42
+        ui.text(sh.name, x + 38, box.y + (big ? 4 : 6), { font: big ? 'sans' : 'tiny', bold: big, color: ok ? '#2e2320' : '#8c7656' })
+        ui.text(`$${sh.price}`, x + 38, box.y + 15, { color: '#3a8040' })
+        ui.lines(sh.text, x + 4, box.y + 27, bw - 8, { font: 'tiny', color: '#5c4a36' })
+      })
+      const w = 34
+      grid(cards.length, { ...box, y: box.y + 64, h: box.h - 64 }, w, 5, 8).forEach((at, i) => {
+        const c = cards[i]
+        ui.card(c, at.x, at.y, w, { onClick: () => {
+          gradeOpen = false
+          sfx.coin()
+          void dispatch({ type: 'ship', cardId: c.id, shipper })
+        } })
+      })
+    },
+    buttons: [{ label: 'Cancel', kind: 'back', enabled: true, onClick: close }],
+    onEscape: close,
+  }
+}
+
+// a wishlist from the Sleeve: pick the binder card it shuffles back into your deck
+let wishSlot: number | null = null
+function wishPanel(): Panel {
+  const me = v().me
+  const back = () => {
+    wishSlot = null
+    render()
+  }
+  return {
+    title: entry('insert', 'wishlist').name,
+    help: 'Pick a binder card to shuffle into your deck.',
+    body: (ui, box) => {
+      const w = 40
+      grid(me.binder.length, box, w, 6, 10).forEach((at, i) => {
+        const c = me.binder[i]
+        ui.card(c, at.x, at.y, w, { onClick: () => {
+          const slot = wishSlot!
+          wishSlot = null
+          void dispatch({ type: 'useInsert', slot, cardIds: [c.id], suit: null })
+        } })
+      })
+    },
+    buttons: [{ label: 'Back', kind: 'back', enabled: true, onClick: back }],
+    onEscape: back,
+  }
 }
 
 // ---------- the table ----------
 const BET_LABEL: Record<BetChoice, string> = { min: 'Min', max: 'Max' }
-const MAX_RULE = 'Max: bet more on yourself. Win and the House pays it, lose and your rival takes it.'
 
 // the rival's face. solo: the mask that sat down this Table. online opponents get a mask from their name
 type DuelRival = { name: string; mask: string; stamp: string; back: StarterId }
@@ -1125,8 +1359,6 @@ function rivalFace(): DuelRival {
   return { name: them.name, mask: MASKS[h % MASKS.length], stamp: v().mode.toUpperCase(), back: 'standard' }
 }
 
-const plain = (html: string) => html.replace(/<[^>]+>/g, '')
-
 // the deal: pick cards, then play them, flambé them or discard them. a Sleeve insert picked up takes over the bar
 function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
   const ids = [...selected] // click order, which photocopie reads (the first becomes the second)
@@ -1139,7 +1371,7 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
     const def = INSERTS[ins.id]
     const [lo, hi] = def.cards
     const want = lo === hi ? `${lo} card${lo > 1 ? 's' : ''}` : `${lo}–${hi} cards`
-    const hint = `${def.name}: ${def.text}.${hi ? ` Pick ${want}.` : ''}`
+    const hint = `${def.name}: ${plainText(entry('insert', ins.id, ins).text[0])}.${hi ? ` Pick ${want}.` : ''}`
     const cancel: Slip = { label: 'Put back', kind: 'skip', enabled: true, onClick: () => {
       insertSlot = null
       selected = new Set()
@@ -1153,9 +1385,9 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
     }
     if (ins.id === 'checklist') {
       const suits = SUITS.map(x => ({ label: SUIT_GLYPH[x], kind: 'insert' as const, enabled: can({ type: 'useInsert', slot, cardIds: ids, suit: x }), onClick: use(x) }))
-      return { slips: [...suits, cancel], hint }
+      return { slips: [cancel, ...suits], hint }
     }
-    return { slips: [{ label: `Use ${def.name}`, price: hi ? `${n}/${hi}` : '', kind: 'insert', primary: true, enabled: can({ type: 'useInsert', slot, cardIds: ids, suit: null }), onClick: use(null) }, cancel], hint }
+    return { slips: [cancel, { label: 'Use it', price: hi ? `${n}/${hi}` : '', kind: 'insert', primary: true, enabled: can({ type: 'useInsert', slot, cardIds: ids, suit: null }), onClick: use(null) }], hint }
   }
 
   if (grindPick) {
@@ -1171,7 +1403,7 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
   const hint = !n
     ? `Hand ${v().hands?.hand ?? 1} of 3. Pick 1–${PLAY_SIZE} cards to play, flambé or discard.`
     : merges ? 'Flamber merges them into a ★ card for your next hand. This hand scores 0.'
-    : 'Play scores them. Flamber throws the hand: one card gets +1 Value.'
+    : `Play scores them. Flamber: ${rule('hud', 'flamber')}.`
   const lock = (type: 'play' | 'flamber', grind: number | null) => {
     lastLocked = picked
     selected = new Set()
@@ -1181,25 +1413,25 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
   return {
     hint,
     slips: [
-      { label: 'Play', price: n ? `${n} card${n > 1 ? 's' : ''}` : '', kind: 'lock', primary: n > 0, enabled: n > 0 && can({ type: 'play', cardIds: ids }), onClick: () => lock('play', null) },
-      { label: 'Flamber', price: merges ? '★' : n ? '+1 Value' : '', kind: 'forge', enabled: n > 0 && can({ type: 'flamber', cardIds: ids, grind: merges || !grindable.length ? null : grindable[0].id }), onClick: () => {
-        if (merges || grindable.length <= 1) return lock('flamber', merges ? null : grindable[0]?.id ?? null)
-        grindPick = true
-        render()
-      } },
       { label: 'Discard', price: `${me.discardsLeft} left`, kind: 'discard', enabled: n > 0 && can({ type: 'discard', cardIds: ids }), onClick: () => {
         selected = new Set()
         sfx.flip(false)
         void dispatch({ type: 'discard', cardIds: ids })
       } },
+      { label: 'Flamber', price: merges ? '★' : n ? '+1 Value' : '', kind: 'forge', enabled: n > 0 && can({ type: 'flamber', cardIds: ids, grind: merges || !grindable.length ? null : grindable[0].id }), onClick: () => {
+        if (merges || grindable.length <= 1) return lock('flamber', merges ? null : grindable[0]?.id ?? null)
+        grindPick = true
+        render()
+      } },
+      { label: 'Play', price: n ? `${n} card${n > 1 ? 's' : ''}` : '', kind: 'lock', primary: n > 0, enabled: n > 0 && can({ type: 'play', cardIds: ids }), onClick: () => lock('play', null) },
     ],
   }
 }
 
 function renderTable(): void {
+  setPanel(null)
   const view_ = v()
   const me = view_.me
-  const them = view_.others[0]
   const settled = resultHold && view_.showdown !== null
   const tally = settled && tallyHold && view_.last !== null
 
@@ -1214,17 +1446,24 @@ function renderTable(): void {
     } }]
   } else if (view_.phase === 'deal' && !me.locked && !me.forge) {
     ({ slips, hint } = dealSlips(me))
+    if (view_.hands?.hand === 1) {
+      const t = view_.twist
+      if (t) announceOnce(`twist:${view_.round}`, twistName(t), rule('twist', t.id, 0, t))
+      if (me.marker && view_.round % 3 === 0) announceOnce(`marker:${view_.round}`, 'Le Patron attend', `$${me.marker.due} due at the next big shop`, 'bad')
+    }
   } else if (view_.phase === 'bet' && view_.bet?.toAct === me.seat) {
     const b = view_.bet
     const push = b.stage === 'push'
     const price = (c: BetChoice) => (c === 'min' ? (push ? 'stay' : `$${b.stake}`) : `+$${b.extra} on you`)
-    slips = (['min', 'max'] as const).map(c => ({ label: push && c === 'max' ? 'Push' : BET_LABEL[c], price: b.options.includes(c) ? price(c) : b.why[c] ?? price(c), stamp: c, kind: c, enabled: b.options.includes(c), onClick: () => {
+    slips = (['max', 'min'] as const).map(c => ({ label: push && c === 'max' ? 'Push' : BET_LABEL[c], price: b.options.includes(c) ? price(c) : b.why[c] ?? price(c), stamp: c, kind: c, enabled: b.options.includes(c), onClick: () => {
       void dispatch({ type: 'bet', choice: c })
     } }))
     const off = (['min', 'max'] as const).filter(c => b.why[c]).map(c => `${BET_LABEL[c]}: ${b.why[c]}.`).join(' ')
-    hint = [push ? 'Last push before hand 3. Still on Min? You can go Max now.' : MAX_RULE, off].filter(Boolean).join(' ')
+    hint = [push ? `Last push: ${rule('hud', 'push')}.` : `Max: ${rule('hud', 'max')}.`, off].filter(Boolean).join(' ')
   } else if (view_.phase === 'spoils' && view_.spoils?.toPick === me.seat) {
-    hint = 'Spoils: pick a card for your deck, or skip for +$1. The last card burns.'
+    hint = `Spoils: pick one for your deck. ${rule('hud', 'spoils', 1)}. ${rule('hud', 'spoils', 2)}.`
+    docked = { offers: [], dest: 'deck' }
+    announceOnce(`spoils:${view_.round}`, 'Le butin', rule('hud', 'spoils', 1))
     slips = [{ label: 'Skip', price: '+$1', kind: 'skip', enabled: true, onClick: () => void dispatch({ type: 'spoils', cardId: null }) }]
   } else hint = `Waiting on ${rivalFace().name}…`
 
@@ -1246,7 +1485,7 @@ function renderTable(): void {
     hint,
     rival: face,
     myMask: face.mask === 'domino_red' ? 'domino' : 'domino_red',
-    toast: plain(log[log.length - 1] ?? ''),
+    toast: log.at(-1) ?? '',
     clock: () => (deadline === null || !net ? '' : `${Math.max(0, Math.ceil(net.msLeft(deadline) / 1000))}s`),
     insertSlot,
     onDropInsert: (slot, cardId) => {
@@ -1303,7 +1542,7 @@ function renderTable(): void {
       sfx.flip(false)
       render()
     },
-    onPile: () => showDeckViewer(),
+    onPile: () => openDrawer('etui'),
   })
 }
 
@@ -1318,84 +1557,225 @@ function handLabel(a: Appraisal): string {
   return [a.hand, ...a.bonus].map(h => HAND_NAMES[h]).join(' + ')
 }
 
-// over the trait cap: pick which traits the new card keeps
-function renderForgePick(plan: ForgePlan): void {
-  const keep = new Set<number>(autoKeep(plan).map(t => plan.candidates.indexOf(t)))
-  const overlay = document.createElement('div')
-  overlay.className = 'overlay'
-  document.body.appendChild(overlay)
-  const paint = () => {
-    overlay.innerHTML = `<div class="packbox panel" style="max-width:440px">
-      <h2>${rankLabel(plan.rank)}${'★'.repeat(plan.tier)} holds ${plan.tier} trait${plan.tier > 1 ? 's' : ''}</h2>
-      <p class="muted">Pick which ones to keep.</p>
-      <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin:12px 0">
-        ${plan.candidates.map((t, i) => `<label style="cursor:pointer"><input type="checkbox" data-t="${i}" ${keep.has(i) ? 'checked' : ''}> <b>${traitName(t)}</b></label>`).join('')}
-      </div>
-      <div class="row" style="justify-content:center"><button id="keep" ${keep.size !== plan.tier ? 'disabled' : ''}>Flambé it (${keep.size}/${plan.tier})</button></div>
-    </div>`
-    overlay.querySelectorAll<HTMLInputElement>('[data-t]').forEach(el => {
-      el.onchange = () => {
-        const i = Number(el.dataset.t)
-        if (el.checked) keep.add(i)
-        else keep.delete(i)
-        paint()
-      }
-    })
-    document.getElementById('keep')!.onclick = () => {
-      if (keep.size !== plan.tier) return
-      const traits: Trait[] = [...keep].map(i => plan.candidates[i])
+// a flambé made a card with more traits than its tier holds: pick which ones it keeps. the merged cards on top,
+// one chip per trait with its rule, picking past the cap drops the oldest pick
+let forgeKeepPicks: { key: string; keep: number[] } | null = null
+function forgePanel(plan: ForgePlan): Panel {
+  // the view hands back a fresh plan every render, so the picks key on the cards being merged
+  const key = plan.merged.map(c => c.id).join()
+  if (forgeKeepPicks?.key !== key) forgeKeepPicks = { key, keep: autoKeep(plan).map(t => plan.candidates.indexOf(t)) }
+  const picks = forgeKeepPicks
+  const name = `${rankLabel(plan.rank)}${SUIT_GLYPH[plan.suit]}${'★'.repeat(plan.tier)}`
+  return {
+    title: `${name} holds ${plan.tier} trait${plan.tier > 1 ? 's' : ''}`,
+    help: `Pick ${plan.tier} to keep. The rest burn off.`,
+    body: (ui, box) => {
+      const w = 34
+      const spots = grid(plan.merged.length, box, w, 4)
+      plan.merged.forEach((c, i) => ui.card(c, spots[i].x, spots[i].y, w))
+      let y = box.y + CARD_H(w) + 14
+      plan.candidates.forEach((t, i) => {
+        const e = traitEntry(t, plan.rank)
+        const on = picks.keep.includes(i)
+        const x = box.x + 20
+        const cw = box.w - 40
+        const lines = e.text.flatMap(l => wrapText(plainText(l), cw - 12, 'sans'))
+        const h = 16 + lines.length * 10
+        const over = ui.hit(x, y, cw, h, () => {
+          if (on) picks.keep = picks.keep.filter(k => k !== i)
+          else picks.keep = [...picks.keep, i].slice(-plan.tier)
+          sfx.flip(false)
+          render()
+        })
+        ui.nine('hud/plate/paper', x, y, cw, h, on ? '#e8c260' : over ? '#fff6dc' : undefined)
+        ui.fiche(e, x, y, cw, h)
+        ui.text(`${on ? '★ ' : ''}${e.name}`, x + 6, y + 3, { bold: true, color: '#2e2320' })
+        if (e.tag) ui.text(e.tag, x + cw - 6, y + 4, { font: 'tiny', color: '#5c4a36', align: 'right' })
+        lines.forEach((l, j) => ui.text(l, x + 6, y + 14 + j * 10, { color: '#5c4a36' }))
+        y += h + 6
+      })
+    },
+    buttons: [{ label: 'Flambé it', price: `${picks.keep.length}/${plan.tier}`, kind: 'go', enabled: picks.keep.length === plan.tier, onClick: () => {
+      const traits: Trait[] = picks.keep.map(i => plan.candidates[i])
+      forgeKeepPicks = null
       sfx.gradeUp()
       void dispatch({ type: 'forgeKeep', traits })
-    }
+    } }],
   }
-  paint()
 }
 
 // ---------- end of run ----------
-function renderOver(): void {
+// on the bare duel table: won or busted, the score, Le Patron's paper, this seed's leaderboard
+
+let dailyBoard: DailyBoard | null = null // the server's board for the results, fetched once per run end
+let boardAsked = false
+let receiptAt: number | null = null
+let receiptLine = -1
+
+function overPanel(): Panel {
   const view_ = v()
+  receiptAt ??= performance.now()
   const res = view_.result!
   const me = view_.me
   const them = view_.others[0]
   const won = res.winner === me.seat
   // the match ends in the round someone busts, so view_.round is the bust round
   const solo = view_.mode === 'solo' || view_.mode === 'daily'
-  const how = won ? (solo ? 'Paid Le Patron off after round 12. ' : !them.alive ? `Busted ${them.name} in round ${view_.round}. ` : 'Higher bankroll after round 12. ') : ''
-  const score = solo ? `Score <b class="gold">${fmt(res.scores[me.seat])}</b> pts` : ''
-  const seed = match ? ` · seed <b>${match.config.seed}</b>` : ''
-  app.innerHTML = `<div class="title"><div>
-    <h1>${won ? (solo ? 'PAID<br><span>LE PATRON</span>' : 'TOOK<br><span>THE TABLE</span>') : 'BUSTED'}</h1>
-    <p class="big">${won ? `${how}${score}` : me.alive ? (solo ? "Couldn't pay Le Patron" : 'Behind on chips after round 12') : `Out in round ${view_.round}`}</p>
-    <p class="muted">Best appraisal: <b class="gold">${fmt(best.total)}</b>${best.hand ? ` (${best.hand})` : ''}${seed} · you $${me.bankroll} vs ${them.name} $${them.bankroll}</p>
-    <div class="row" style="justify-content:center;margin-top:14px">
-      ${match ? '<button id="again">Same seed again</button>' : ''}
-      <button class="ghost" id="menu">Main menu</button>
-    </div>
-    ${match ? lbTable(`Leaderboard · ${match.config.seed} · ${DIFFICULTIES[difficulty].name}`, leaderboard(match.config.seed, difficulty)) : ''}
-    ${view_.mode === 'daily' ? '<div id="board"></div>' : ''}
-  </div></div>`
-  if (solo && (won || patronMissed)) {
-    const ending = document.createElement('div')
-    ending.className = 'patron-ending ' + (won ? 'paid' : 'unpaid')
-    const prop = (id: string, cls: string) => {
-      const img = document.createElement('img')
-      img.src = canvasUrl(partCanvas(id))
-      img.className = cls
-      img.alt = ''
-      ending.appendChild(img)
-    }
-    prop(won ? 'hud/marker/note' : 'patron/ledger', 'debt-paper')
-    prop(won ? 'hud/marker/paid' : 'hud/marker/unpaid', 'payment-stamp')
-    if (won) prop('hud/marker/seal', 'wax-seal')
-    app.querySelector('h1')!.before(ending)
+  const how = won
+    ? solo
+      ? 'Paid Le Patron off after round 12.'
+      : !them.alive
+        ? `Busted ${them.name} in round ${view_.round}.`
+        : 'Higher bankroll after round 12.'
+    : me.alive
+      ? solo
+        ? "Couldn't pay Le Patron."
+        : 'Behind on chips after round 12.'
+      : `Out in round ${view_.round}.`
+  if (view_.mode === 'daily' && !boardAsked) {
+    boardAsked = true
+    api<DailyBoard>(`/api/daily?difficulty=${difficulty}`).then(
+      b => {
+        dailyBoard = b
+        render()
+      },
+      err => console.warn('no daily board:', err),
+    )
   }
-  if (match) document.getElementById('again')!.onclick = () => startRun(match!.config.seed)
-  document.getElementById('menu')!.onclick = () => {
+  const lb = match ? leaderboard(match.config.seed, difficulty) : []
+  const menu = () => {
     match = null
+    dailyBoard = null
+    boardAsked = false
     if (online) leaveOnline()
     else renderTitle()
   }
-  if (view_.mode === 'daily') void fillBoard()
+  const paper = solo && (won || patronMissed)
+  return {
+    title: won ? (solo ? 'Paid Le Patron' : 'Took the table') : 'Busted',
+    help: how,
+    felt: true,
+    scrim: () => (won ? 0.25 : 0.62),
+    body: (ui, box) => {
+      const ink = '#2e2320'
+      const faded = '#5c4a36'
+      const age = still.matches ? 5000 : ui.now - receiptAt!
+      if (!still.matches && age < 550) {
+        if (won) fit(ui.g, 'fx/leak', { x: -160 + 800 * progress(age, 550), y: 0, w: 160, h: 360 })
+        else {
+          for (let i = 0; i < 6; i++)
+            fit(ui.g, 'scratch/jeton', { x: 155 + (420 + i * 6) * progress(age - i * 20, 350), y: 225 + i * 3, w: 12, h: 8 })
+          const radius = Math.max(8, 400 * (1 - progress(age, 530)))
+          ui.g.fillStyle = '#0e0b0a'
+          ui.g.beginPath()
+          ui.g.rect(0, 0, 640, 360)
+          ui.g.arc(320, 180, radius, 0, Math.PI * 2, true)
+          ui.g.fill()
+        }
+      }
+      if (won) {
+        ui.g.save()
+        ui.g.translate(125, 210)
+        ui.g.rotate(-0.3)
+        ui.g.scale(1, 0.68)
+        fit(ui.g, `mask/${rivalFace().mask}/front`, { x: -32, y: -25, w: 64, h: 50 })
+        ui.g.restore()
+      }
+      const line = Math.min(26, Math.floor(Math.max(0, age - 470) / 95))
+      const seedRows = match ? Math.max(1, Math.min(5, lb.length)) + 1 : 0
+      const onlineRows = dailyBoard
+        ? 2 + Math.max(1, Math.min(5, dailyBoard.best.length)) + Math.max(1, Math.min(5, dailyBoard.first.length))
+        : 0
+      const receiptHeight = Math.min(box.h, 88 + (seedRows + onlineRows) * 12 + (dailyBoard ? 12 : 0))
+      const printed = Math.min(receiptHeight, 12 + line * 12)
+      if (line !== receiptLine && printed < receiptHeight) {
+        receiptLine = line
+        sfx.thunk()
+      }
+      ui.nine('fx/receipt', box.x - 3, box.y - 3, box.w + 6, printed + 8)
+      ui.g.save()
+      ui.g.beginPath()
+      ui.g.rect(box.x, box.y, box.w, printed)
+      ui.g.clip()
+      let y = box.y
+      if (solo && won) {
+        ui.text(`Score ${fmt(res.scores[me.seat])} pts`, box.x, y, { font: 'didone', color: '#7a1a2c' })
+        y += 22
+      }
+      ui.text(`Best appraisal: ${fmt(best.total)}${best.hand ? ` (${best.hand})` : ''}`, box.x, y, { color: ink, bold: true })
+      y += 12
+      ui.text(`You $${me.bankroll} · ${them.name} $${them.bankroll}`, box.x, y, { color: ink })
+      y += 12
+      if (match) {
+        ui.text(`Seed ${match.config.seed} · ${DIFFICULTIES[difficulty].name}`, box.x, y, { color: faded })
+        y += 12
+      }
+      // le patron's paper on the right: the marker stamped paid, or his ledger stamped unpaid
+      if (paper) {
+        const px = box.x + box.w - 96
+        fit(ui.g, won ? 'hud/marker/note' : 'patron/ledger', { x: px, y: box.y, w: 90, h: 64 })
+        fit(ui.g, won ? 'hud/marker/paid' : 'hud/marker/unpaid', { x: px + 4, y: box.y + 18, w: won ? 64 : 82, h: 24 })
+        if (won) fit(ui.g, 'hud/marker/seal', { x: px + 68, y: box.y + 40, w: 22, h: 22 })
+        ui.fiche(entry('hud', 'marker'), px, box.y, 90, 64)
+      }
+      y = Math.max(y, box.y + 70) + 6
+      const table = (title: string, rows: string[][]) => {
+        ui.text(title, box.x, y, { color: '#7a1a2c', bold: true })
+        y += 12
+        if (!rows.length) {
+          ui.text('Nobody yet. Be first.', box.x, y, { color: faded })
+          y += 12
+        }
+        for (const r of rows) {
+          r.forEach((cell, i) => ui.text(cell, box.x + [0, 22, 110, 160, 200][i], y, { color: ink }))
+          y += 11
+        }
+        y += 6
+      }
+      if (match)
+        table(
+          'This seed, this browser',
+          lb
+            .slice(0, 5)
+            .map((e, i) => [
+              `#${i + 1}`,
+              `${fmt(e.score ?? 0)} pts`,
+              `$${e.bankroll}`,
+              e.won ? 'won' : 'lost',
+              `best ${fmt(e.best)}`,
+            ]),
+        )
+      if (dailyBoard) {
+        const rows = (list: BoardRow[]) =>
+          list
+            .slice(0, 5)
+            .map((r, i) => [
+              `#${i + 1}`,
+              r.name,
+              `${fmt(r.score)} pts`,
+              r.attempts ? `${r.attempts} tr${r.attempts === 1 ? 'y' : 'ies'}` : '',
+            ])
+        table(`Online daily ${dailyBoard.day} · best run`, rows(dailyBoard.best))
+        table('First try', rows(dailyBoard.first))
+      }
+      ui.g.restore()
+    },
+    buttons: match
+      ? [
+          { label: 'Main menu', kind: 'back', enabled: true, onClick: menu },
+          { label: 'Same seed again', kind: 'go', enabled: true, onClick: () => startRun(match!.config.seed) },
+        ]
+      : [{ label: 'Main menu', kind: 'go', enabled: true, onClick: menu }],
+  }
+}
+
+// ---------- the glossary ----------
+
+// the carnet's glossary: rule words first, then card modifiers, then everything else that has rules
+const CARNET: Kind[] = ['keyword', 'finish', 'stamp', 'knockoff', 'tier', 'trait', 'variant', 'joker', 'bulk', 'insert', 'pochette', 'twist', 'keeper', 'hud']
+
+function carnetEntries(): Entry[] {
+  return CARNET.flatMap(kind => glossaryIds(kind).map(id => entry(kind, id)))
 }
 
 // ---------- boot ----------
@@ -1412,6 +1792,8 @@ api<{ player: PlayerInfo | null }>('/api/me').then(r => {
 
 await Promise.all([loadArt(), loadFonts()])
 await Promise.all([loadLogo(), loadTitle()])
+setKeywords(KEYWORDS)
+setGlossary(carnetEntries())
 artReady = true
 if (joinCode) panTo(2) // came in on a room link: start down in the sewers, where joining happens
 if (QUICK) quickStart()

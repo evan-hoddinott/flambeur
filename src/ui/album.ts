@@ -1,5 +1,5 @@
-import { JOKERS, SUITS, SUIT_GLYPH, VARIANTS, rankLabel, type Card } from '../engine/cards.ts'
-import { canvasUrl, faceCanvas } from './art.ts'
+// every card and modifier pulled, across runs, in this browser. the binder's Album page draws it
+import { JOKERS, VARIANTS, type Card } from '../engine/cards.ts'
 
 const store = 'flambeur:album:1'
 const seen = new Set<string>()
@@ -23,17 +23,12 @@ export function recordPull(card: Card): boolean {
   return true
 }
 
-export function albumPage(): string {
+export function albumSeen(): ReadonlySet<string> {
   read()
-  const faces = SUITS.map(suit => Array.from({ length: 13 }, (_, i) => {
-    const rank = i + 2
-    const label = rankLabel(rank) + SUIT_GLYPH[suit]
-    return `<img class="${seen.has(rank + suit) ? '' : 'unseen'}" src="${canvasUrl(faceCanvas(rank, suit))}" alt="${label}" title="${label}">`
-  }).join('')).join('')
-  const sets: [string, string[]][] = [
-    ['finish', ['foil','holo','prism','misprint']], ['stamp', ['first','signed','gold','damaged']],
-    ['type', Object.keys(VARIANTS)], ['joker', Object.keys(JOKERS)], ['knock', ['crayon','marked','wrongsuit','beer']],
-  ]
-  const modifiers = sets.map(([group, ids]) => `<p>${ids.map(id => `<span class="${seen.has(group+'/'+id) ? 'found' : ''}">${id}</span>`).join(' ')}</p>`).join('')
-  return `<div class="album-grid">${faces}</div><div class="album-modifiers">${modifiers}</div>`
+  return seen
 }
+
+export const ALBUM_SETS: [string, string[]][] = [
+  ['finish', ['foil', 'holo', 'prism', 'misprint']], ['stamp', ['first', 'signed', 'gold', 'damaged']],
+  ['type', Object.keys(VARIANTS)], ['joker', Object.keys(JOKERS)], ['knock', ['crayon', 'marked', 'wrongsuit', 'beer']],
+]

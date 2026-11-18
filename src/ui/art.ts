@@ -45,31 +45,8 @@ export async function loadArt(): Promise<void> {
 }
 
 export function sprite(name: string): Sprite {
-  const s = sprites.get(name) ?? fromPlaceholder(name)
+  const s = sprites.get(name)
   if (!s) throw new Error(`no sprite ${name}`)
-  return s
-}
-
-export function hasSprite(name: string): boolean {
-  return sprites.has(name) || placeholders.has(name)
-}
-
-// stand-ins for art that isn't drawn yet (ui/placeholders.ts). painted the first time they're asked for, so the
-// fonts are loaded by then. a real sprite with the same name in an atlas always wins
-type Placeholder = { w: number; h: number; px: number; py: number; paint: (g: CanvasRenderingContext2D) => void }
-const placeholders = new Map<string, Placeholder>()
-
-export function placeholder(name: string, w: number, h: number, paint: Placeholder['paint'], pivot = { x: 0, y: 0 }): void {
-  placeholders.set(name, { w, h, px: pivot.x, py: pivot.y, paint })
-}
-
-function fromPlaceholder(name: string): Sprite | null {
-  const p = placeholders.get(name)
-  if (!p) return null
-  const img = canvas(p.w, p.h)
-  p.paint(ctx2d(img))
-  const s: Sprite = { img, x: 0, y: 0, w: p.w, h: p.h, px: p.px, py: p.py, center: null }
-  sprites.set(name, s)
   return s
 }
 
@@ -92,6 +69,30 @@ export function ctx2d(c: HTMLCanvasElement): CanvasRenderingContext2D {
 export function blit(g: CanvasRenderingContext2D, name: string, x: number, y: number): void {
   const s = sprite(name)
   g.drawImage(s.img, s.x, s.y, s.w, s.h, x, y, s.w, s.h)
+}
+
+// corners stay native size, edges and middle stretch. tint multiplies a greyscale sprite by a color
+export function nineSlice(g: CanvasRenderingContext2D, name: string, x: number, y: number, w: number, h: number, tint?: string): void {
+  const s = sprite(name)
+  const img = tint ? tinted(name, tint) : s.img
+  const sx0 = tint ? 0 : s.x
+  const sy0 = tint ? 0 : s.y
+  const m = s.center
+  if (!m) throw new Error(`${name} has no 9-slice center`)
+  const sx = [0, m.x, m.x + m.w, s.w]
+  const sy = [0, m.y, m.y + m.h, s.h]
+  const dx = [0, m.x, w - (s.w - m.x - m.w), w]
+  const dy = [0, m.y, h - (s.h - m.y - m.h), h]
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const sw = sx[c + 1] - sx[c]
+      const sh = sy[r + 1] - sy[r]
+      const tw = dx[c + 1] - dx[c]
+      const th = dy[r + 1] - dy[r]
+      if (sw <= 0 || sh <= 0 || tw <= 0 || th <= 0) continue
+      g.drawImage(img, sx0 + sx[c], sy0 + sy[r], sw, sh, x + dx[c], y + dy[r], tw, th)
+    }
+  }
 }
 
 // the greyscale glyph times the ink color, alpha kept
@@ -215,6 +216,7 @@ export function backCanvas(box: StarterId | null): HTMLCanvasElement {
   for (let y = 5; y < 83; y += tile.h) for (let x = 5; x < 59; x += tile.w) blit(g, `back/tile/${id}`, x, y)
   g.restore()
   blit(g, 'back/frame', 0, 0)
+  blit(g, `back/emblem/${id}`, 16, 24)
   backs.set(id, c)
   return c
 }
@@ -355,15 +357,4 @@ export function cardCanvas(card: Card): HTMLCanvasElement {
   }
   cards.set(key, finished)
   return finished
-}
-
-// for the DOM screens (draft, shop, packs) until they're rebuilt as scenes
-const urls = new WeakMap<HTMLCanvasElement, string>()
-export function canvasUrl(c: HTMLCanvasElement): string {
-  let u = urls.get(c)
-  if (!u) {
-    u = c.toDataURL()
-    urls.set(c, u)
-  }
-  return u
 }

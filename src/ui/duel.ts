@@ -1,20 +1,29 @@
-import { laneArt } from './lanes.ts'
-import { collectible, drawCollectible, opaque } from './collectibles.ts'
+import { forgePlan } from '../engine/forge.ts'
+import { REF_SCORE } from '../engine/bot.ts'
+import { progress, mix, juiceAt, spring, springs, stepSprings } from './motion.ts'
 // the duel scene: you vs the rival across the table, drawn on one canvas from the atlases.
 // layout is the art proof's (art/duel/review.py), in 640x360 stage units. main.ts owns the game,
 // this file only draws a DuelState and reports clicks back through it
-import { sprite, tinted, canvas, ctx2d, blit, backCanvas, cardCanvas, stockScale, specialInk, tierInk, faceCanvas, type Sprite } from './art.ts'
-import { HAND_BASE, HAND_NAMES, HAND_TYPES } from '../engine/hands.ts'
-import { describe, getDef, type Owned } from '../engine/collectibles.ts'
+import { laneArt } from './lanes.ts'
+import { sprite, canvas, ctx2d, blit, backCanvas, cardCanvas, stockScale, specialInk, tierInk, type Sprite, nineSlice } from './art.ts'
+import { HAND_NAMES } from '../engine/hands.ts'
 import { tableOf } from '../engine/economy.ts'
 import { JOKERS, VARIANTS, knockoffName, traitName, type Card } from '../engine/cards.ts'
 import { twistName, twistText } from '../engine/twists.ts'
 import type { BetChoice, SeatView, ShowdownView } from '../engine/match.ts'
 import { INSERTS, type Insert } from '../engine/shop.ts'
+import type { Difficulty } from '../engine/match.ts'
+import { insertFace, insertMark } from './placeholders.ts'
 import type { Appraisal } from '../engine/scoring.ts'
 import type { StarterId } from '../engine/starters.ts'
 import * as sfx from './sound.ts'
+import { STRIP, announce, bandShowing, drawBand, runStrip, skipBand } from './frame.ts'
+import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
+import { closeDrawer, deckCounts, drawDrawer, drawerKey, drawerOpen, drawerPointer, openDrawer, setCompareHover, setDrawerActions, setDrawerHover } from './drawer.ts'
+import { drawRules, rulesClick, rulesKey, rulesOpen, toggleRules } from './rules.ts'
+import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
+import { KEYWORDS, cardEntry, entry, type Entry } from '../engine/glossary.ts'
 
 export type Kind = 'lock' | 'max' | 'min' | 'forge' | 'discard' | 'insert' | 'skip' | 'continue'
 // primary = the one "move on" action that pulses. never a bet choice. stamp = the ink slam sprite when it's pressed
@@ -41,6 +50,7 @@ export type DuelState = {
   onSpoil: (cardId: number) => void // clicked a spoils card (only when it's your pick)
   sort: HandSort // the hand comes in already sorted, this just lights the button
   onSort: (by: HandSort) => void
+  bare?: boolean // showBareTable: the room and table as a backdrop for panels, nobody playing
 }
 
 export type HandSort = 'rank' | 'suit'
@@ -71,6 +81,7 @@ const MY_PILE = { x: 146, y: 251 }
 const MY_DISCARD = { x: 470, y: 228 } // just left of the action column
 const COL = { x: 508, w: 126, bottom: 352 } // the action column: messages, tally, tickets
 const OUTLINE = '#0e0b0a' // text over the world gets a 1px ink outline
+const STAMP_DIFFICULTY: Record<string, Difficulty> = { FACILE: 'easy', MOYEN: 'medium', 'GROS JOUEUR': 'hard' } // main.ts's plate stamps
 const RIVAL_LINE: Record<BetChoice, string> = { max: 'Tapis.', min: 'Petite mise.' }
 const BET_WORD: Record<BetChoice, string> = { max: 'Max', min: 'Min' }
 
@@ -85,8 +96,8 @@ let state: DuelState | null = null
 let running = false
 let now = 0
 let mouse = { x: -1, y: -1 }
-let vitrineOpen = false
-let cheatOpen = false
+let overDrawer = false // the drawer took the mouse: the scene doesn't see it
+let detachFiche: (() => void) | null = null
 let bubble: { text: string; sub: string; t: number } | null = null
 const stamps: { name: string; x: number; y: number; t: number }[] = []
 const floats: { text: string; x: number; y: number; color: string; t: number }[] = []
@@ -94,7 +105,7 @@ const juice = new Map<string, number>() // key -> start time
 
 type Hit = { x: number; y: number; w: number; h: number; onClick: () => void }
 let hits: Hit[] = []
-let cuffHits: { slot: number; x: number; y: number }[] = []
+let cuffHits: { slot: number; x: number; y: number; w: number; h: number }[] = []
 let dragInsert: { slot: number; x: number; y: number; pointer: number; moved: boolean } | null = null
 let suppressClick = false
 type CardHit = { id: number; x: number; y: number; r: number; w: number; h: number; onClick: () => void }
@@ -126,7 +137,7 @@ function insertEffect(): void {
   const u = Math.max(0, (now - at) / 760)
   if (u >= 1) { insertFx = null; return }
   if (!targets.length) {
-    pin('scratch/' + id, 168, 308 - u * 30, { s: 1 + Math.sin(u * Math.PI) * 0.4, alpha: 1 - u })
+    pin(insertMark(id), SLEEVE_AT[0].x, SLEEVE_AT[0].y - 10 - u * 30, { s: 1 + Math.sin(u * Math.PI) * 0.4, alpha: 1 - u })
     return
   }
   for (const [i, target] of targets.entries()) {
@@ -182,7 +193,7 @@ function insertEffect(): void {
       } else {
         g.fillStyle = insertColors[id]
         g.fillRect(sweep, 1, 2, h - 2)
-        pin('scratch/' + id, sweep - 8, 1, { alpha: 1 - u })
+        pin(insertMark(id), sweep - 8, 1, { alpha: 1 - u })
       }
     }
     g.restore()
@@ -193,7 +204,13 @@ function insertEffect(): void {
 type Live = { v: number; h: number; g: number; label: string; step: string }
 let live: [Live, Live] | null = null
 
-let forgeFx: { at: number; cards: Card[]; result?: Card } | null = null
+let forgeFx: { at: number; cards: Card[]; result?: Card; bulk: number; landed: boolean } | null = null
+let reelAt = -Infinity
+let pendingBust: number | null = null
+let bustAt = -Infinity
+let tallyAt = -Infinity
+let tallyLine = -1
+export function rivalBusted(seat: number): void { pendingBust = seat }
 let markerAt = -Infinity
 let pipAt = -Infinity
 
@@ -205,32 +222,55 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
     callout = null
     forgeFx = null
   }
+  if (!next.settled) {
+    bustAt = reelAt = tallyAt = -Infinity
+    if (next.bare || next.view.phase === 'deal') pendingBust=null
+  }
+  if (pendingBust!==null && pendingBust===next.view.showdown?.opponent && next.settled && !next.counting) {
+    pendingBust = null
+    bustAt = performance.now()
+  }
+  if (next.counting && !state?.counting) { tallyAt=-Infinity; tallyLine=-1 }
   const sd = next.view.showdown
   if (next.settled && sd?.myKind === 'flamber' && !stillCards.matches &&
       (!state?.settled || state.view.showdown?.hand !== sd.hand || state.view.round !== next.view.round)) {
-    const held = next.view.me.hand
-    const ground = held.find(c => sd.myCards.some(old => old.id === c.id))
-    const forged = held.find(c => c.tier && !state?.view.me.hand.some(old => old.id === c.id))
-    forgeFx = { at: performance.now(), cards: sd.myCards, result: ground ?? forged }
+    const previous = state?.view.me
+    const known = new Set(previous ? [...previous.hand,...previous.pile,...previous.discard].map(c=>c.id) : [])
+    const plan = forgePlan(sd.myCards)
+    const current = [...next.view.me.hand,...next.view.me.discard,...next.view.me.pile]
+    const result = plan ? current.find(c=>c.tier>0 && !known.has(c.id)) :
+      current.find(c=>sd.myCards.some(old=>old.id===c.id && old.grind<c.grind))
+    forgeFx = {at:performance.now(),cards:sd.myCards,result,bulk:plan?plan.merged.length-1:0,landed:false}
   }
   state = next
+  init()
+  // the drawer is shared with the shop: point its hovers and the Sleeve's use at this scene
+  setDrawerHover(drawerFiche)
+  setDrawerActions({ useInsert: slot => {
+    if (!state || !sleeveUsable(state)) return
+    closeDrawer()
+    state.onInsert(slot)
+  } })
   if (!cv || !cv.isConnected) {
     app.innerHTML = ''
     cv = document.createElement('canvas')
     cv.className = 'stage'
     app.appendChild(cv)
     g = ctx2d(cv)
+    detachFiche?.()
+    detachFiche = ficheInput(cv, toStage)
     cv.onpointerdown = e => {
       suppressClick = false
-      if (!e.isPrimary || e.button !== 0 || calling() || cheatOpen || vitrineOpen) return
+      if (!e.isPrimary || e.button !== 0 || calling() || rulesOpen() || drawerOpen() || overDrawer || panelOpen()) return
       const p = toStage(e)
-      const cuff = cuffHits.find(h => Math.abs(p.x - h.x) <= 12 && Math.abs(p.y - h.y) <= 17)
+      const cuff = cuffHits.find(h => Math.abs(p.x - h.x) <= h.w / 2 && Math.abs(p.y - h.y) <= h.h / 2)
       if (!cuff) return
       dragInsert = { slot: cuff.slot, ...p, pointer: e.pointerId, moved: false }
       cv?.setPointerCapture(e.pointerId)
     }
     cv.onpointermove = e => {
       mouse = toStage(e)
+      overDrawer = drawerPointer(mouse.x, mouse.y, false)
       if (dragInsert?.pointer === e.pointerId && Math.hypot(mouse.x - dragInsert.x, mouse.y - dragInsert.y) > 3) dragInsert.moved = true
     }
     cv.onpointerup = e => {
@@ -243,7 +283,10 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
       if (card) state?.onDropInsert(drag.slot, card.id)
     }
     cv.onlostpointercapture = () => { dragInsert = null }
-    cv.onpointerleave = () => { mouse = { x: -1, y: -1 } }
+    cv.onpointerleave = () => {
+      mouse = { x: -1, y: -1 }
+      overDrawer = drawerPointer(-1, -1, false)
+    }
     cv.onclick = e => { if (!suppressClick) click(toStage(e)) }
     resize()
   }
@@ -252,6 +295,38 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
     requestAnimationFrame(frame)
   }
 }
+
+const noop = () => {}
+
+// the duel room, table and felt as a backdrop, with the frame (run strip, drawer, band), panels and the Fiche.
+// no hands, plates, tickets or rival. main.ts hosts the draft, starter box and results on it as Panels
+export function showBareTable(app: HTMLElement, view: SeatView): void {
+  showDuel(app, {
+    view, bare: true, settled: false, tally: false, counting: false, selected: new Set(), lastLocked: [], slips: [], hint: '',
+    rival: { name: '', mask: 'domino_red', stamp: '', back: 'standard' }, myMask: 'domino', toast: '', clock: () => '',
+    onCard: noop, onPile: noop, insertSlot: null, onDropInsert: noop, onInsert: noop, onSpoil: noop, sort: 'rank', onSort: noop,
+  })
+}
+
+// placeholder art and the keyword lines the Fiche's sub-boxes read. once, whichever scene comes up first
+let ready = false
+function init(): void {
+  if (ready) return
+  ready = true
+  setKeywords(KEYWORDS)
+}
+
+// what the drawer reports under the mouse, as a Fiche
+function drawerFiche(thing: { kind: string; id?: string; card?: Card } | null, a: { x: number; y: number; w: number; h: number }): void {
+  if (!thing || !state) return
+  const me = state.view.me
+  if (thing.card) fiche(cardEntry(thing.card), a)
+  else if (thing.kind === 'insert' && thing.id) fiche(entry('insert', thing.id, me.sleeve.find(s => s.id === thing.id)), a)
+  else if (thing.kind === 'collectible' && thing.id) fiche(entry('collectible', thing.id, me.display.find(o => o.id === thing.id)), a)
+  else throw new Error(`no fiche for drawer thing ${thing.kind}`)
+}
+
+const sleeveUsable = (st: DuelState) => !st.bare && st.view.phase === 'deal' && !st.view.me.locked && !st.settled
 
 function say(choice: BetChoice): void {
   bubble = { text: RIVAL_LINE[choice], sub: BET_WORD[choice], t: now }
@@ -277,11 +352,10 @@ function toStage(e: MouseEvent): { x: number; y: number } {
 }
 
 function click(p: { x: number; y: number }): void {
+  if (rulesClick(p.x, p.y)) return
+  if (drawerPointer(p.x, p.y, true)) return
+  if (panelClick(p)) return
   if (calling()) return endCallout()
-  if (cheatOpen) {
-    cheatOpen = false
-    return
-  }
   // topmost first: rects are pushed in draw order, cards draw over the felt but under the hud
   for (let i = hits.length - 1; i >= 0; i--) {
     const h = hits[i]
@@ -289,7 +363,6 @@ function click(p: { x: number; y: number }): void {
   }
   const card = cardUnder(p)
   if (card) return card.onClick()
-  if (vitrineOpen) vitrineOpen = false
 }
 
 function cardUnder(p: { x: number; y: number }, list = cardHits): CardHit | null {
@@ -311,9 +384,10 @@ function frame(t: number): void {
   }
   const dt = Math.min(0.05, (t - now) / 1000 || 0)
   now = t
-  step(dt)
+  stepSprings(dt)
   cuffHits = []
   hits = []
+  looks = []
   lastCardHits = cardHits
   cardHits = []
   g.setTransform(1, 0, 0, 1, 0, 0)
@@ -321,12 +395,28 @@ function frame(t: number): void {
   g.fillRect(0, 0, cv.width, cv.height)
   // a throw in draw still lands in the console every frame, but the next frame is already booked so the game doesn't freeze
   requestAnimationFrame(frame)
+  // the frame's layers sit over the scene: the band, a panel, the rules sheet, the drawer, the Fiche last.
+  // whichever of them has the mouse, the scene doesn't see it
+  const real = mouse
+  const off = { x: -1, y: -1 }
+  const covered = overDrawer || drawerOpen() || rulesOpen()
+  if (covered || panelOpen()) mouse = off
+  spoilsShown = false
   draw(state)
-  cv.style.cursor = hoverable() ? 'pointer' : 'default'
+  mouse = real
+  if (!spoilsShown && spoilHover) {
+    spoilHover = null
+    setCompareHover(null)
+  }
+  drawBand(g, now)
+  drawPanel(g, now, covered ? off : mouse)
+  drawRules(g, state.view)
+  drawDrawer(g, state.view, now)
+  drawFiche(g)
+  cv.style.cursor = (covered ? overDrawer || rulesOpen() : panelOpen() ? panelHover(mouse) : hoverable()) ? 'pointer' : 'default'
 }
 
 function hoverable(): boolean {
-  if (cheatOpen) return true
   const p = mouse
   if (hits.some(h => p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h)) return true
   return !!cardUnder(p)
@@ -334,54 +424,13 @@ function hoverable(): boolean {
 
 // ---------- springs + juice ----------
 
-type T = { x: number; y: number; r: number; s: number }
-const springs = new Map<string, { at: T; vel: T }>()
-const seen = new Set<string>()
-
-// the visible transform chases the target, critically damped with a touch of overshoot
-function spring(key: string, target: T, from?: T): T {
-  seen.add(key)
-  let s = springs.get(key)
-  if (!s) {
-    s = { at: { ...(from ?? target) }, vel: { x: 0, y: 0, r: 0, s: 0 } }
-    springs.set(key, s)
-  }
-  pending.push([s, target])
-  return s.at
-}
-let pending: [{ at: T; vel: T }, T][] = []
-
-function step(dt: number): void {
-  const stiff = 170
-  const damp = 2 * Math.sqrt(stiff) * 0.75
-  for (const [s, target] of pending) {
-    for (const f of ['x', 'y', 'r', 's'] as const) {
-      const a = stiff * (target[f] - s.at[f]) - damp * s.vel[f]
-      s.vel[f] += a * dt
-      s.at[f] += s.vel[f] * dt
-    }
-  }
-  pending = []
-  // forget springs nobody drew last frame, so a card coming back flies in again
-  for (const key of springs.keys()) if (!seen.has(key)) springs.delete(key)
-  seen.clear()
-}
-
 function pop(key: string): void {
   juice.set(key, now)
 }
 
 // scale and wobble for a juiceUp, ~0.3s
 function juiced(key: string): { s: number; r: number } {
-  const t0 = juice.get(key)
-  if (t0 === undefined) return { s: 1, r: 0 }
-  const t = (now - t0) / 1000
-  if (t > 0.5) {
-    juice.delete(key)
-    return { s: 1, r: 0 }
-  }
-  const e = Math.exp(-t * 10)
-  return { s: 1 + 0.18 * e, r: 0.1 * Math.sin(t * 34) * e }
+  return juiceAt(juice,key,now)
 }
 
 // ---------- draw helpers (stage units) ----------
@@ -423,26 +472,7 @@ function tile(name: string, x: number, y: number, w: number, h: number, c = g): 
 
 // corners stay native size, edges and middle stretch. tint multiplies a greyscale sprite by a color
 function nine(name: string, x: number, y: number, w: number, h: number, tint?: string): void {
-  const s = sprite(name)
-  const img = tint ? tinted(name, tint) : s.img
-  const ox = tint ? 0 : s.x
-  const oy = tint ? 0 : s.y
-  const m = s.center
-  if (!m) throw new Error(`${name} has no 9-slice center`)
-  const sx = [0, m.x, m.x + m.w, s.w]
-  const sy = [0, m.y, m.y + m.h, s.h]
-  const dx = [0, m.x, w - (s.w - m.x - m.w), w]
-  const dy = [0, m.y, h - (s.h - m.y - m.h), h]
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      const sw = sx[c + 1] - sx[c]
-      const sh = sy[r + 1] - sy[r]
-      const tw = dx[c + 1] - dx[c]
-      const th = dy[r + 1] - dy[r]
-      if (sw <= 0 || sh <= 0 || tw <= 0 || th <= 0) continue
-      g.drawImage(img, ox + sx[c], oy + sy[r], sw, sh, x + dx[c], y + dy[r], tw, th)
-    }
-  }
+  nineSlice(g, name, x, y, w, h, tint)
 }
 
 // a canvas in one flat color, cached, for hover outlines
@@ -493,6 +523,59 @@ function hit(x: number, y: number, w: number, h: number, onClick: () => void): b
   return mouse.x >= x && mouse.x <= x + w && mouse.y >= y && mouse.y <= y + h
 }
 
+// ---------- the Fiche on hover ----------
+// everything with rules meaning pushes a look as it draws. at the end of the frame the topmost one under
+// the mouse gets its Fiche. the entry is only built for that one
+
+type Look = { x: number; y: number; w: number; h: number; r: number; e: () => Entry; above: boolean }
+let looks: Look[] = []
+const STACK = { x: 508, y: 230, w: 126, h: 122 } // the action stack, the Fiche never covers it
+const FICHE_W = 162 // the box at its widest, with padding
+const FICHE_H = 130 // a tall one
+
+// x, y = top-left
+function look(x: number, y: number, w: number, h: number, e: () => Entry, above = false): void {
+  looks.push({ x: x + w / 2, y: y + h / 2, w, h, r: 0, e, above })
+}
+
+// a card drawn centered at x, y, turned by r
+function lookCard(card: Card, x: number, y: number, w: number, h: number, r: number, above = false): void {
+  looks.push({ x, y, w, h, r, e: () => cardEntry(card), above })
+}
+
+function lookUnder(p: { x: number; y: number }, l: Look): boolean {
+  const dx = p.x - l.x
+  const dy = p.y - l.y
+  const lx = dx * Math.cos(-l.r) - dy * Math.sin(-l.r)
+  const ly = dx * Math.sin(-l.r) + dy * Math.cos(-l.r)
+  return Math.abs(lx) <= l.w / 2 && Math.abs(ly) <= l.h / 2
+}
+
+function showLook(): void {
+  if (dragInsert?.moved) return
+  let l: Look | undefined
+  for (let i = looks.length - 1; i >= 0 && !l; i--) if (lookUnder(mouse, looks[i])) l = looks[i]
+  if (!l) return
+  // the box around a turned card
+  const w = Math.abs(l.w * Math.cos(l.r)) + Math.abs(l.h * Math.sin(l.r))
+  const h = Math.abs(l.w * Math.sin(l.r)) + Math.abs(l.h * Math.cos(l.r))
+  const a = { x: l.x - w / 2, y: l.y - h / 2, w, h }
+  if (l.above) return fiche(l.e(), a, { above: true })
+  // right of the thing, unless that lands on the action stack: then left of it (an anchor that runs
+  // to the stage edge leaves no room on the right, so the Fiche flips)
+  const right = a.x + a.w + 4
+  const covers = right < STACK.x + STACK.w && right + FICHE_W > STACK.x && a.y < STACK.y + STACK.h && a.y + FICHE_H > STACK.y
+  fiche(l.e(), covers ? { x: a.x, y: a.y, w: W - a.x, h: a.h } : a)
+}
+
+// a pinned sprite's box, for a look
+function spriteBox(name: string, x: number, y: number): { x: number; y: number; w: number; h: number } {
+  const s = sprite(name)
+  return { x: x - s.px, y: y - s.py, w: s.w, h: s.h }
+}
+
+const rule = (id: string, ctx?: unknown) => () => entry('hud', id, ctx)
+
 const fmt = (n: number) => n.toLocaleString('en-US')
 // hype goes fractional once a × lands: show one decimal
 const hypeText = (h: number) => (Number.isInteger(h) ? fmt(h) : h.toFixed(1))
@@ -516,7 +599,7 @@ function buildRoom(): HTMLCanvasElement {
   const c = canvas(W, 160)
   const r = ctx2d(c)
   tile('room/wall', 0, 0, W, 122, r)
-  blit(r, 'room/chalkboard', 34, 28)
+  blit(r, 'room/chalkboard', 34, 28) // the run strip is pinned over its top
   // vignette toward the sides
   const img = r.getImageData(0, 0, W, 151)
   for (let y = 0; y < 151; y++) {
@@ -703,17 +786,46 @@ function draw(st: DuelState): void {
   g.beginPath()
   g.rect(0, 0, W, H)
   g.clip()
+  const forgeShake=forgeFx?.result?.tier===3 && now-forgeFx.at>=540 ? 4*(1-progress(now-forgeFx.at-540,450)) : 0
   const impact = !stillCards.matches && calling() ? Math.max(0, 1 - (now - callout!.t) / 200) : 0
-  g.translate(320 + drift.x + impact * Math.sin(now * 0.12) * 2, 180 + drift.y - impact * 2)
+  g.translate(320 + drift.x + forgeShake*Math.sin(now*.08) + impact * Math.sin(now * 0.12) * 2, 180 + drift.y - impact * 2)
   g.rotate(drift.r)
-  g.scale(1.01, 1.01) // so the drift never shows the stage edge
+  const age = now-reelAt
+  const push = !stillCards.matches && age<1200 ? .03*Math.sin(Math.PI*progress(age,1200)) : 0
+  g.scale(1.01+push, 1.01+push) // so the drift never shows the stage edge
   g.translate(-320, -180)
 
   room(st, tournament, t)
-  lamp(tournament, t, turnFlare(st))
+  lamp(tournament, t, st.bare ? 0 : Math.max(turnFlare(st),push*36))
+  if (st.bare) {
+    g.drawImage(feltLayer!, 0, 0)
+    you(st, t)
+    g.restore()
+    g.setTransform(k, 0, 0, k, ox, oy)
+    g.save()
+    g.beginPath()
+    g.rect(0, 0, W, H)
+    g.clip()
+    frameZones(st, t)
+    showLook()
+    g.restore()
+    return
+  }
   rival(st, t)
   g.drawImage(feltLayer!, 0, 0)
   tableTop(st)
+  if (Number.isFinite(bustAt) && !stillCards.matches) {
+    const age=now-bustAt
+    for(let i=0;i<5;i++) {
+      const u=progress(age-i*35,340)
+      if(u<1) pin('scratch/jeton',mix(RIVAL_X,150,u),mix(134,245,u)-12*Math.sin(Math.PI*u),{s:.7})
+    }
+    if(age>=540) {
+      const u=progress(age-540,430)
+      pin(`mask/${st.rival.mask}/front`,mix(RIVAL_X,327,u),mix(59,202,u)-75*Math.sin(Math.PI*u),{r:u*2.8,sy:1-u*.57})
+      if(age<1130) pin('fx/leak',-160+800*progress(age-540,600),0,{alpha:.33})
+    }
+  }
   // bet tickets sit on top of face-down cards, but under the cards once they're face up and scoring
   const showdown = st.settled && !!st.view.showdown
   if (showdown) feltBets(st)
@@ -727,13 +839,15 @@ function draw(st: DuelState): void {
   g.beginPath()
   g.rect(0, 0, W, H)
   g.clip()
+  sleeveCards(st, t)
   hand(st, t)
+  insertGhost(st, t)
   hud(st, t)
   insertEffect()
   effects()
   turnBanner()
   calloutBanner(st)
-  if (cheatOpen) cheatSheet(st)
+  showLook()
   g.restore()
 }
 
@@ -769,16 +883,11 @@ function room(st: DuelState, tournament: boolean, t: number): void {
     pin('room/curtain/cord', x, 96, { flip })
     pin('room/curtain/tassel', flip ? x - 21 : 21, 118, { flip, r: Math.sin(t * 1.3) * 0.05 })
   }
-  // chalkboard: Table and round, then the twist or the stakes
-  const roman = ['I', 'II', 'III', 'IV'][table - 1]
-  const round = st.settled && view.last ? view.last.round : view.round
-  const third = view.twist ? twistLabel(view) : `Ante $${view.blinds.ante} · Max $${view.blinds.max}`
-  text(`Table ${roman}`, 82, 34, { font: 'chalk', color: '#e3d2a8', align: 'center' })
-  text(`Manche ${round}${view.lastRound ? ` / ${view.lastRound}` : ''}`, 82, 50, { font: 'chalk', color: '#bfa77e', align: 'center' })
-  // chalk when it fits on the board, the tiny hand when it doesn't
-  const thirdColor = view.twist ? '#c99a3a' : '#bfa77e'
-  if (measure(third, 'chalk') <= 84) text(third, 82, 66, { font: 'chalk', color: thirdColor, align: 'center' })
-  else text(third, 82, 70, { font: 'tiny', color: thirdColor, align: 'center' })
+  // chalkboard: tonight's stakes. the round itself is on the run strip above it
+  text(`Ante $${view.blinds.ante}`, 82, 58, { font: 'chalk', color: '#e3d2a8', align: 'center' })
+  text(`Max $${view.blinds.max}`, 82, 73, { font: 'chalk', color: '#bfa77e', align: 'center' })
+  look(50, 57, 64, 14, () => entry('keyword', 'Ante'))
+  look(50, 72, 64, 14, rule('max'))
 }
 
 function twistLabel(v: SeatView): string {
@@ -850,7 +959,10 @@ function rival(st: DuelState, t: number): void {
   // blink every few seconds
   const blink = (t % 4.3) < 0.09
   pin(`rival/eyes/${blink ? 'half' : b?.choices.some(c => c.seat === them.seat && c.choice === 'max') && (t % 1.2) < 0.3 ? 'glint1' : 'open'}`, 0, -21)
-  pin(`mask/${st.rival.mask}/front`, 0, -21)
+  if (stillCards.matches || now-bustAt<540 || !Number.isFinite(bustAt)) {
+    pin(`mask/${st.rival.mask}/front`, 0, -21)
+    if(Number.isFinite(bustAt) && now-bustAt>260) pin('mask/crack/'+(now-bustAt<415?1:2),0,-21)
+  }
   g.restore()
   // their fan of backs, face-up for any card you're allowed to see
   if (st.settled && view.showdown) {
@@ -868,8 +980,10 @@ function rival(st: DuelState, t: number): void {
     const card = shown[i]
     const target = { x: RIVAL_X + m * step_, y: 104 + Math.abs(m) * 1.5 + slump, r: (m * 8 * Math.PI) / 180, s: 1 }
     const at = spring(`rfan${i}`, target, { x: RIVAL_X, y: 140, r: 0, s: 1 })
-    if (card) drawCard(card, at.x, at.y, 0.5, at.r)
-    else centered(backCanvas(st.rival.back), at.x, at.y, 32, 44, at.r)
+    if (card) {
+      const { w, h } = drawCard(card, at.x, at.y, 0.5, at.r)
+      lookCard(card, at.x, at.y, w, h, at.r)
+    } else centered(backCanvas(st.rival.back), at.x, at.y, 32, 44, at.r)
   }
   pin('rival/hand/hold/L', RIVAL_X - 26, 104 + slump, { s: 0.72 })
   const pose = view.phase === 'spoils' ? 'push' : thinking ? 'tap' : 'hold'
@@ -883,18 +997,24 @@ function tableTop(st: DuelState): void {
   const me = view.me
   const them = view.others[0]
   drawPile(223, 158, 0.64, st.rival.back, Math.max(0, them.deckSize - them.handSize))
-  // your pile opens the deck viewer: outlined on hover, its count always above it
-  const over = !cheatOpen && hit(110, 206, 72, 66, st.onPile)
+  // your pile is a passive count (the drawer's Étui is the deck), but a click opens the Étui too
+  const over = hit(110, 206, 72, 66, () => openDrawer('etui'))
+  look(110, 206, 72, 66, rule('pile'))
   const top = drawPile(MY_PILE.x, MY_PILE.y, 0.96, me.starter, me.pile.length, false, over)
-  text(over ? `Deck · ${me.pile.length}` : String(me.pile.length), MY_PILE.x, top - 9, { font: 'tiny', color: over ? CREAM : '#bfa77e', align: 'center', outline: OUTLINE })
+  const n = deckCounts(view)
+  text(over ? `Deck · ${n.pile}/${n.total} · D` : `${n.pile}/${n.total}`, MY_PILE.x, top - 9, { font: 'tiny', color: over ? CREAM : '#bfa77e', align: 'center', outline: OUTLINE })
   drawPile(MY_DISCARD.x, MY_DISCARD.y, 0.84, me.starter, me.discard.length, true)
+  look(MY_DISCARD.x - 30, MY_DISCARD.y - 24, 60, 46, rule('discard-pile'))
   // bankroll stacks (the plates carry the numbers) and the pot with its number
   const b = view.bet
   const pot = b ? 2 * b.stake + (b.onMax[0] ? b.extra : 0) + (b.onMax[1] ? b.extra : 0) : 0
   chips(180, 160, them.bankroll, 0.78) // left of their pile, clear of their row and tag
-  chips(60, 262, me.bankroll, 0.95)
+  chips(86, 262, me.bankroll, 0.95) // right of the drawer
   chips(346, 193, pot, 0.95)
-  if (pot) text(`$${pot}`, 374, 184, { font: 'sans', color: MONEY, align: 'center', bold: true, outline: OUTLINE })
+  if (pot) {
+    text(`$${pot}`, 374, 184, { font: 'sans', color: MONEY, align: 'center', bold: true, outline: OUTLINE })
+    look(326, 176, 64, 22, () => entry('keyword', 'Pot'))
+  }
 }
 
 // both sides' bets as tickets lying on the felt, so the table reads like the conversation it was:
@@ -902,6 +1022,8 @@ function tableTop(st: DuelState): void {
 // and the rival's also gets their line in the bubble. driven by the view, so it works online too
 const FELT_TW = 96
 const FELT_AT = { me: { x: 236, y: 202 }, them: { x: 446, y: 178 } } // ticket centers
+// face up, the rows take the felt: yours goes right of your score tag, theirs under their tag, clear of their row
+const SHOWDOWN_AT = { me: { x: 414, y: 280 }, them: { x: 518, y: 146 } }
 const seenBets = new Set<string>()
 function feltBets(st: DuelState): void {
   const view = st.view
@@ -909,12 +1031,14 @@ function feltBets(st: DuelState): void {
   const last = st.tally ? view.last : null
   const bets = last ? last.bets : view.bet?.choices ?? []
   const round = last ? last.round : view.round
+  const showdown = st.settled && !!view.showdown
   const count = { me: 0, them: 0 }
   bets.forEach((b, i) => {
     const side = b.seat === view.me.seat ? 'me' : 'them'
     const n = count[side]++
     const tilt = side === 'me' ? -0.07 + n * 0.09 : 0.08 - n * 0.1
-    const target = { x: FELT_AT[side].x + n * 8, y: FELT_AT[side].y + n * 19, r: tilt, s: 1 }
+    const at0 = showdown ? SHOWDOWN_AT[side] : FELT_AT[side]
+    const target = { x: at0.x + n * 8, y: at0.y + n * (showdown ? 10 : 19), r: tilt, s: 1 }
     const key = `felt${round}:${i}`
     if (!seenBets.has(key)) {
       seenBets.add(key)
@@ -925,15 +1049,18 @@ function feltBets(st: DuelState): void {
       }
     }
     const at = spring(key, target, { x: target.x, y: target.y - 30, r: tilt * 4, s: 2.2 })
-    if (n === 0) text(side === 'me' ? 'Vous' : st.rival.name, at.x - FELT_TW / 2 + 4, at.y - 24, { font: 'sans', color: CREAM, outline: OUTLINE })
+    if (n === 0 && !showdown) text(side === 'me' ? 'Vous' : st.rival.name, at.x - FELT_TW / 2 + 4, at.y - 24, { font: 'sans', color: CREAM, outline: OUTLINE })
     g.save()
     g.translate(at.x, at.y)
     g.rotate(at.r)
     g.scale(at.s, at.s)
     g.translate(-FELT_TW / 2, -14)
     shadow(FELT_TW / 2, 16, FELT_TW, 22, 0)
-    ticket({ label: b.stage === 'push' ? 'Push' : BET_WORD[b.choice], price: `$${b.amount}`, kind: b.choice, enabled: true, onClick: () => {} }, 3, false, FELT_TW)
+    // at the last push a min means they stayed put
+    const label = b.stage === 'push' ? (b.choice === 'max' ? 'Push' : 'Stay') : BET_WORD[b.choice]
+    ticket({ label, price: `$${b.amount}`, kind: b.choice, enabled: true, onClick: () => {} }, 3, false, FELT_TW)
     g.restore()
+    looks.push({ x: at.x, y: at.y, w: FELT_TW, h: 28, r: at.r, e: rule(b.stage === 'push' ? 'push' : b.choice), above: false })
   })
 }
 
@@ -942,22 +1069,47 @@ function feltBets(st: DuelState): void {
 function forgeReturn(): boolean {
   if (!forgeFx) return false
   const age = now - forgeFx.at
-  if (age >= 1000) { forgeFx = null; return true }
+  if (age >= 1000) {
+    forgeFx = null
+    return true
+  }
   if (age < 560) {
     const u = Math.max(0, age / 560)
     forgeFx.cards.forEach((c, i, cards) => {
       const x = NEAR_ROW.cx + (i - (cards.length - 1) / 2) * 42 * (1 - u)
       const art = cardCanvas(c)
-      const h = Math.ceil(art.height * (1 - u))
-      if (h) g.drawImage(art, 0, 0, art.width, h, x - 22, 200, 44, h * .68)
-      for (let j = 0; j < 11; j++) {
-        g.fillStyle = j % 3 ? '#ff7a24' : GOLD
-        g.fillRect(x - 21 + 4 * j, 200 + h * .68 + Math.sin(j + u * 24) * 4, 3, 5)
+      const melt = progress(age - i * 55, Math.max(200, 560 - i * 55))
+      const h = Math.ceil(art.height * (1 - melt))
+      if (h) g.drawImage(art, 0, 0, art.width, h, x - 22, 200, 44, h * 0.68)
+      if (melt > 0) {
+        pin('fx/flame/' + ((Math.floor(age / 65 + i) % 4) + 1), x - 22 + 19 * melt, 191 + h * 0.68, { s: 1.1 })
+        pin('fx/ember/' + ((i % 3) + 1), x - 10 + Math.sin(i + u * 7) * 15, 205 - 30 * u)
       }
     })
   } else if (forgeFx.result) {
     const u = (age - 560) / 440
-    drawCard(forgeFx.result, NEAR_ROW.cx + 25 * u, 231 + 70 * u - 22 * Math.sin(Math.PI * u), .7 + .2 * Math.sin(Math.PI * u), .12 * Math.sin(Math.PI * u))
+    if (forgeFx.bulk > 0) {
+      const count = forgeFx.bulk
+      if (age >= 780 && !forgeFx.landed) {
+        forgeFx.landed = true
+        sfx.thunk()
+      }
+      for (let i = 0; i < count; i++) {
+        const drop = progress(age - 560 - i * 40, 220)
+        pin('base/bulk', NEAR_ROW.cx - 30 + i * 16, 198 + 42 * drop * drop, { s: 0.36, r: i * 0.09 })
+      }
+      if (forgeFx.result.tier === 3) {
+        g.fillStyle = `rgba(255,251,232,${0.5 * (1 - u)})`
+        g.fillRect(0, 0, W, H)
+      }
+    }
+    drawCard(
+      forgeFx.result,
+      NEAR_ROW.cx + 25 * u,
+      231 + 70 * u - 22 * Math.sin(Math.PI * u),
+      0.7 + 0.2 * Math.sin(Math.PI * u),
+      0.12 * Math.sin(Math.PI * u),
+    )
   }
   return true
 }
@@ -985,23 +1137,33 @@ function playedCards(st: DuelState): void {
 }
 
 // spoils: 3 cards face up on the pot. the loser picks first, then the winner, the last card burns
+let spoilHover: Card | null = null // the spoils card hovered, as told to the compare dock
+let spoilsShown = false // drawn this frame
 function spoilsTable(st: DuelState): void {
   const sp = st.view.spoils
   if (!sp) return
+  spoilsShown = true
   const mine = sp.toPick === st.view.me.seat
   const sign = spring('butin', { x: 272, y: 140, r: 0, s: 1 }, { x: 272, y: 112, r: -.04, s: 1 })
   pin('hud/spoils/placard', sign.x, sign.y, { r: sign.r })
+  const box = spriteBox('hud/spoils/placard', sign.x, sign.y)
+  look(box.x, box.y, box.w, box.h, rule('spoils'))
   const who = sp.toPick === null ? '' : mine ? 'Your pick' : `${st.rival.name} picks`
   text(who, 320, 166, { font: 'sans', color: mine ? GOLD : CREAM, align: 'center', bold: true, outline: OUTLINE })
+  // hovering one shows it against your deck in the compare dock (main opens the dock)
+  let hovered: Card | null = null
   sp.cards.forEach((c, i) => {
     const target = { x: 260 + i * 60, y: 222, r: (i - 1) * 0.04, s: 0.8 }
     const at = spring(`card${c.id}`, target, { x: 346, y: 193, r: 0, s: 0.3 })
-    const over = mine && Math.abs(mouse.x - at.x) < 26 && Math.abs(mouse.y - at.y) < 36
-    const lift = over ? -6 : 0
-    const { w, h } = drawCard(c, at.x, at.y + lift, at.s * (over ? 1.06 : 1), at.r, false, true)
+    const over = Math.abs(mouse.x - at.x) < 26 && Math.abs(mouse.y - at.y) < 36
+    if (over) hovered = c
+    const lift = over && mine ? -6 : 0
+    const { w, h } = drawCard(c, at.x, at.y + lift, at.s * (over && mine ? 1.06 : 1), at.r, false, true)
     if (mine) cardHits.push({ id: c.id, x: at.x, y: at.y, r: at.r, w, h, onClick: () => { pop(`card${c.id}`); st.onSpoil(c.id) } })
-    if (over) cardTag(c, at.x, at.y - h / 2 - 12)
+    lookCard(c, at.x, at.y + lift, w, h, at.r)
   })
+  if (hovered !== spoilHover) setCompareHover(hovered)
+  spoilHover = hovered
   // what already went: a skip pays $1, a pick shows on its picker's side
   sp.picks.forEach((x, i) => {
     const yours = x.seat === st.view.me.seat
@@ -1024,6 +1186,7 @@ function faceDown(cards: Card[], back: HTMLCanvasElement): void {
     const size = at.s * stockScale(c)
     shadow(at.x, at.y, 64 * size, 88 * size, at.r)
     centered(back, at.x, at.y, 64 * size, 88 * size, at.r)
+    lookCard(c, at.x, at.y, 64 * size, 88 * size, at.r)
   })
 }
 
@@ -1048,7 +1211,8 @@ function rowOf(cards: Card[], row: typeof NEAR_ROW, a: Appraisal, side: string, 
       return
     }
     const dim = live === null && !a.scoringIds.includes(c.id)
-    drawCard(c, at.x, at.y, at.s * j.s, at.r + j.r, dim, true)
+    const { w, h } = drawCard(c, at.x, at.y, at.s * j.s, at.r + j.r, dim, true)
+    lookCard(c, at.x, at.y, w, h, at.r)
   })
 }
 
@@ -1115,10 +1279,11 @@ function shadow(x: number, y: number, w: number, h: number, r: number): void {
   g.restore()
 }
 
+const THEIR_TAG_X = 448 // under their plate, left of their hand pips
 function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   const a = mine ? sd.mine : sd.theirs
   const w0 = 96
-  const x0 = mine ? NEAR_ROW.cx - w0 / 2 : 456
+  const x0 = mine ? NEAR_ROW.cx - w0 / 2 : THEIR_TAG_X
   const y0 = mine ? 260 : 74
   if (!a) {
     // a thrown hand: the tag burnt (hud/score/tag/thrown is the real art), "jetée" where the number goes
@@ -1128,16 +1293,18 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
     text('JETÉE', x0 + w0 / 2, y0 + 6, { font: 'didone', color: '#ff7a24', align: 'center' })
     text('thrown: scores 0, no KO', x0 + w0 / 2, y0 + 28, { font: 'tiny', color: CREAM, align: 'center' })
     g.restore()
+    look(x0, y0, w0, 44, rule('flamber'))
     return
   }
   const l = live ? live[mine ? 0 : 1] : null
+  if (l && !l.label) return // the cards are still landing, the count hasn't started
   const v = l ? l.v : a.value
   const hy = l ? Math.max(1, l.h) : a.hype
   const gr = l ? l.g : a.grade
   const total = Math.floor(v * hy * 2 ** gr)
   const label = l ? l.label : [a.hand, ...a.bonus].map(h => HAND_NAMES[h]).join(' + ')
   const w = 96
-  const x = mine ? NEAR_ROW.cx - w / 2 : 456
+  const x = mine ? NEAR_ROW.cx - w / 2 : THEIR_TAG_X
   const y = mine ? 260 : 74
   const won = !st.counting && sd.winner !== null && sd.winner === (mine ? st.view.me.seat : sd.opponent)
   const lostIt = !st.counting && sd.winner !== null && !won
@@ -1159,8 +1326,29 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
     text(s, px, y + 10, { font: 'sans', color })
     px += widths[i]
   })
-  text(fmt(total), x + w / 2, y + 19, { font: 'didone', color: won ? '#a8260a' : INK, align: 'center' })
+  const ratio = total / REF_SCORE[Math.min(st.view.round,REF_SCORE.length)-1]
+  const heat = ratio>=4 ? '#fffbe8' : ratio>=2 ? '#ff7a24' : ratio>=1 ? GOLD : CREAM
+  const digits = fmt(total)
+  const age = Math.max(0,now-reelAt)
+  const settled = Number.isFinite(reelAt) && !stillCards.matches
+  const numberWidth = measure(digits,'didone')
+  let dx=x+(w-numberWidth)/2
+  if(settled && ratio>=2){
+    for(let offset=0;offset<numberWidth;offset+=15) pin('fx/flame/'+(1+(Math.floor(now/85+offset)%4)),dx+offset,y+13,{sx:.7,sy:ratio>=4?.75:.45})
+  }
+  for(let i=0;i<digits.length;i++){
+    const digit=digits[i]
+    const lock=age-170-i*95
+    const spin=settled && /[0-9]/.test(digit) && lock<0
+    const shown=spin?String((Math.floor(age/38)+i*3)%10):digit
+    if(settled && ratio>=2 && lock>=0 && lock<160) pin('fx/spark',dx+2,y+16-lock*.04)
+    const bounce=settled && lock>=0 && lock<125?2*Math.sin(Math.PI*lock/125):0
+    text(shown,dx,y+19-bounce,{font:'didone',color:settled?(lock>=0&&lock<90?'#fffbe8':heat):INK,outline:settled?INK:undefined})
+    dx+=measure(digit,'didone')+1
+  }
   g.restore()
+  // the tag reads as its hand: your level shows, theirs you don't know
+  look(x, y, w, 44, () => entry('hand', a.hand, mine ? st.view.me.levels[a.hand] : undefined))
   if (l?.step) text(l.step, x + w / 2, y + 47, { font: 'tiny', color: CREAM, align: 'center', outline: OUTLINE })
   if (won) glow(x + w / 2, y + 30, 40, 'rgba(255,176,58,0.18)')
   // the near miss: how close the losing side came
@@ -1229,6 +1417,7 @@ function hand(st: DuelState, t: number): void {
       g.restore()
     }
     cardHits.push({ id: c.id, x: at.x, y: at.y, r: at.r, w, h, onClick: pickable ? () => { pop(`card${c.id}`); st.onCard(c.id) } : () => {} })
+    lookCard(c, at.x, at.y, w, h, at.r, true) // over the fan, never on top of it
   }
   // a blue pip under each picked card, so picked reads at a glance and not only by height
   if (pickable) for (const { c, at } of placed) {
@@ -1239,12 +1428,6 @@ function hand(st: DuelState, t: number): void {
     g.fillStyle = '#6f9ad8' // your blue
     g.fillRect(Math.round(at.x - Math.sin(at.r) * d) - 1, Math.round(at.y + Math.cos(at.r) * d) - 1, 3, 3)
   }
-  // a little tag above the hovered card for what the art doesn't show yet
-  const hov = cardUnder(mouse)
-  if (hov) {
-    const c = cards.find(x => x.id === hov.id)
-    if (c) cardTag(c, hov.x, hov.y - hov.h / 2 - 10)
-  }
 }
 
 export function cardTags(card: Card) {
@@ -1253,7 +1436,7 @@ export function cardTags(card: Card) {
   if (card.bulk) add('Bulk: +5 Value', specialInk.bulk)
   if (card.variant) add(VARIANTS[card.variant].name, specialInk[card.variant])
   if (card.joker) add(JOKERS[card.joker].name + ': ' + JOKERS[card.joker].text, specialInk[card.joker === 'crayon' ? 'crayon' : 'joker'])
-  if (card.finish) add(({ foil: 'Gold foil', holo: 'Holographic', prism: 'Embers', misprint: 'Misprint' })[card.finish], specialInk[card.finish])
+  if (card.finish) add(({ foil: 'Foil', holo: 'Holo', prism: 'Prism', misprint: 'Misprint' })[card.finish], specialInk[card.finish])
   if (card.stamp) add(({ first: '1st Edition', signed: 'Signed', gold: 'Gold Border', damaged: 'Damaged' })[card.stamp], specialInk[card.stamp])
   if (card.knockoff) add(knockoffName(card.knockoff), specialInk[card.knockoff.kind])
   if (card.grade !== null) add('Grade ' + card.grade)
@@ -1268,23 +1451,6 @@ export function cardInfo(card: Card): string {
 }
 const describeCard = cardInfo
 
-function cardTag(c: Card, x: number, y: number): void {
-  const lines = cardTags(c).flatMap(tag => wrap(tag.label, 138, 'sans').map(line => ({ line, color: tag.color })))
-  if (!lines.length) return
-  const w = 156
-  const h = 6 + lines.length * 10
-  const left = Math.round(Math.max(4, Math.min(W - w - 4, x - w / 2)))
-  const top = Math.max(2, Math.round(y - h))
-  nine('hud/plate/paper', left, top, w, h)
-  lines.forEach(({line, color}, i) => {
-    g.fillStyle = '#201720'
-    g.fillRect(left+4, top+4+i*10, 7, 7)
-    g.fillStyle = color
-    g.fillRect(left+5, top+5+i*10, 5, 5)
-    text(line, left+14, top+1+i*10, {font: 'sans'})
-  })
-}
-
 // ---------- hud ----------
 
 function hud(st: DuelState, t: number): void {
@@ -1294,10 +1460,13 @@ function hud(st: DuelState, t: number): void {
   const phaseCards = view.phase === 'deal' || view.phase === 'bet'
   plate(8, 144, true, st, me.bankroll, me.hand.length, me.discardsLeft, me.sleeve.length)
   plate(482, 12, false, st, them.bankroll, phaseCards ? them.handSize : 0, them.discards, them.sleeve)
-  for (let i = 0; i < them.sleeve; i++) pin('insert/back', 461 + i * 9, 75, { s: 0.55, r: (i - 0.5) * 0.12 })
-  pin('you/cuff', 483, 87, { s: 0.5, flip: true })
+  // their sleeve hangs where their score tag goes, so it tucks away for the showdown
+  if (!(st.settled && view.showdown)) {
+    for (let i = 0; i < them.sleeve; i++) pin('insert/back', 461 + i * 9, 75, { s: 0.55, r: (i - 0.5) * 0.12 })
+    if (them.sleeve) look(454, 64, 16 + them.sleeve * 9, 24, rule('plate-sleeve'))
+    pin('you/cuff', 483, 87, { s: 0.5, flip: true })
+  }
   marker(st)
-  sleeveSlots(st, t)
   premier(st)
   if (view.twist) twistSign(view)
   if (bubble && now - bubble.t < 2600) speech(bubble.text, bubble.sub, now - bubble.t)
@@ -1307,21 +1476,41 @@ function hud(st: DuelState, t: number): void {
   let top = colTop
   if (st.tally && !st.counting && view.last && !calling()) top = tally(st)
   bandTop = colText(st, top - 6) - 8 // next frame's band starts above whatever is in the column
-  cheatBall(t)
   sortTabs(st)
   handTrack(st)
-  vitrine(st, t)
+  frameZones(st, t)
+}
+
+// zone A and the table's own ways into the frame: the run strip, the VITRINE and CARNET tabs over it, the rules
+// paper on the rail. the bare table draws these too
+function frameZones(st: DuelState, t: number): void {
+  const view = st.view
+  const twist = runStrip(g, view, st.settled && view.last ? view.last.round : view.round)
+  look(STRIP.x, STRIP.y, STRIP.w, 16, rule('round'))
+  const tw = view.twist ?? view.nextTwist?.twist
+  if (twist && tw) look(twist.x, twist.y, twist.w, twist.h, () => entry('twist', tw.id, tw))
+  vitrineTab(st, t)
+  carnetTab()
+  rulesBall(st, t)
 }
 
 // "Main 2 / 3" across the top: one pip per hand (won, lost, tie, thrown, still to play), the score, and the KO line
+let lastHands: SeatView['hands'] = null
+
 function handTrack(st: DuelState): void {
-  const hv = st.view.hands
+  // the engine clears hands when the round ends. keep showing the last one through the reveal and the tally
+  if (st.view.hands) lastHands = st.view.hands
+  else if (!st.settled) lastHands = null
+  const hv = lastHands
   if (!hv) return
   const me = st.view.me.seat
   const shown = st.settled && st.view.showdown ? st.view.showdown.hand : hv.hand
   const x0 = 254
   const y = 4
   nine('hud/plate/paper', x0, y, 132, 16, '#e3d2a8')
+  look(x0, y, 58, 16, rule('plate-hand'))
+  look(x0 + 58, y, 74, 16, rule('hand-pips'))
+  look(540, 70, 42, 14, rule('hand-pips'))
   text(`Main ${Math.min(3, shown)} / 3`, x0 + 6, y + 3, { font: 'sans', color: INK, bold: true })
   for (const mine of [true, false]) {
     const seat = mine ? me : st.view.others[0].seat
@@ -1334,13 +1523,17 @@ function handTrack(st: DuelState): void {
       const y0 = mine ? y + 2 : 73
       const age = now - pipAt
       const flip = hand && i === hv.hands.length - 1 && age < 290 && !stillCards.matches ? Math.max(0.12, Math.abs(Math.cos(Math.PI * age / 290))) : 1
-      pin(`hud/hand/pip/${state}${smoke}`, x + 6 * (1 - flip), y0, { sx: flip })
+      const pop = flip === 1 ? 1 : 1+.15*Math.sin(Math.PI*progress(age,290))
+      pin(`hud/hand/pip/${state}${smoke}`, x + 6 * (1 - flip*pop), y0, { sx: flip*pop, sy: pop })
     }
   }
   text(`${hv.wins[0]}–${hv.wins[1]}`, x0 + 112, y + 3, { font: 'sans', color: BURGUNDY, align: 'center', bold: true })
-  // the knockout line, always up so you know it
+  // the knockout line, always up so you know it. the count-up's floats rise through this spot, so it steps aside for them
+  if (live) return
   pin('hud/ko/badge', 324, 176)
   text(`K.O. ${hv.knockout}×`, 346, 180, { font: 'tiny', color: BURGUNDY, align: 'center' })
+  const ko = spriteBox('hud/ko/badge', 324, 176)
+  look(ko.x, ko.y, ko.w, ko.h, rule('ko', st.view.round))
 }
 
 // le patron's marker, pinned under your plate: the next payment and when it's due
@@ -1349,7 +1542,7 @@ function marker(st: DuelState): void {
   if (!due) return
   const x = 100
   const y = 186
-  const over = hit(x, y, 58, 26, () => {})
+  look(x, y, 58, 26, rule('marker', due.due))
   pin('hud/marker/note', x, y, { r: stillCards.matches ? 0 : Math.sin(now / 800) * 0.018 })
   const age = now - markerAt
   if (!stillCards.matches && age >= 0 && age < 700) {
@@ -1361,77 +1554,91 @@ function marker(st: DuelState): void {
   }
   text('Le Patron', x + 4, y + 3, { font: 'tiny', color: '#5c4a36' })
   text(`$${due.due}`, x + 4, y + 12, { font: 'sans', color: BURGUNDY, bold: true })
-  if (over) {
-    const line = due.table >= 4 ? `Le Patron · $${due.due} after round 12, settle up` : `Le Patron · $${due.due} at the next big shop`
-    const w = measure(line, 'sans') + 10
-    nine('hud/plate/paper', x, y + 28, w, 14)
-    text(line, x + 5, y + 30, { font: 'sans', color: INK })
-  }
 }
 
-// your Sleeve: up to 2 inserts as small face-down cards by the cuff. hover reads it, click picks it up
-function sleeveSlots(st: DuelState, t: number): void {
-  const me = st.view.me
-  const usable = st.view.phase === 'deal' && !me.locked && !st.settled
-  for (let i = 0; i < 2; i++) {
-    const card = me.sleeve[i]
-    const x = 166 + i * 28
-    const picked = st.insertSlot === i
-    const resting = spring('insert' + i + (card?.id ?? ''), { x: 0, y: 318, s: 1, r: 0 }, { x: 0, y: 366, s: 1, r: 0 })
-    const y = resting.y - (picked ? 12 : 0)
-    if (!card) continue
-    const over = hit(x - 12, y - 17, 24, 34, () => { if (usable) { sfx.flip(false); st.onInsert(i) } })
-    if (usable && INSERTS[card.id].when !== 'shop') cuffHits.push({ slot: i, x, y })
-    if (dragInsert?.moved && dragInsert.slot === i) continue
-    const name = picked || over ? `insert/face/${card.id}` : 'insert/back'
-    const lift = over ? 10 : 0
-    if (over) outline(name, x - 12, y - 17 - lift)
-    pin(name, x - 12, y - 17 - lift + Math.sin(t * 2 + i) * 0.4)
-    if (over) {
-      const def = INSERTS[card.id]
-      const head = card.hand ? `${def.name}: ${HAND_NAMES[card.hand]} +1` : def.name
-      const lines = [head, ...wrap(def.text, 150, 'sans'), usable ? (def.when === 'shop' ? 'Use it in the shop' : 'Click to use') : '']
-      const w = 160
-      const top = y - 24 - lines.length * 10
-      nine('hud/plate/paper', x - 10, top, w, lines.length * 10 + 4)
-      lines.forEach((l, j) => text(l, x - 5, top + 1 + j * 10, { font: 'sans', color: j === 0 ? BURGUNDY : INK, bold: j === 0 }))
-    }
-  }
+// the Sleeve's inserts as two cards beside your hand, out of your cuff (UX.md §4). hover for the Fiche,
+// a click picks one up (then click a card), or drag it straight onto a card
+const SLEEVE_AT = [{ x: 158, y: 306, r: -0.08 }, { x: 195, y: 313, r: 0.06 }]
+const INSERT_S = 2 // the 24×34 faces, doubled
+function sleeveCards(st: DuelState, t: number): void {
   pin('you/cuff', 151, 328)
-  const held = dragInsert?.moved && me.sleeve[dragInsert.slot]
-  if (held) pin(`insert/face/${held.id}`, mouse.x - 12, mouse.y - 24, { r: Math.sin(t * 5) * 0.045 })
+  if (st.bare) return
+  const me = st.view.me
+  const usable = sleeveUsable(st)
+  me.sleeve.slice(0, 2).forEach((card, i) => {
+    const spot = SLEEVE_AT[i]
+    const w = 24 * INSERT_S
+    const h = 34 * INSERT_S
+    const picked = st.insertSlot === i
+    const over = !dragInsert?.moved && Math.abs(mouse.x - spot.x) <= w / 2 && Math.abs(mouse.y - spot.y + 4) <= h / 2
+    const target = { x: spot.x, y: spot.y - (picked ? 16 : over ? 8 : 0), r: picked || over ? 0 : spot.r, s: 1 }
+    const at = spring(`insert${i}${card.id}`, target, { x: spot.x, y: 390, r: 0, s: 1 })
+    const def = INSERTS[card.id]
+    const canUse = usable && def.when !== 'shop'
+    hit(at.x - w / 2, at.y - h / 2, w, h, () => { if (usable) { sfx.flip(false); st.onInsert(i) } })
+    if (canUse) cuffHits.push({ slot: i, x: at.x, y: at.y, w, h })
+    looks.push({ x: at.x, y: at.y, w, h, r: at.r, above: true, e: () => {
+      const e = entry('insert', card.id, card)
+      return canUse ? { ...e, foot: picked ? 'now click a card' : 'click to use' } : e
+    } })
+    if (dragInsert?.moved && dragInsert.slot === i) return
+    insertCard(insertFace(card.id), at.x, at.y + Math.sin(t * 2 + i) * 0.4, at.r, over || picked)
+  })
 }
 
-// balatro's sort buttons, under your plate. only while you hold a hand
+// one insert face at 2x, centered, with the cream outline when lit
+function insertCard(name: string, x: number, y: number, r: number, lit: boolean): void {
+  const img = sub(sprite(name))
+  const w = img.width * INSERT_S
+  const h = img.height * INSERT_S
+  shadow(x, y, w, h, r)
+  g.save()
+  g.translate(x, y)
+  g.rotate(r)
+  if (lit) for (const [dx, dy] of AROUND) g.drawImage(silhouette(img), -w / 2 + dx, -h / 2 + dy, w, h)
+  g.drawImage(img, -w / 2, -h / 2, w, h)
+  g.restore()
+}
+
+// the insert you're dragging rides the mouse, over the hand
+function insertGhost(st: DuelState, t: number): void {
+  const held = dragInsert?.moved && st.view.me.sleeve[dragInsert.slot]
+  if (held) insertCard(insertFace(held.id), mouse.x, mouse.y - 12, Math.sin(t * 5) * 0.045, false)
+}
+
+// balatro's sort buttons, right of the hand under the discard (the drawer owns the left edge). only while you hold a hand
 function sortTabs(st: DuelState): void {
   if (st.settled || !st.view.me.hand.length) return
-  text('Sort', 14, 212, { font: 'tiny', color: '#bfa77e', outline: OUTLINE })
+  const x = 460
+  text('Sort', x + 17, 253, { font: 'tiny', color: '#bfa77e', align: 'center', outline: OUTLINE })
   for (const [i, by] of (['rank', 'suit'] as const).entries()) {
-    const x = 36 + i * 36
+    const y = 262 + i * 18
     const on = st.sort === by
-    const over = hit(x, 207, 34, 15, () => { if (!on) { sfx.flip(false); st.onSort(by) } })
-    nine('hud/plate/paper', x, 207 - (over && !on ? 1 : 0), 34, 15, on ? GOLD : over ? undefined : '#b8a888')
-    text(by === 'rank' ? 'Rank' : 'Suit', x + 17, 209 - (over && !on ? 1 : 0), { font: 'sans', color: INK, align: 'center', bold: on })
+    const over = hit(x, y, 34, 15, () => { if (!on) { sfx.flip(false); st.onSort(by) } })
+    nine('hud/plate/paper', x, y - (over && !on ? 1 : 0), 34, 15, on ? GOLD : over ? undefined : '#b8a888')
+    text(by === 'rank' ? 'Rank' : 'Suit', x + 17, y + 2 - (over && !on ? 1 : 0), { font: 'sans', color: INK, align: 'center', bold: on })
   }
 }
 
 let bandTop = COL.bottom
 
-// the cheat sheet, a crumpled ball on the rail. outlined with a tag on hover, a gold glint now and then
-function cheatBall(t: number): void {
-  const x = 486
-  const y = 338
-  const over = hit(x - 12, y - 11, 24, 22, () => { cheatOpen = true; sfx.flip(false) })
+// the rules paper, a crumpled ball on the rail. a click uncrumples it into the sheet (rules.ts).
+// outlined with a tag on hover, a gold glint now and then
+const BALL = { x: 486, y: 338 }
+function rulesBall(_st: DuelState, t: number): void {
+  if (rulesOpen()) return // it's the sheet right now
+  const { x, y } = BALL
+  const over = hit(x - 12, y - 11, 24, 22, () => { toggleRules({ x, y }) })
   const r = over ? Math.sin(t * 20) * 0.15 : 0
-  if (over) outline('hud/cheat/ball', x, y, r)
-  pin('hud/cheat/ball', x, y, { r })
+  if (over) outline('rules/ball', x, y, r)
+  pin('rules/ball', x, y, { r })
   if (t % 8 < 0.15) {
     g.fillStyle = '#fff0b0'
     g.fillRect(x + 3, y - 6, 1, 1)
     g.fillRect(x + 2, y - 5, 3, 1)
     g.fillRect(x + 3, y - 4, 1, 1)
   }
-  if (over) text('Hands', x, y - 22, { font: 'sans', color: CREAM, align: 'center', bold: true, outline: OUTLINE })
+  look(x - 12, y - 11, 24, 22, () => entry('hud', 'rules'))
 }
 
 // a seat's plate: name, bankroll, then cards in hand, discards (yours left, theirs used) and inserts up the Sleeve
@@ -1439,6 +1646,9 @@ function plate(x: number, y: number, mine: boolean, st: DuelState, bankroll: num
   nine('hud/plate/frame', x, y, 150, 58)
   nine('hud/plate/paper', x + 5, y + 5, 140, 48)
   pin(`mask/${mine ? st.myMask : st.rival.mask}/icon`, x + 20, y + 17)
+  const rival = st.view.others[0].rival
+  // the plate reads as your bankroll, or as the rival (its stack, lane, case)
+  look(x, y, 150, 58, mine || !rival ? rule('bankroll') : () => entry('rival', rival, tableOf(st.view.round)))
   text(mine ? st.view.me.name === 'You' ? 'Vous' : st.view.me.name : st.rival.name, x + 34, y + 9, { font: 'sans', color: INK })
   const j = juiced(mine ? 'plate0' : 'plate1')
   g.save()
@@ -1448,23 +1658,35 @@ function plate(x: number, y: number, mine: boolean, st: DuelState, bankroll: num
   g.restore()
   // the solo rival's money is the stack it sat down with: bust it and the table is yours
   if (!mine && st.view.others[0].rival) text('stack', x + 12, y + 44, { font: 'tiny', color: '#8c7656' })
-  for (const [i, [icon, n, tip]] of ([['hand', cards, 'cards'], ['discard', discards, mine ? 'discards left' : 'discards used'], ['sleeve', sleeve, 'inserts']] as const).entries()) {
+  for (const [i, [icon, n, id]] of ([['hand', cards, 'plate-cards'], ['discard', discards, mine ? 'plate-discards' : 'rival-discards'], ['sleeve', sleeve, 'plate-sleeve']] as const).entries()) {
     const ix = x + 70 + i * 25
     pin(`icon/${icon}`, ix, y + 35)
     text(String(n), ix + 11, y + 33, { font: 'sans', color: INK })
-    if (mouse.x >= ix && mouse.x < ix + 22 && mouse.y >= y + 30 && mouse.y < y + 46) text(tip, ix + 4, y + 47, { font: 'tiny', color: CREAM, align: 'center', outline: OUTLINE })
+    look(ix - 2, y + 29, 24, 17, rule(id))
   }
-  if (!mine) text(st.rival.stamp, x + 138, y + 12, { font: 'tiny', color: BURGUNDY, align: 'right' })
+  if (!mine) {
+    text(st.rival.stamp, x + 138, y + 12, { font: 'tiny', color: BURGUNDY, align: 'right' })
+    const sw = measure(st.rival.stamp, 'tiny')
+    look(x + 136 - sw, y + 10, sw + 4, 10, rule('difficulty', STAMP_DIFFICULTY[st.rival.stamp]))
+  }
   const spoils = st.view.spoils
-  if (spoils) pin(spoils.first === (mine ? st.view.me.seat : st.view.others[0].seat) ? 'hud/spoils/order' : 'hud/spoils/order/2', x + 124, y + 21)
-  const rival = st.view.others[0].rival
-  if (!mine && rival) pin('icon/lane/' + laneArt[rival], x + 53, y + 32)
+  if (spoils) {
+    const name = spoils.first === (mine ? st.view.me.seat : st.view.others[0].seat) ? 'hud/spoils/order' : 'hud/spoils/order/2'
+    pin(name, x + 124, y + 21)
+    const b = spriteBox(name, x + 124, y + 21)
+    look(b.x, b.y, b.w, b.h, rule('spoils'))
+  }
+  if (!mine && rival) {
+    const name = 'icon/lane/' + laneArt[rival]
+    pin(name, x + 53, y + 32)
+    const b = spriteBox(name, x + 53, y + 32)
+    look(b.x, b.y, b.w, b.h, rule('lane', rival))
+  }
   const clock = mine ? st.clock() : ''
   if (clock) text(clock, x + 138, y + 13, { font: 'sans', color: BURGUNDY, align: 'right', bold: true })
 }
 
-// the 1er token: a brass puck on the corner of whoever bets first, with why under it.
-// drawn here until it gets a sprite (hud/token/premier)
+// the 1er token: a brass puck (hud/token/premier) on the corner of whoever bets first, with why under it
 const PUCK_R = 18
 function premier(st: DuelState): void {
   const view = st.view
@@ -1486,6 +1708,7 @@ function premier(st: DuelState): void {
   pin('hud/token/premier', -d / 2, -d / 2)
   text('1er', 0, -6, { font: 'chalk', color: INK, align: 'center', bold: true })
   g.restore()
+  look(at.x - PUCK_R, at.y - PUCK_R, d, d, rule('first'))
 
   // the caption explains the order until the first bet lands, then the felt tickets take over
   // (and the rival's bubble needs that space)
@@ -1495,19 +1718,25 @@ function premier(st: DuelState): void {
   const left = meFirst ? 12 : 632
   const y = meFirst ? 110 : 74
   const align = meFirst ? 'left' : 'right'
-  text(who, left, y, { font: 'didone', color: GOLD, align, outline: OUTLINE })
+  // under their plate the didone runs into the puck, so a long name drops to the sans
+  if (!meFirst && measure(who, 'didone') > 128) text(who, left, y + 4, { font: 'sans', color: GOLD, align, bold: true, outline: OUTLINE })
+  else text(who, left, y, { font: 'didone', color: GOLD, align, outline: OUTLINE })
   text(why, left, y + 19, { font: 'sans', color: CREAM, align, outline: OUTLINE })
 }
 
 function twistSign(view: SeatView): void {
   tile('hud/twist/string', 204, 0, 1, 53)
   tile('hud/twist/string', 271, 0, 1, 53)
-  nine('hud/twist/sign', 183, 52, 111, 36)
+  // the sign grows to fit the whole rule, never cut off
+  const rule = wrap(view.twist ? twistText(view.twist) : '', 104, 'tiny')
+  const h = 28 + Math.max(2, rule.length) * 7 // the 6px bottom border sits under the last line, not on it
+  nine('hud/twist/sign', 183, 52, 111, h)
+  const tw = view.twist
+  if (tw) look(183, 52, 111, h, () => entry('twist', tw.id, tw))
   const name = twistLabel(view)
   if (measure(name, 'didone') <= 104) text(name, 238, 52, { font: 'didone', color: BURGUNDY, align: 'center' })
   else text(name.toUpperCase(), 238, 57, { font: 'sans', color: BURGUNDY, align: 'center', bold: true })
-  const rule = wrap(view.twist ? twistText(view.twist) : '', 104, 'tiny')
-  rule.slice(0, 2).forEach((line, i) => text(line, 238, 72 + i * 7, { font: 'tiny', color: INK, align: 'center' }))
+  rule.forEach((line, i) => text(line, 238, 72 + i * 7, { font: 'tiny', color: INK, align: 'center' }))
 }
 
 // the rival's line, in a bubble to the left of their head (their plate owns the right)
@@ -1532,7 +1761,7 @@ function turnFlare(st: DuelState): number {
 }
 
 function turnBanner(): void {
-  if (!myTurn || calling()) return
+  if (!myTurn || calling() || bandShowing()) return
   const age = now - myTurn.t
   if (age >= TURN_MS) return
   const alpha = Math.min(1, age / 120, (TURN_MS - age) / 300)
@@ -1551,6 +1780,7 @@ const calledOut = new Set<string>()
 const calling = () => callout !== null && now - callout.t < CALLOUT_MS
 function endCallout(): void {
   if (callout) callout.t = -CALLOUT_MS
+  skipBand()
 }
 
 function startCallout(st: DuelState): void {
@@ -1561,6 +1791,8 @@ function startCallout(st: DuelState): void {
   calledOut.add(key)
   callout = { key, t: now }
   sfx.bell()
+  const [big, small] = calloutLines(st)
+  announce(big, small, sd.winner === st.view.me.seat ? 'good' : 'bad')
 }
 
 // the french line big, what it means under it
@@ -1574,33 +1806,15 @@ function calloutLines(st: DuelState): [string, string] {
 function calloutBanner(st: DuelState): void {
   if (!calling() || !st.view.showdown?.ko) return
   const age = now - callout!.t
-  const [big, small] = calloutLines(st)
   const won = st.view.showdown.winner === st.view.me.seat
   if (!stillCards.matches && age < 430) {
     const t = age / 430
     for (const side of ['L', 'R'] as const) {
       const dir = side === 'L' ? -1 : 1
-      pin('hud/score/tear/' + side, (won ? 503 : NEAR_ROW.cx) + dir * 32 * t, (won ? 96 : 275) + t * t * 30, { r: dir * t / 4, alpha: 1 - t })
+      pin('hud/score/tear/' + side, (won ? THEIR_TAG_X + 48 : NEAR_ROW.cx) + dir * 32 * t, (won ? 96 : 275) + t * t * 30, { r: dir * t / 4, alpha: 1 - t })
     }
   }
-  pin('hud/ko/stamp', won ? 503 : NEAR_ROW.cx, won ? 96 : 275, { r: -0.14, s: age < 120 ? 2 - age / 120 : 1 })
-
-  const scale = measure(big, 'didone') * 2 <= 400 ? 2 : 1
-  const w = Math.max(measure(big, 'didone') * scale, measure(small, 'sans')) + 40
-  const h = 30 + 14 * scale
-  const pop = age < 260 ? 0.6 + 0.4 * (1 - Math.exp(-age / 50)) + 0.12 * Math.exp(-age / 90) : 1
-  const fade = Math.min(1, (CALLOUT_MS - age) / 200)
-  g.save()
-  g.globalAlpha = fade
-  g.fillStyle = 'rgba(14,11,10,0.45)'
-  g.fillRect(0, 150, W, 90) // dim the felt behind it
-  g.translate(300, 190)
-  g.scale(pop, pop)
-  nine('hud/plate/frame', -w / 2 - 5, -h / 2 - 5, w + 10, h + 10)
-  nine('hud/plate/paper', -w / 2, -h / 2, w, h)
-  text(big, 0, -h / 2 + 4, { font: 'didone', color: won ? '#a8260a' : INK, align: 'center', scale })
-  text(small, 0, h / 2 - 15, { font: 'sans', color: won ? '#3a8040' : BURGUNDY, align: 'center', bold: true })
-  g.restore()
+  pin('hud/ko/stamp', won ? THEIR_TAG_X + 48 : NEAR_ROW.cx, won ? 96 : 275, { r: -0.14, s: age < 120 ? 2 - age / 120 : 1 })
 }
 
 // the french line big, the english bet word under it
@@ -1676,6 +1890,8 @@ function slips(st: DuelState): void {
     }
     presses.push(s.enabled ? act : () => {})
     const over = s.enabled && hit(at.x, at.y - 4, TW, PITCH, act)
+    const id = slipRule(s)
+    if (id) look(at.x, at.y - 4, TW, PITCH, rule(id))
     if (over) {
       hovering = i
       if (hoverSlip !== i) pop(key)
@@ -1693,6 +1909,12 @@ function slips(st: DuelState): void {
     g.restore()
   })
   hoverSlip = hovering
+}
+
+// the rule a ticket stands for, if any
+function slipRule(s: Slip): string | null {
+  if (s.kind === 'max') return s.label === 'Push' ? 'push' : 'max'
+  return ({ lock: 'play', forge: 'flamber', discard: 'discard', min: 'min', skip: 'spoils' } as Partial<Record<Kind, string>>)[s.kind] ?? null
 }
 
 // 0 → 1 → 0 over 1.2s, the primary ticket's breathing
@@ -1732,6 +1954,9 @@ function ticket(s: Slip, gap: number, over: boolean, tw = TW): void {
   }
 }
 
+const TOAST_MS = 5000
+let toastSeen = { text: '', t: 0 }
+
 // the hint, and the latest log line above it, stacked upward from bottom. returns the new top
 function colText(st: DuelState, bottom: number): number {
   let y = bottom
@@ -1748,7 +1973,10 @@ function colText(st: DuelState, bottom: number): number {
   const hint = st.hint ? wrap(st.hint, COL.w - 4, 'sans') : []
   y -= hint.length * 10
   hint.forEach((line, i) => text(line, COL.x + 2, y + i * 10, { font: 'sans', color: CREAM, outline: OUTLINE }))
-  const toast = st.toast ? wrap(st.toast, COL.w - 4, 'sans').slice(-3) : []
+  // a log line says its piece for a few seconds, then gets out of the way
+  if (st.toast !== toastSeen.text) toastSeen = { text: st.toast, t: now }
+  const fresh = now - toastSeen.t < TOAST_MS
+  const toast = st.toast && fresh ? wrap(st.toast, COL.w - 4, 'sans').slice(-3) : []
   if (toast.length) {
     y -= toast.length * 10 + (hint.length ? 4 : 0)
     toast.forEach((line, i) => text(line, COL.x + 2, y + i * 10, { font: 'sans', color: '#bfa77e', outline: OUTLINE }))
@@ -1761,7 +1989,8 @@ function colText(st: DuelState, bottom: number): number {
 function tally(st: DuelState): number {
   const r = st.view.last!
   const name = st.rival.name
-  const score = `${r.wins[0]}–${r.wins[1]}`
+  // level on hands won means the round went to the totals
+  const score = r.wins[0] === r.wins[1] ? 'on total' : `${r.wins[0]}–${r.wins[1]}`
   const title = { win: r.ko ? 'K.-O. ! Yours' : `You win ${score}`, loss: r.ko ? `K.-O. by ${name}` : `${name} wins ${score}`, tie: 'Dead even', bye: 'Bye' }[r.outcome]
   const t = r.tally
   const rows: [string, number][] = ([['Pot', t.pot], ['House', t.house], ['K.O.', t.ko], ['Momentum', t.momentum], ['Interest', t.interest], ['Extras', t.extras], ['Table skipped', t.skip]] as [string, number][]).filter(([, n]) => n !== 0)
@@ -1781,22 +2010,29 @@ function tally(st: DuelState): number {
   const x = COL.x + 4
   const y = colTop - 10 - h
   const at = spring('tally', { x, y, r: 0, s: 1 }, { x: W + 20, y, r: 0, s: 1 })
-  nine('hud/plate/frame', at.x - 4, at.y - 4, w + 8, h + 8)
-  nine('hud/plate/paper', at.x, at.y, w, h)
+  if(!Number.isFinite(tallyAt)) tallyAt=now
+  const age=stillCards.matches?Infinity:now-tallyAt
+  const lines=Math.min(rows.length,Math.floor(age/120))
+  if(lines>tallyLine) { tallyLine=lines; sfx.thunk() }
+  nine('fx/receipt',at.x,at.y,w,Math.min(h,32+lines*11+(lines===rows.length?22+noteLines.length*10:0)))
   const titleColor = r.outcome === 'win' ? '#a8260a' : INK
   if (measure(title, 'didone') <= w - 8) text(title, at.x + w / 2, at.y + 1, { font: 'didone', color: titleColor, align: 'center' })
   else if (measure(title, 'sans', true) <= w - 8) text(title, at.x + w / 2, at.y + 6, { font: 'sans', color: titleColor, align: 'center', bold: true })
   else text(title, at.x + w / 2, at.y + 6, { font: 'sans', color: titleColor, align: 'center' })
+  const ROW_RULE: Record<string, () => Entry> = { Pot: () => entry('keyword', 'Pot'), House: rule('house'), 'K.O.': rule('ko', st.view.round), Momentum: rule('momentum'), Interest: rule('interest') }
   rows.forEach(([label, n], i) => {
+    if (i>=lines) return
     const ry = at.y + 24 + i * 11
+    if (ROW_RULE[label]) look(at.x, ry - 1, w, 11, ROW_RULE[label])
     text(label, at.x + 8, ry, { font: 'sans' })
     text(`${n > 0 ? '+' : '−'}$${Math.abs(n)}`, at.x + w - 8, ry, { font: 'sans', color: n > 0 ? '#3a8040' : BURGUNDY, align: 'right', bold: true })
   })
+  if(lines<rows.length) return y-8
   const ty = at.y + 26 + rows.length * 11
   g.fillStyle = '#bfa77e'
   g.fillRect(at.x + 6, ty - 2, w - 12, 1)
   text('This round', at.x + 8, ty + 1, { font: 'sans', bold: true })
-  text(`${total >= 0 ? '+' : '−'}$${Math.abs(total)}`, at.x + w - 8, ty + 1, { font: 'sans', bold: true, align: 'right', color: total >= 0 ? '#3a8040' : BURGUNDY })
+  text(`${total >= 0 ? '+' : '−'}$${Math.round(Math.abs(total)*progress(age-lines*120,270))}`, at.x + w - 8, ty + 1, { font: 'sans', bold: true, align: 'right', color: total >= 0 ? '#3a8040' : BURGUNDY })
   noteLines.forEach((line, i) => text(line, at.x + 6, ty + 12 + i * 10, { font: 'sans', color: '#5c4a36' }))
   return y - 8
 }
@@ -1804,13 +2040,14 @@ function tally(st: DuelState): number {
 // keys: 1–4 press the tickets top to bottom, space or enter presses the primary one
 window.addEventListener('keydown', e => {
   if (!state || !cv?.isConnected || e.repeat) return
+  if (rulesKey(e.key)) return e.preventDefault()
+  if (drawerKey(e.key)) return e.preventDefault()
+  if (rulesOpen() || drawerOpen()) return
+  if (panelKey(e.key)) return e.preventDefault()
+  if (panelOpen() || state.bare) return
   if (calling()) {
     if (e.key === ' ' || e.key === 'Enter') e.preventDefault()
     return endCallout()
-  }
-  if (cheatOpen) {
-    cheatOpen = false
-    return
   }
   const n = Number(e.key)
   if (n >= 1 && n <= presses.length) presses[n - 1]()
@@ -1822,80 +2059,27 @@ window.addEventListener('keydown', e => {
   }
 })
 
-function vitrine(st: DuelState, t: number): void {
-  const items: Owned[] = st.view.me.display
-  if (vitrineOpen) {
-    const slots = Math.max(items.length, st.view.me.displaySlots)
-    const widths = Array.from({ length: slots }, (_, i) => items[i] ? sprite(items[i].id).w : 36)
-    const row = widths.reduce((a, b) => a + b, 0) + 6 * (slots - 1)
-    const w = Math.max(184, row + 18)
-    const at = spring('vitrine', { x: 8, y: 15, r: 0, s: 1 }, { x: 8, y: -130, r: 0, s: 1 })
-    hit(at.x, at.y, w, 124, () => {})
-    nine('hud/vitrine/case', at.x, at.y, w, 124)
-    let x = at.x + (w - row) / 2
-    const floor = at.y + 115
-    let hint = ''
-    for (let i = 0; i < slots; i++) {
-      const o = items[i]
-      if (o) {
-        const f = collectible(o, now, i)
-        const j = juiced(`slot${i}`)
-        g.save()
-        g.translate(x + widths[i] / 2, floor)
-        g.rotate(j.r)
-        g.scale(j.s, j.s)
-        drawCollectible(g, f, -widths[i] / 2, -f.art.height, now + i * 213)
-        g.restore()
-        if (opaque(f, mouse.x - x, mouse.y - floor + f.art.height)) hint = getDef(o.id).name + ' · ' + describe(o)
-      } else {
-        g.fillStyle = '#5c4a36'
-        g.fillRect(x + 4, floor - 1, widths[i] - 8, 1)
-      }
-      x += widths[i] + 6
-    }
-    if (hint) {
-      const width = measure(hint, 'sans') + 12
-      const left = Math.min(at.x + 4, W - width)
-      g.fillStyle = INK
-      g.fillRect(left, floor + 8, width, 18)
-      text(hint, left + 6, floor + 12, { font: 'sans', color: '#f6ecd2' })
-    }
-  }
-  const over = hit(8, 0, 64, 18, () => { vitrineOpen = !vitrineOpen })
-  const drop = over && !vitrineOpen ? 2 : 0
+// top-left shortcuts into the drawer: VITRINE with a pip per filled slot, and the CARNET
+function vitrineTab(st: DuelState, t: number): void {
+  const over = hit(8, 0, 64, 18, () => openDrawer('vitrine'))
+  look(8, 0, 64, 18, rule('vitrine'))
+  const drop = over ? 2 : 0
   if (over) outline('hud/vitrine/tab', 8, drop)
   pin('hud/vitrine/tab', 8, drop + (over ? Math.sin(t * 8) * 0.3 : 0))
+  st.view.me.display.forEach((_, i) => {
+    g.fillStyle = OUTLINE
+    g.fillRect(75 + i * 5, 6 + drop, 4, 4)
+    g.fillStyle = GOLD
+    g.fillRect(76 + i * 5, 7 + drop, 2, 2)
+  })
 }
 
-function cheatSheet(st: DuelState): void {
-  g.fillStyle = 'rgba(14,11,10,0.62)'
-  g.fillRect(0, 0, W, H)
-  nine('hud/cheat/sheet', 44, 10, 552, 340)
-  const crease = sub(sprite('hud/cheat/crease'))
-  for (const x of [230, 421]) centered(crease, x, 180, 3, 323)
-  text('Les mains de poker', 73, 22, { font: 'didone' })
-  text('HAND', 72, 56, { font: 'sans', color: BURGUNDY })
-  text('CARDS', 262, 56, { font: 'sans', color: BURGUNDY })
-  text('VALUE', 460, 56, { font: 'sans', color: BURGUNDY, align: 'center' })
-  text('HYPE', 526, 56, { font: 'sans', color: BURGUNDY, align: 'center' })
-  const examples: Record<string, string> = {
-    royalflush: '10h Jh Qh Kh Ah', straightflush: '4s 5s 6s 7s 8s', quads: '9h 9s 9d 9c', fullhouse: 'Kh Ks Kd 8c 8h',
-    flush: '2d 4d 7d Jd Ad', straight: '4s 5h 6c 7d 8s', trips: 'Qh Qs Qd', twopair: '10s 10h 8c 8d', pair: 'Jh Jc', high: 'As',
-  }
-  const rankOf: Record<string, number> = { J: 11, Q: 12, K: 13, A: 14 }
-  ;[...HAND_TYPES].reverse().forEach((h, i) => {
-    const y = 71 + 26 * i
-    const lv = st.view.me.levels[h]
-    text(HAND_NAMES[h] + (lv ? `  lv${lv + 1}` : ''), 73, y + 4, { font: 'sans' })
-    examples[h].split(' ').forEach((ex, j) => {
-      const r = ex.slice(0, -1)
-      const face = faceCanvas(rankOf[r] ?? Number(r), ex.slice(-1).toUpperCase() as Card['suit'])
-      g.drawImage(face, 0, 0, 14, 24, 263 + j * 21, y, 14, 24)
-    })
-    text(String(HAND_BASE[h].value), 460, y + 4, { font: 'sans', align: 'center' })
-    text(String(HAND_BASE[h].hype), 526, y + 4, { font: 'sans', align: 'center', color: BURGUNDY })
-  })
-  text('base numbers, before levels and cards', 320, 334, { font: 'tiny', align: 'center', color: '#8c7656' })
+function carnetTab(): void {
+  const x = 106
+  const over = hit(x, 0, 46, 16, () => openDrawer('carnet'))
+  const drop = over ? 2 : 0
+  nine('hud/plate/paper', x, -4 + drop, 46, 18, over ? CREAM : '#e3d2a8')
+  text('Carnet ?', x + 23, 2 + drop, { font: 'tiny', color: BURGUNDY, align: 'center' })
 }
 
 function effects(): void {
@@ -1948,10 +2132,7 @@ export async function countUp(sd: ShowdownView): Promise<void> {
       const card = st.cardId !== null ? cards.find(c => c.id === st.cardId) : undefined
       l.step = i === 0 ? '' : st.label === 'card' && card ? '' : st.label
       pop(`tag${n}`)
-      if (st.slot !== null && n === 0) {
-        pop(`slot${st.slot}`)
-        if (!vitrineOpen) l.step = st.label
-      }
+      if (st.slot !== null && n === 0) l.step = st.label
       if (card) {
         pop(`card${card.id}`)
         const s = springs.get(`card${card.id}`)
@@ -1973,6 +2154,11 @@ export async function countUp(sd: ShowdownView): Promise<void> {
     const l = live![n]
     if (a && Math.floor(l.v * Math.max(1, l.h) * 2 ** l.g) !== a.total) throw new Error('count-up does not match appraisal')
   })
+  reelAt = performance.now()
+  if(!stillCards.matches && sides.some(Boolean)) {
+    const digits = Math.max(...sides.map(a=>fmt(a?.total ?? 0).length))
+    await sleep(300+digits*95)
+  }
   live = null
   pop(sd.winner === null ? 'tag0' : sd.winner === sd.opponent ? 'tag1' : 'tag0')
 }
