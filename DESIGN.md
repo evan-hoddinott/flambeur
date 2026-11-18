@@ -1,5 +1,7 @@
 # Flambeur design (v1)
 
+> **Being replaced (Nov 18):** `docs/V2.md` is the v2 rework spec (best of 3 hands, no fold, Flamber as a hand, spoils, Le Patron's marker, a rival roster). Where they disagree, V2.md wins. Each section here gets rewritten as its slice lands.
+
 Booster-pack poker roguelike for the KSU AI Hackathon (IEEE AI Game Sprint + Nudox). Browser game.
 Numbers here are first-pass. The econ sim (`sim/econ.ts`) is how we tune them, not guessing.
 

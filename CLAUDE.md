@@ -17,7 +17,8 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 
 | File | What it is |
 |---|---|
-| `DESIGN.md` | **The game spec and source of truth for every rule and number.** Keep it in sync with code. |
+| `docs/V2.md` | **The v2 fun rework (Nov 18), the current build spec.** Best of 3 hands, no fold, Flamber as a hand, spoils, Le Patron's marker, a rival roster, the Sleeve. It wins over DESIGN.md until DESIGN.md is rewritten to match. Its §0 is the "done when". |
+| `DESIGN.md` | **The game spec and source of truth for every rule and number.** Keep it in sync with code. Being rewritten to match `docs/V2.md`, slice by slice. |
 | `CLAUDE.md` | This file. How to work here. |
 | `docs/ART.md` | **The art style source of truth**: rendering rules, palette, scenes, characters, cards, motion, UI. Research behind it: `docs/balatro-visual-research.md`. |
 | `docs/DUEL.md` | Duel scene spec: layout, characters and the 10 masks, table, room, HUD, sprite list. |
@@ -73,6 +74,7 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
 
 ## How to work here
 
+- **Big changes are welcome** (Evan, Nov 18). Don't shrink a redesign, rewrite or engine change because of the deadline, and don't steer toward the "safe" option for scope reasons. Evan will put in the extra work. The one exception is **Friday Nov 20 (demo day)**: no big changes that day, only fixes, polish and the golden-path demo run.
 - **The engine stays pure and deterministic.**
   - All randomness goes through `Rng`.
   - Per-round streams come from `roundRng` and the deck's `seed:round:pile` stream, so a shop restock never changes a deal. The same seed plus the same picks must replay the same run.
