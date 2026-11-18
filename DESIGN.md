@@ -84,7 +84,7 @@ Code: `forge.ts` (`forgePlan`, `buildForged`), `flamberOut` in match.ts. One lin
 | Trips | Triplet | counts as 3 of its rank |
 | Straight | Bridge | counts as any rank inside a straight |
 | Flush | Wild Suit | counts as every suit |
-| Full House | Household | is a full house by itself |
+| Full House | Household | is a full house by itself. Shown as "Household (Ks over 8s)" (`traitLabel` in cards.ts) |
 | Quads | Quad | counts as 4 of its rank |
 | Straight Flush | Bridge + Wild Suit | both |
 | Royal Flush | Crown | bridge + wild + permanent +1 Grade |
@@ -231,16 +231,18 @@ Code: `rivals.ts` (the roster as data, `buildRival`), `sitRival` in match.ts.
 
 | Mask | Lane | Deck leans toward | Case by Table (2 → 3 → 4) |
 |---|---|---|---|
-| Hare | Pairs | 3 copies of 4 ranks. Nervous: bets Min unless it's sure | Rubber Band → Les Jumeaux → Binder Divider |
+| Hare | Pairs | 3 copies of 4 ranks. Nervous: bets Min unless its hand is strong, never bluffs | Rubber Band → Les Jumeaux → Binder Divider |
 | Pierrot | Low cards | 2–6 | Low Ball → Petite Monnaie → Odd Lot |
 | Black Domino | Straights | Runs of connected ranks | Straight Edge → Ligne Droite → Code: Straight |
-| Crimson Domino | Money | Gold Borders, bets Max a lot | Price Sticker → Le Flambeur → Tournament Badge |
-| Arlequin | Finishes | Finishes and Stickers | Black Light → Vitrine → Lucky Penny |
+| Crimson Domino | Money | Gold Borders. Reckless: bets Max a lot, often on nothing | Price Sticker → Le Flambeur → Tournament Badge |
+| Arlequin | Finishes | Finishes and Stickers | Black Light → L'Écrin → Lucky Penny |
 | Queen of Hearts | ♥ flushes | Hearts, Holo | Color-Sorted Binder → Sommelier → Playmat (♥) |
 | King of Spades | Flambé | ★ cards | Chalumeau → Flamme Bleue → Chef's Apron |
 | Owl | Grade | Graded cards, Prism | PSA 10 Slab → Le Commissaire-priseur → Thin Binder |
 | Scaramouche | Junk | Bulk and knockoffs | Bulk Bin → Le Ferrailleur → Participation Trophy |
 | Fox | Jokers | 2 Jokers, Signed cards | Specialist → Bis ! → Combo Platter |
+
+- **Betting styles** as the Fiche says them (`glossary.ts`): Hare and Crimson Domino as above, every other mask "bets Max when its hand is strong, sometimes bluffs" (its difficulty's style).
 
 | Difficulty | Bot style | Build step | Score × |
 |---|---|---|---|
@@ -330,7 +332,7 @@ Off-Brand packs only, in the stamp slot.
 
 | Knockoff | Does |
 |---|---|
-| Crayon | Any rank, 0 Value. Joins your biggest rank group or fills a straight gap. Never the high card |
+| Crayon | **Counts as any rank, 0 Value.** In a hand it joins your biggest rank group or fills a straight gap; a lone Crayon is an ace. Its printed rank means nothing, so rank triggers (Low Ball, Odd Lot, Even Stack, Face Binder, PSA 10 Slab, Petite Monnaie, Face Cards Don't Score) skip it |
 | Marked | +1 Grade when it scores. Once locked, the rival sees it face up |
 | Wrong Suit | Also counts as a second suit for flushes |
 | Beer-stained | +6 Hype when it scores. Stuck to another card: drawn, tossed and played together |
@@ -353,7 +355,7 @@ Lanes: **Off-Brand** = stamps + knockoffs, **Repack** = pre-flambéed cards, Jum
 | Joker | Rule |
 |---|---|
 | Sticky Fingers | Win the round with it played in any hand: steal a random card from the rival's deck. Once per round |
-| Double or Nothing | Played in any hand by either side: everything the round pays or costs is doubled (pot, Max bets, House, KO, Momentum, Gold Border; not interest), as far as the loser's bankroll goes |
+| Double or Nothing | **Everything this round pays or costs ×2.** Played in any hand by either side: pot, Max bets, House, KO, Momentum, Gold Border, Price Sticker and Double Down's match, as far as the loser's bankroll goes. Interest isn't the round's, it's on what you hold |
 | Courtier | Counts as whichever J, Q or K makes your best hand |
 | Catalyst | Flambé with it: the new card comes out one ★ higher (max ★3) |
 | Poker Face | Played in a round you lose: your Max bet comes back (was Bluff; id `bluff`) |
@@ -378,7 +380,7 @@ Code: `sleeves.ts` (ids say `sleeve`). One is offered in each big shop, $10, out
 | Pochette | Does |
 |---|---|
 | Big Hands | +1 hand size |
-| Pochette Restock | First restock each shop is free |
+| Pochette Restock | First restock each shop is free (the Store Credit collectible did exactly this and is cut) |
 | Hot Market | STONKS sells at +1× |
 | Display Riser | +1 display case slot |
 | Deep Pockets | Interest caps at +$4 instead of +$2 |
@@ -396,7 +398,7 @@ A **lane** is a build. Cheap collectibles add; one rare **payoff** per lane mult
 | Les Jumeaux | Pairs | Each Pair in the hand: ×1.5 Hype |
 | Sommelier | Flush | Flush: ×2 Hype if a scored card is Holo |
 | Flamme Bleue | Flambé | Each scored flambéed card: ×1.5 Hype |
-| Vitrine | Finishes | ×1 Hype per different Finish scored |
+| L'Écrin | Finishes | ×1 Hype per different Finish scored (id `vitrine`, renamed so it doesn't clash with the display case) |
 | Petite Monnaie | Low cards | Each scored 2–6: ×1.25 Hype |
 | Le Ferrailleur | Bulk | Each Bulk played: ×1.5 Hype |
 | Le Flambeur | Money | ×Hype = 1 + 1 per $20 you hold |
@@ -496,6 +498,22 @@ Other boxes, 300 runs. Win %:
 - Easy is very easy for any policy that buys (86–90%).
 - `REF_SCORE` from this run: `[300, 304, 548, 791, 805, 1501, 2196, 2232, 3256, 4280, 4140, 4223]`, within noise of the one in bot.ts, so it stays.
 
+### UX content pass (Nov 18, `ENGINE_VERSION` 2.0.2)
+
+docs/UX.md §10: Crayon's rank triggers, the Store Credit cut, Double or Nothing covering Price Sticker and Double Down. Classic vs Medium, 1000 runs, seed `sim`:
+
+| Policy | Win % | Mean score | KO % | Reach r12 | Hands/round | Marker misses T2/3/4 |
+|---|---|---|---|---|---|---|
+| greedy, before | 56.9 | 270.5 | 21.7 | 61.7 | 2.47 | 23 / 47 / 69 |
+| greedy, after | 59.7 | 286.7 | 21.9 | 63.9 | 2.46 | 17 / 52 / 61 |
+| cautious, before | 3.9 | 11.0 | 2.6 | 7.7 | 2.46 | 0 / 303 / 142 |
+| cautious, after | 3.7 | 9.9 | 2.7 | 7.8 | 2.46 | 0 / 306 / 150 |
+| random, before | 44.3 | 187.3 | 17.5 | 49.5 | 2.48 | 53 / 58 / 75 |
+| random, after | 45.4 | 198.7 | 17.9 | 50.7 | 2.49 | 61 / 54 / 58 |
+
+- Greedy +2.8 points, still inside the 40–60 band. Most of it is the shop no longer stocking a dead Store Credit (one fewer common in the pool also reshuffles every later draw, so some is noise).
+- Rival strength didn't move: greedy's `REF_SCORE` came out `[300, 308, 553, 798, 814, 1490, 2166, 2232, 3236, 4240, 4146, 4229]`, within noise of bot.ts, so it stays.
+
 
 ## Decisions log (v2 build, Nov 18)
 
@@ -516,6 +534,15 @@ Calls the spec didn't make, all the simplest option that fit its intent:
 - **UI, inserts in a hand:** click a Sleeve card to pick it up, select its cards (Photocopie reads click order: first becomes second), then Use. Checklist shows 4 suit tickets. Wishlist says "use it in the shop".
 - **UI, the shop's Sleeve:** click it on the zinc for an overlay: use a Code or Wishlist, or toss.
 - **Dev flags:** `/?quick&big` stops at the first big shop, `/?quick&auto` plays your seat with the `house` bot through the real UI to the end of the run (the browser smoke test).
+
+- **UX content pass (UX.md §10, 2.0.2):**
+  - **Crayon** reads "Counts as any rank, 0 Value." Hand eval already did that; what didn't match was its printed rank still firing Low Ball, Odd Lot, Even Stack, Face Binder, PSA 10 Slab and Face Cards Don't Score (Petite Monnaie already skipped it). Now they all skip it, and a lone Crayon is an ace for the high card.
+  - **Store Credit cut:** it and Pochette Restock both added one free restock per shop and stacked the same way (`freeRestocks`). The pochette stays.
+  - **Vitrine → L'Écrin** (a jewel case, which is what its art already is). The id stays `vitrine` so the art keeps working, like `bluff` for Poker Face.
+  - **Double or Nothing** reads "Everything this round pays or costs ×2." To make that true it now also doubles Price Sticker and Double Down's house match. Interest stays out: it's on what you hold, not the round.
+  - **Household** shows as "Household (Ks over 8s)": `traitLabel(card, trait)` in cards.ts. `traitName` keeps the short "Household/8".
+  - **Rival betting styles** have player-facing lines in `glossary.ts`.
+- **Rules text map:** `src/engine/glossary.ts` (`entry`, `cardEntry`, `KEYWORDS`, `glossaryIds`) reads every Fiche line from the engine's own tables and constants (`VARIANTS`, `JOKERS`, `describe()`, `INSERTS`, `SLEEVES`, `TWISTS`, `RIVALS`, `KEEPER`, `HAND_BASE`, the scoring constants). Packs use their art names: Faux Frère (Off-Brand), Le Roussi (Repack), Sélène (Collector). `src/engine/compare.ts` (`deckDelta`) gives compare mode its counts and payoff lines.
 
 ## Open problems
 

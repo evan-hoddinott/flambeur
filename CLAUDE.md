@@ -24,6 +24,7 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 | `docs/DUEL.md` | Duel scene spec: layout, characters and the 10 masks, table, room, HUD, sprite list. |
 | `docs/SHOP.md` | Shop scene spec: first-person tabac counter, the offer shelf, binder, grading window, pack rip, sprite list. |
 | `docs/CARDS.md` | Card art spec for the art agent: every segmented sprite, sizes, layout, layer order, export. §0.5 = special cards are Balatro-loud, one visual channel per modifier slot. |
+| `docs/UX.md` | **The UI frame (Nov 18)**: fixed zones on every screen, the left-edge bifold drawer (deck/binder/sleeve/vitrine/carnet), the Sleeve also as 2 cards beside the hand in a match, the rules paper, compare mode, the Fiche description box, teaching. Wins over ART/DUEL/SHOP on where UI lives. |
 | `docs/READABILITY.md` | How interactables read: color-coded ticket buttons, outlined text, prop hover cues. Amends ART.md §13. |
 | `pitch.html` | Visual pitch page for Evan's friend. It's published on It as `pull-rate-pitch` (its old name) and is older than DESIGN.md. |
 | `collectibles-draft.md` | An old 58-idea collectible brainstorm with a Codex review. It's superseded by DESIGN.md and `src/engine/collectibles.ts`. |
@@ -68,12 +69,16 @@ src/engine/      pure, deterministic game logic. no DOM. this is the part that l
   bot.ts           botAction(match, seat): one action at a time, same rules as people. also the sim's policies
                    (greedy/cautious/random/nobuy) and REF_SCORE (rival p50 per hand)
   *.test.ts        focused tests with hand-computed expected values
-src/main.ts      the UI driver. the table is the duel scene, the shop is the tabac scene, draft/packs/binder/grading/the shop's Sleeve
-                 are still the throwaway DOM harness. dev: /?quick&big = first big shop, /?quick&auto = your seat plays itself to the end
+src/main.ts      the UI driver. the table is the duel scene, the shop is the tabac scene. draft, starter box, results, packs, binder,
+                 grading, Sleeve, Vitrine and forge pick are canvas panels (src/ui/panels.ts). no DOM screens left. dev: /?quick&big = first big shop, /?quick&auto = your seat plays itself to the end
 src/ui/art.ts    loads art/duel + art/cards atlases (aseprite slices), composites cards at runtime like art/cards/build.py
 src/ui/duel.ts   the duel scene on one canvas: layout from art/duel/review.py, springs, idle motion, count-up, slips
 src/ui/shop.ts   the tabac on one canvas: the buraliste, the offer shelf, sign, STONKS board, tickets, le patron + the scouting dossier
                  (big shop), the Sleeve on the zinc. art from art/shop/*.py (`python art/shop/counter.py` rebuilds shop.png/json)
+src/ui/frame.ts  the run strip and the announcement band, shared by both scenes
+src/ui/drawer.ts the left-edge bifold drawer (deck/binder/sleeve/vitrine/carnet) and compare mode (UX.md)
+src/ui/fiche.ts  the description box on every hover, text from src/engine/glossary.ts
+src/ui/rules.ts  the rules paper in the duel
 src/ui/placeholders.ts  flat stand-ins for v2 sprites not drawn yet (docs/V2-ART.md), registered under their real ids. delete each when its art lands
 src/ui/collectibles.ts  collectible art on the vitrine
 src/ui/font.ts   bitmap text from art/fonts (sans, tiny, didone, chalk). glyphs are text grids in art/fonts/*.txt, `python art/fonts/build.py` rebuilds (also the woff2s style.css uses for DOM text)
@@ -167,6 +172,8 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
 **Sim, greedy vs Medium, Classic, 1000 runs:** see DESIGN.md, Tuning. Every §0 target hits except shop share (~47% vs ≤ 40%, explained there). Tuned: knockout K 6/8/10/12, rival upgrades 3 per Table, `REF_SCORE` per hand.
 
 **Verified:** tests, typecheck and build pass. A full `/?quick&auto` run in headless Chromium (draft → round 12 → results) throws nothing; Play/Flamber/Discard, bets, reveal, tally, spoils and both shops checked by hand. Only console noise: `/api/me` 502 with no game server running.
+
+**UX frame (docs/UX.md) is built:** run strip, bifold drawer in both scenes, Fiche on every hover with glossary text, compare mode on pack sort/spoils/draft, Sleeve inserts beside the hand, rules paper, one announcement band, every screen on canvas. A full `/?quick&auto` and `/?quick&wild&auto` run clean.
 
 **Open problems:**
 - **Shop share** of the greedy bot's actions is ~47%.
