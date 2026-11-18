@@ -35,6 +35,12 @@ def export():
     # Pack the generated layers below Aseprite's sheet, keeping its slice coordinates.
     x, y, row = 0, original.height, 0
     extras = layers()
+    from runpy import run_path
+    device = run_path(str(ROOT.parent / "packaging/starters/build.py"))["device"]
+    for box in BOXES:
+        badge = Image.new("RGBA", (32, 40))
+        badge.alpha_composite(device(box).resize((32, 30), Image.Resampling.NEAREST), (0, 5))
+        extras[f"back/emblem/{box}"] = badge
     positions = {}
     for name, im in extras.items():
         if x + im.width > original.width:
@@ -111,6 +117,7 @@ def back(parts, box):
             field.paste(tile, (x, y))
     card.alpha_composite(field, (5, 5))
     card.alpha_composite(parts["back/frame"])
+    card.alpha_composite(parts[f"back/emblem/{box}"], (16,24))
     return card
 
 

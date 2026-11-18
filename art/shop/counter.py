@@ -684,6 +684,12 @@ def export_atlas():
     add("shop/lottery", lottery())
     add("shop/register", register())
     add("shop/sign", sign([]))
+    note=Image.new("RGBA",(42,31))
+    nd=ImageDraw.Draw(note)
+    nd.polygon([(1,3),(38,0),(41,26),(5,30)],fill="#e3d2a8",outline="#5c4a36")
+    text(note,"+10%",21,8,"sans","#7a1a2c","center")
+    nd.line((9,22,33,19),fill="#7a1a2c")
+    add("shop/note/salty",note)
     add("shop/bell", bell(), (12, 17))
     add("shop/counter", counter_top())
     add("shop/case", shelf_case())
@@ -691,6 +697,21 @@ def export_atlas():
     add("shop/box", stock_box(), (60, 59))
     for kind in ("free", "offbrand", "repack", "collector"):
         add(f"shop/pack/{kind}", pack_art(kind))
+    for kind in ("offbrand", "repack", "collector"):
+        wrapper = pack_art(kind)
+        for top in (True,False):
+            half = wrapper.copy()
+            for x in range(half.width):
+                cut = half.height//4 + x%5//2
+                bounds = (x,cut,x+1,half.height) if top else (x,0,x+1,cut)
+                half.paste((0,0,0,0), bounds)
+            add("pack/"+kind+("/top" if top else "/bottom"),half)
+    for i in range(4):
+        scrap = Image.new("RGBA",(8,8))
+        d = ImageDraw.Draw(scrap)
+        d.polygon([(0,2+i),(5,0),(7,3),(4,7)],"#e3d2a8")
+        d.line((2,3,5,1),"#fff0b0")
+        add(f"pack/scrap/{i+1}",scrap)
     for rarity in ("common", "uncommon", "rare"):
         add(f"shop/easel/{rarity}", collectible("", rarity))
     for name, img in scratch_parts.items():

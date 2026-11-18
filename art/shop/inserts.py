@@ -10,7 +10,7 @@ LIGHT = "#fff0b0"
 COLORS = {
     "code": RED, "checklist": "#3a8040", "wishlist": "#7a4ab0", "grail": GOLD,
     "stylo": "#28497a", "broyeuse": "#43342e", "photocopie": "#3e9ab0",
-    "reprint": "#9c7028", "foil": GOLD, "holo": "#9a6ad0", "prism": "#e8501a",
+    "reprint": "#9c7028", "foilwrap": GOLD, "holo": "#9a6ad0", "prism": "#e8501a",
     "tampon": RED, "allumettes": "#a82a38",
 }
 
@@ -34,8 +34,8 @@ def emblem(key):
             d.polygon([(x,y),(x+6,y),(x+9,y+3),(x+9,y+11),(x,y+11)], PAPER, INK)
             d.line((x+2,y+5,x+6,y+5), EDGE)
         d.line((0,10,13,10), c, 2)
-    elif key in ("foil","reprint"):
-        d.polygon([(4,4),(13,5),(10,12),(13,14),(3,14),(1,12)], GOLD if key=="foil" else PAPER, INK)
+    elif key in ("foilwrap","reprint"):
+        d.polygon([(4,4),(13,5),(10,12),(13,14),(3,14),(1,12)], GOLD if key=="foilwrap" else PAPER, INK)
         d.polygon([(2,2),(12,1),(15,3),(14,7),(4,8),(1,6)], c, INK)
         d.line((4,3,12,2), LIGHT)
         d.ellipse((1,2,5,8), "#9c7028", INK)

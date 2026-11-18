@@ -45,12 +45,21 @@ def export_parts():
                             raise ValueError(f"Off-palette pixel in {key}: {(r, g, b, a)}")
                     parts[key] = part
                     slices.append(item)
+    from ephemera import parts as paper_parts
+    for key, im in paper_parts().items():
+        parts[key] = im
+        w,h = im.size
+        centered = key in ("rules/ball","rules/half")
+        frame = dict(frame=0, bounds=dict(x=0,y=0,w=w,h=h), pivot=dict(x=w//2 if centered else 0,y=h//2 if centered else 0))
+        if key == "fx/receipt":
+            frame["center"] = dict(x=4,y=4,w=24,h=20)
+        slices.append(dict(name=key,keys=[frame]))
     return parts, slices, source["meta"]["version"]
 
 
 def pack(parts, slices, version):
     # Pack individual slices. Pivots and nine-slice centers stay local to their sprite.
-    width = 512
+    width = max(512, max(im.width for im in parts.values()))
     x = y = row_height = 0
     for item in sorted(slices, key=lambda s: -parts[s["name"]].height):
         w, h = parts[item["name"]].size

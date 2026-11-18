@@ -113,7 +113,7 @@
     "format": "RGBA8888",
     "size": {
       "w": 278,
-      "h": 644
+      "h": 674
     },
     "scale": "1",
     "slices": [
@@ -1761,6 +1761,104 @@
               "y": 634,
               "w": 10,
               "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "back/emblem/classic",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 40,
+              "y": 634,
+              "w": 32,
+              "h": 40
+            }
+          }
+        ]
+      },
+      {
+        "name": "back/emblem/forge",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 72,
+              "y": 634,
+              "w": 32,
+              "h": 40
+            }
+          }
+        ]
+      },
+      {
+        "name": "back/emblem/suited",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 104,
+              "y": 634,
+              "w": 32,
+              "h": 40
+            }
+          }
+        ]
+      },
+      {
+        "name": "back/emblem/highroller",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 136,
+              "y": 634,
+              "w": 32,
+              "h": 40
+            }
+          }
+        ]
+      },
+      {
+        "name": "back/emblem/bargain",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 168,
+              "y": 634,
+              "w": 32,
+              "h": 40
+            }
+          }
+        ]
+      },
+      {
+        "name": "back/emblem/collector",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 200,
+              "y": 634,
+              "w": 32,
+              "h": 40
+            }
+          }
+        ]
+      },
+      {
+        "name": "back/emblem/standard",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 232,
+              "y": 634,
+              "w": 32,
+              "h": 40
             }
           }
         ]
