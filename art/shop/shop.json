@@ -1,0 +1,601 @@
+{
+ "meta": {
+  "app": "art/shop/counter.py",
+  "slices": [
+   {
+    "name": "bur/body",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 189,
+       "w": 175,
+       "h": 153
+      },
+      "pivot": {
+       "x": -13,
+       "y": -19
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/eyes/down",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 161,
+       "y": 910,
+       "w": 41,
+       "h": 9
+      },
+      "pivot": {
+       "x": -80,
+       "y": -63
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/eyes/you",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 203,
+       "y": 910,
+       "w": 41,
+       "h": 9
+      },
+      "pivot": {
+       "x": -80,
+       "y": -63
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/eyes/shut",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 341,
+       "y": 910,
+       "w": 41,
+       "h": 7
+      },
+      "pivot": {
+       "x": -80,
+       "y": -65
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/brows/grump",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 245,
+       "y": 910,
+       "w": 47,
+       "h": 9
+      },
+      "pivot": {
+       "x": -77,
+       "y": -56
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/brows/raised",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 293,
+       "y": 910,
+       "w": 47,
+       "h": 9
+      },
+      "pivot": {
+       "x": -77,
+       "y": -50
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/stache/grump",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 910,
+       "w": 55,
+       "h": 19
+      },
+      "pivot": {
+       "x": -73,
+       "y": -79
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/stache/puff",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 56,
+       "y": 910,
+       "w": 55,
+       "h": 19
+      },
+      "pivot": {
+       "x": -73,
+       "y": -79
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/cig",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 137,
+       "y": 910,
+       "w": 23,
+       "h": 12
+      },
+      "pivot": {
+       "x": -107,
+       "y": -91
+      }
+     }
+    ]
+   },
+   {
+    "name": "bur/front",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 35,
+       "y": 851,
+       "w": 107,
+       "h": 27
+      },
+      "pivot": {
+       "x": -47,
+       "y": -145
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/wall",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 343,
+       "w": 640,
+       "h": 152
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/window",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 637,
+       "w": 124,
+       "h": 108
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/diamond",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 500,
+       "y": 746,
+       "w": 60,
+       "h": 42
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/stonks",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 146,
+       "y": 746,
+       "w": 124,
+       "h": 92
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/clock",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 851,
+       "w": 34,
+       "h": 34
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/lottery",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 271,
+       "y": 746,
+       "w": 46,
+       "h": 58
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/register",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 318,
+       "y": 746,
+       "w": 84,
+       "h": 58
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/sign",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 403,
+       "y": 746,
+       "w": 96,
+       "h": 52
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/bell",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 112,
+       "y": 910,
+       "w": 24,
+       "h": 18
+      },
+      "pivot": {
+       "x": 12,
+       "y": 17
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/counter",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 886,
+       "w": 640,
+       "h": 23
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/case",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 188
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/glints",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 496,
+       "w": 640,
+       "h": 140
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/pack/free",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 125,
+       "y": 637,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/pack/offbrand",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 198,
+       "y": 637,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/pack/repack",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 271,
+       "y": 637,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/pack/collector",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 344,
+       "y": 637,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/easel/common",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 417,
+       "y": 637,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/easel/uncommon",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 490,
+       "y": 637,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/easel/rare",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 563,
+       "y": 637,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/scratcher",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 0,
+       "y": 746,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/sleeve",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 73,
+       "y": 746,
+       "w": 72,
+       "h": 104
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/vendu",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 143,
+       "y": 851,
+       "w": 58,
+       "h": 26
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "shop/binder",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 561,
+       "y": 746,
+       "w": 52,
+       "h": 40
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   }
+  ]
+ }
+}
