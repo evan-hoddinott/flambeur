@@ -145,7 +145,7 @@ export function evaluateHand(played: Card[]): HandResult {
   else if (rankHandScored) scoring = cards.filter(c => isCrayon(c) || rankWith.ranks.some(r => (rankCounts(c).get(r) ?? 0) > 0))
   else scoring = [top]
 
-  const highest = top.rank
+  const highest = isCrayon(top) ? 14 : top.rank // all crayon: they count as aces
   const mainRanks = FAMILIES[type].includes('rank') ? rankWith.ranks : [highest]
   const rankScored = FAMILIES[type].includes('rank') || bonus.includes(rankWith.type)
   return { type, bonus, scoring, mainRanks, rankRanks: rankScored ? rankWith.ranks : [] }

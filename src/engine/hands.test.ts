@@ -224,6 +224,16 @@ test('crayon fills a straight gap: 5 6 7 _ 9 = (35 + 5+6+7+0+9) × 4 = 248', () 
   assert.equal(a.total, 248)
 })
 
+test('crayon counts as any rank, so its printed 3 never triggers Low Ball: 9 9 + crayon = trips (30 + 9 + 9 + 0) × 3 = 144', () => {
+  const a = withCase([c(9, 'S'), c(9, 'H'), c(3, 'D', { knockoff: { kind: 'crayon' } })], ['low_ball'])
+  assert.equal(a.hand, 'trips')
+  assert.equal(a.total, 144)
+})
+
+test('a lone crayon is a high card that counts as an ace', () => {
+  assert.deepEqual(evaluateHand([c(4, 'D', { knockoff: { kind: 'crayon' } })]).mainRanks, [14])
+})
+
 test('wrong suit ♠ that also counts as ♥ makes a heart flush: (35 + 2+5+7+9+10) × 4 = 272', () => {
   const a = score([c(2, 'H'), c(5, 'H'), c(7, 'H'), c(9, 'H'), c(10, 'S', { knockoff: { kind: 'wrongsuit', suit: 'H' } })])
   assert.equal(a.hand, 'flush')

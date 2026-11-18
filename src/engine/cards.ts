@@ -22,7 +22,7 @@ export type JokerId = 'sticky' | 'double' | 'courtier' | 'catalyst' | 'bluff' | 
 // doesn't play them). ids stay as they were when bluff became poker face
 export const JOKERS: Record<JokerId, { name: string; text: string }> = {
   sticky: { name: 'Sticky Fingers', text: "Win the round with it played: steal a random card from the rival's deck" },
-  double: { name: 'Double or Nothing', text: 'Played by either side: everything the round pays or costs is doubled' },
+  double: { name: 'Double or Nothing', text: 'Everything this round pays or costs ×2' },
   courtier: { name: 'Courtier', text: 'Counts as whichever J, Q or K makes your best hand' },
   catalyst: { name: 'Catalyst', text: 'Flambé with it: the new card comes out one ★ higher' },
   bluff: { name: 'Poker Face', text: 'Played in a round you lose: your Max bet comes back' },
@@ -168,6 +168,17 @@ export function traitName(t: Trait): string {
   if (t.kind === 'split') return `Split/${rankLabel(t.rank)}`
   if (t.kind === 'household') return `Household/${rankLabel(t.pairRank)}`
   return { bridge: 'Bridge', wild: 'Wild Suit', crown: 'Crown' }[t.kind]
+}
+
+// plural rank for display: Ks, 8s, As
+export function rankPlural(rank: number): string {
+  return `${rankLabel(rank)}s`
+}
+
+// a trait's full name on a card: household spells out its full house, "Household (Ks over 8s)"
+export function traitLabel(card: Card, t: Trait): string {
+  if (t.kind === 'household') return `Household (${rankPlural(card.rank)} over ${rankPlural(t.pairRank)})`
+  return traitName(t)
 }
 
 export function cardName(card: Card): string {

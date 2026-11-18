@@ -1,4 +1,4 @@
-import { BULK_VALUE, bestFinish, cardValue, has, type Card, type Finish } from './cards.ts'
+import { BULK_VALUE, bestFinish, cardValue, has, isCrayon, type Card, type Finish } from './cards.ts'
 import { getDef, hasCollectible, type HandCtx, type Owned } from './collectibles.ts'
 import { HAND_BASE, HAND_NAMES, evaluateHand, type HandType } from './hands.ts'
 import { randInt, type Rng } from './rng.ts'
@@ -43,6 +43,21 @@ export type ScoreCtx = {
 export const LEVEL_VALUE = 15
 export const LEVEL_HYPE = 1
 
+// what card modifiers add when the card scores. the glossary reads these too
+export const FOIL_VALUE = 30
+export const HOLO_HYPE = 4
+export const MISPRINT_MAX = 8 // rolls +0 to this
+export const BEER_HYPE = 6
+export const JUMBO_TIMES = 3
+export const TIER_HYPE = [0, 0, 5, 10] // by tier. ★3 also gives +1 grade
+
+// a graded card's bonus: 1–3 is damaged in shipping, 4–9 +grade/3 hype, a 10 is gem mint +1 grade
+export function gradeBonus(grade: number): { hype: number; grade: number } {
+  if (grade <= 3) return { hype: -1, grade: 0 }
+  if (grade <= 9) return { hype: Math.floor(grade / 3), grade: 0 }
+  return { hype: 0, grade: 1 }
+}
+
 // appraisal = value × hype × 2^grade, rounded down. the case triggers left to right and a × multiplies whatever
 // hype has built up so far, so order matters: hand base → each scored card in play order (value, finish, stamps,
 // tier, grade, then each collectible's per-card effect) → bulk → each collectible's per-hand effect
@@ -75,7 +90,7 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
 
   const display = tw === 'sealed' ? [] : ctx.display
   // face cards / the banned suit still make the hand, they just score nothing themselves
-  const blank = (c: Card) => (tw === 'faceless' && c.rank >= 11 && c.rank <= 13) || (tw === 'banwave' && c.suit === ctx.twist?.suit)
+  const blank = (c: Card) => (tw === 'faceless' && !isCrayon(c) && c.rank >= 11 && c.rank <= 13) || (tw === 'banwave' && c.suit === ctx.twist?.suit)
   const signedTimes = hasCollectible(display, 'bis') ? 3 : 2
   const worn: Finish[] = []
   for (const card of hand.scoring) {
@@ -86,24 +101,20 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
     const times = card.stamp === 'signed' ? signedTimes : 1
     const tag = (name: string) => (card.finish === null && finish !== null ? `Sticker ${name}` : name)
     for (let t = 0; t < times; t++) {
-      add(card.variant === 'jumbo' ? 'Jumbo' : 'card', card.id, null, { value: cardValue(card) * (card.variant === 'jumbo' ? 3 : 1) })
-      if (finish === 'foil') add(tag('Foil'), card.id, null, { value: 30 })
-      if (finish === 'holo') add(tag('Holo'), card.id, null, { hype: 4 })
+      add(card.variant === 'jumbo' ? 'Jumbo' : 'card', card.id, null, { value: cardValue(card) * (card.variant === 'jumbo' ? JUMBO_TIMES : 1) })
+      if (finish === 'foil') add(tag('Foil'), card.id, null, { value: FOIL_VALUE })
+      if (finish === 'holo') add(tag('Holo'), card.id, null, { hype: HOLO_HYPE })
       if (finish === 'prism') add(tag('Prism'), card.id, null, { grade: 1 })
-      if (finish === 'misprint') add(tag('Misprint'), card.id, null, { hype: ctx.rng ? randInt(ctx.rng, 0, 8) : 4 })
+      if (finish === 'misprint') add(tag('Misprint'), card.id, null, { hype: ctx.rng ? randInt(ctx.rng, 0, MISPRINT_MAX) : MISPRINT_MAX / 2 })
       if (card.stamp === 'first') add('1st Edition', card.id, null, { hype: 1 + card.bonusHype })
       if (card.stamp === 'damaged') add('Damaged', card.id, null, { grade: 1 })
       if (card.knockoff?.kind === 'marked') add('Marked', card.id, null, { grade: 1 })
-      if (card.knockoff?.kind === 'beer') add('Beer-stained', card.id, null, { hype: 6 })
+      if (card.knockoff?.kind === 'beer') add('Beer-stained', card.id, null, { hype: BEER_HYPE })
       // forge tiers: ★2 +5 hype, ★3 +10 hype and +1 grade. crown is a permanent +1 grade
-      if (card.tier === 2) add('★★', card.id, null, { hype: 5 })
-      if (card.tier >= 3) add('★★★', card.id, null, { hype: 10, grade: 1 })
+      if (card.tier === 2) add('★★', card.id, null, { hype: TIER_HYPE[2] })
+      if (card.tier >= 3) add('★★★', card.id, null, { hype: TIER_HYPE[3], grade: 1 })
       if (has(card, 'crown')) add('Crown', card.id, null, { grade: 1 })
-      if (card.grade !== null) {
-        if (card.grade <= 3) add(`Grade ${card.grade}`, card.id, null, { hype: -1 })
-        else if (card.grade <= 9) add(`Grade ${card.grade}`, card.id, null, { hype: Math.floor(card.grade / 3) })
-        else add('Gem Mint', card.id, null, { grade: 1 })
-      }
+      if (card.grade !== null) add(card.grade === 10 ? 'Gem Mint' : `Grade ${card.grade}`, card.id, null, gradeBonus(card.grade))
       display.forEach((owned, slot) => {
         const d = getDef(owned.id).onCard?.(card, owned.param)
         if (d) add(getDef(owned.id).name, card.id, slot, d)

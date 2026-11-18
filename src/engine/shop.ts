@@ -250,7 +250,7 @@ export function newShop(rng: Rng, mem: ShopMemory, owned: Owned[], kind: ShopKin
   return { kind, offers: adjust(offers, priceAdj), restocks: 0 }
 }
 
-// $1, $2, $3... free = how many restocks this shop cost nothing (store credit, pochette restock)
+// $1, $2, $3... free = how many restocks this shop cost nothing (pochette restock, a grumpy keeper)
 export function restockPrice(shop: Shop, free: number): number {
   return Math.max(0, shop.restocks + 1 - free)
 }

@@ -61,6 +61,7 @@ export const HOUSE_BONUS = 2 // the round winner, × ante
 export const KO_BONUS = 1 // winning by knockout, × ante
 export const MOMENTUM_MAX = 2 // at the boss: +1× ante per round won earlier this table, max +2
 export const SKIP_BONUS = 2 // busting a solo rival: × ante for every round of its table you skip
+export const TEAR_CHANCE = 0.25 // a damaged card that scores tears for good
 export const GOLD_BORDER = 3 // once per round, a gold border played in any hand: +$3 if you win the round, −$3 if you lose
 
 // +$1 per $10 held, max +$2 (Deep Pockets pochette: +$4)

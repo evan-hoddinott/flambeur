@@ -16,14 +16,14 @@ import { sleeveOffer, stonksFor, stonksMult, type SleeveId, type Stonks } from '
 import { cleanup, deckSize, draw, pileView, refill, removeFromHand, shuffleDeck, shuffleIn, toDiscard, type Piles } from './deck.ts'
 import { buildRival, getRival, rivalOrder, type RivalId } from './rivals.ts'
 import {
-  BULK_BIN_PRICE, COLLECTIBLE_PRICE, GOLD_BORDER, HAND_SIZE, HANDS_PER_ROUND, HOUSE_BONUS, HOUSE_FLAT, KO_BONUS, MOMENTUM_MAX, PLAY_SIZE,
+  BULK_BIN_PRICE, COLLECTIBLE_PRICE, GOLD_BORDER, TEAR_CHANCE, HAND_SIZE, HANDS_PER_ROUND, HOUSE_BONUS, HOUSE_FLAT, KO_BONUS, MOMENTUM_MAX, PLAY_SIZE,
   RIVAL_STACKS, ROUNDS, ROUNDS_PER_TABLE, SHIPPERS, SKIP_BONUS, SLEEVE_SLOTS, SPOILS_CARDS, SPOILS_SKIP, TOURNAMENT_ROUNDS, WINS_NEEDED,
   blinds, interest, isTableStart, knockoutAt, markerFor, tableOf, type Shipper,
 } from './economy.ts'
 import { chance, makeRng, pick, randInt, shuffled, type Rng } from './rng.ts'
 
 // bump on any rule or rng change. a log only replays on its own version
-export const ENGINE_VERSION = '2.0.1'
+export const ENGINE_VERSION = '2.0.2'
 
 // ---------- types the server and ui build against ----------
 
@@ -64,6 +64,7 @@ export type LogEntry = { seat: SeatId; action: Action; auto?: boolean } // auto 
 export type ShopOfferView = ShopOffer
 
 export type ShopView = {
+  rolledOver: boolean
   kind: ShopKind
   offers: ShopOfferView[]
   restockPrice: number
@@ -436,7 +437,7 @@ export function bulkPrice(p: Player): number {
 }
 
 export function freeRestocks(m: Match, p: Player): number {
-  return (hasCollectible(p.display, 'store_credit') ? 1 : 0) + (p.sleeves.includes('restock') ? 1 : 0) + (m.keeper.includes('grumpy') ? 1 : 0)
+  return (p.sleeves.includes('restock') ? 1 : 0) + (m.keeper.includes('grumpy') ? 1 : 0)
 }
 
 // +3 pulled this round, +2 last round, +1 two rounds ago. the starting deck is never fresh
@@ -1292,7 +1293,7 @@ function playOut(p: Player, played: Card[], scoringIds: number[], jokers: JokerI
   for (const card of played) {
     if (!scoringIds.includes(card.id) || card.bulk) continue
     if (card.stamp === 'first') card.bonusHype++
-    if (card.stamp === 'damaged' && !p.sleeves.includes('archival') && chance(p.rng.table, 0.25)) {
+    if (card.stamp === 'damaged' && !p.sleeves.includes('archival') && chance(p.rng.table, TEAR_CHANCE)) {
       torn.push(card.id)
       p.made.torn.push(card)
     }
@@ -1397,10 +1398,11 @@ function settlePair(m: Match, pair: Pair, results: Map<SeatId, SeatResult>, doub
   const delta = settle(b, winner, keepMax)
   if (winner !== null) {
     const loser = other(winner)
-    // double down: the house matches the pot
-    if (twistFor(m)?.id === 'doubledown') delta[winner] += b.stake
+    const double = plays(0, 'double') || plays(1, 'double')
+    // double down: the house matches the pot (twice with double or nothing)
+    if (twistFor(m)?.id === 'doubledown') delta[winner] += b.stake * (double ? 2 : 1)
     // double or nothing (either side played it): the loser pays again as far as their bankroll goes, the house doubles its share
-    if (plays(0, 'double') || plays(1, 'double')) {
+    if (double) {
       for (const s of pair.seats) doubled.add(s)
       const extra = Math.min(-delta[loser], ps[loser].bankroll + delta[loser])
       delta[loser] -= extra
@@ -1444,7 +1446,7 @@ function settlePair(m: Match, pair: Pair, results: Map<SeatId, SeatResult>, doub
 }
 
 // house: +$2 to everyone who played, the winner 2× ante, +1× for a knockout, momentum at the boss. interest on top
-// x = 2 when double or nothing was played: everything the round pays is doubled (interest isn't the round's)
+// x = 2 when double or nothing was played: everything the round pays is doubled (interest isn't the round's, it's on what you hold)
 function payIncome(m: Match, p: Player, r: SeatResult, x: number): void {
   const at = pairOf(m, p.seat)
   if (at) {
@@ -1453,7 +1455,7 @@ function payIncome(m: Match, p: Player, r: SeatResult, x: number): void {
     r.tally.house = x * (HOUSE_FLAT + (win ? HOUSE_BONUS * ante : 0))
     r.tally.ko = win && r.ko ? x * KO_BONUS * ante : 0
     r.tally.momentum = win && isTournament(m.round) ? x * Math.min(MOMENTUM_MAX, p.tableWins) * ante : 0
-    const sticker = win && hasCollectible(p.display, 'price_sticker') ? 1 : 0
+    const sticker = win && hasCollectible(p.display, 'price_sticker') ? x : 0
     r.tally.extras += sticker
     p.bankroll += r.tally.house + r.tally.ko + r.tally.momentum + sticker
     if (win) p.tableWins++
@@ -1758,6 +1760,7 @@ export function view(m: Match, s: SeatId): SeatView {
       starter: p.starter,
       draft: p.draft,
       shop: shop ? {
+        rolledOver: p.mem.rolledOver,
         kind: shop.kind,
         offers: shop.offers,
         restockPrice: restockPrice(shop, freeRestocks(m, p)),

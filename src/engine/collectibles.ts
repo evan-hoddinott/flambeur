@@ -29,7 +29,7 @@ export type CollectibleDef = {
   text: string // {S} and {R} get the rolled param
   roll?: 'suit' | 'rank'
   payoff?: true // a lane's rare × payoff. the big shop always offers one
-  // per scored card, every time it scores
+  // per scored card, every time it scores. a crayon's printed rank means nothing, so rank triggers skip it
   onCard?: (card: Card, param: string | null) => Partial<Delta> | null
   // once per hand, after the cards
   onHand?: (ctx: HandCtx, param: string | null) => Partial<Delta> | null
@@ -63,11 +63,11 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   { id: 'color_binder', name: 'Color-Sorted Binder', rarity: 'common', text: 'Flush: +10 Hype', onHand: c => (handIs('flush')(c) ? { hype: 10 } : null) },
   { id: 'draft_chaff', name: 'Draft Chaff', rarity: 'common', text: 'High Card: +60 Value', onHand: c => (handIs('high')(c) ? { value: 60 } : null) },
   // ranks and suits
-  { id: 'low_ball', name: 'Low Ball', rarity: 'common', text: 'Each scored 2–5: +20 Value', onCard: c => (c.rank <= 5 ? { value: 20 } : null) },
-  { id: 'odd_lot', name: 'Odd Lot', rarity: 'common', text: 'Each scored A,3,5,7,9: +3 Hype', onCard: c => ([14, 3, 5, 7, 9].includes(c.rank) ? { hype: 3 } : null) },
-  { id: 'even_stack', name: 'Even Stack', rarity: 'common', text: 'Each scored 2,4,6,8,10: +20 Value', onCard: c => (c.rank <= 10 && c.rank % 2 === 0 ? { value: 20 } : null) },
+  { id: 'low_ball', name: 'Low Ball', rarity: 'common', text: 'Each scored 2–5: +20 Value', onCard: c => (!isCrayon(c) && c.rank <= 5 ? { value: 20 } : null) },
+  { id: 'odd_lot', name: 'Odd Lot', rarity: 'common', text: 'Each scored A,3,5,7,9: +3 Hype', onCard: c => (!isCrayon(c) && [14, 3, 5, 7, 9].includes(c.rank) ? { hype: 3 } : null) },
+  { id: 'even_stack', name: 'Even Stack', rarity: 'common', text: 'Each scored 2,4,6,8,10: +20 Value', onCard: c => (!isCrayon(c) && c.rank <= 10 && c.rank % 2 === 0 ? { value: 20 } : null) },
   { id: 'playmat', name: 'Playmat', rarity: 'common', text: 'Each scored {S}: +3 Hype', roll: 'suit', onCard: (c, s) => (isWild(c) || c.suit === s ? { hype: 3 } : null) },
-  { id: 'face_binder', name: 'Face Binder', rarity: 'uncommon', text: 'Each scored J/Q/K: +5 Hype', onCard: c => (c.rank >= 11 && c.rank <= 13 ? { hype: 5 } : null) },
+  { id: 'face_binder', name: 'Face Binder', rarity: 'uncommon', text: 'Each scored J/Q/K: +5 Hype', onCard: c => (!isCrayon(c) && c.rank >= 11 && c.rank <= 13 ? { hype: 5 } : null) },
   {
     id: 'suit_sorter', name: 'Suit Sorter', rarity: 'uncommon', text: '+1 Grade if you played all 4 suits',
     onHand: c => (new Set(c.played.filter(p => !isWild(p)).map(p => p.suit)).size + c.played.filter(isWild).length >= 4 ? { grade: 1 } : null),
@@ -79,7 +79,6 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   { id: 'tournament_badge', name: 'Tournament Badge', rarity: 'uncommon', text: '+15 Hype if you bet Max', onHand: c => (c.betMax ? { hype: 15 } : null) },
   { id: 'deck_box', name: 'Deck Box', rarity: 'common', text: 'Draw 9 cards instead of 8' },
   { id: 'price_sticker', name: 'Price Sticker', rarity: 'common', text: '+$1 every round you win' },
-  { id: 'store_credit', name: 'Store Credit', rarity: 'common', text: 'First restock each shop is free' },
   // forging and combos
   { id: 'combo_platter', name: 'Combo Platter', rarity: 'uncommon', text: '+10 Hype per bonus hand', onHand: c => (c.hand.bonus.length ? { hype: 10 * c.hand.bonus.length } : null) },
   { id: 'specialist', name: 'Specialist', rarity: 'uncommon', text: '+15 Hype if you scored no bonus hands', onHand: c => (c.hand.bonus.length === 0 ? { hype: 15 } : null) },
@@ -96,7 +95,7 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
     },
   },
   // rares
-  { id: 'psa_slab', name: 'PSA 10 Slab', rarity: 'rare', text: '+1 Grade if 2+ scored cards are {R}', roll: 'rank', onHand: (c, r) => (c.hand.scoring.filter(x => String(x.rank) === r).length >= 2 ? { grade: 1 } : null) },
+  { id: 'psa_slab', name: 'PSA 10 Slab', rarity: 'rare', text: '+1 Grade if 2+ scored cards are {R}', roll: 'rank', onHand: (c, r) => (c.hand.scoring.filter(x => !isCrayon(x) && String(x.rank) === r).length >= 2 ? { grade: 1 } : null) },
   { id: 'thin_binder', name: 'Thin Binder', rarity: 'rare', text: '+1 Grade if your deck has 18 or fewer cards', onHand: c => (c.deckSize <= 18 ? { grade: 1 } : null) },
   { id: 'high_roller', name: 'High Roller', rarity: 'rare', text: '+1 Grade and +10 Hype while bankroll is under 3× the ante', onHand: c => (c.bankroll < 3 * c.ante ? { grade: 1, hype: 10 } : null) },
   // bulk feeder
@@ -108,7 +107,7 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
     onHand: c => (hands(c).some(h => h === 'flush' || h === 'straightflush' || h === 'royalflush') && c.worn.includes('holo') ? { xhype: 2 } : null),
   },
   { id: 'flamme_bleue', name: 'Flamme Bleue', rarity: 'rare', payoff: true, text: 'Each scored flambéed card: ×1.5 Hype', onCard: c => (isForged(c) ? { xhype: 1.5 } : null) },
-  { id: 'vitrine', name: 'Vitrine', rarity: 'rare', payoff: true, text: '×1 Hype per different Finish scored', onHand: c => (new Set(c.worn).size > 1 ? { xhype: new Set(c.worn).size } : null) },
+  { id: 'vitrine', name: "L'Écrin", rarity: 'rare', payoff: true, text: '×1 Hype per different Finish scored', onHand: c => (new Set(c.worn).size > 1 ? { xhype: new Set(c.worn).size } : null) },
   { id: 'petite_monnaie', name: 'Petite Monnaie', rarity: 'rare', payoff: true, text: 'Each scored 2–6: ×1.25 Hype', onCard: c => (!isCrayon(c) && c.rank <= 6 ? { xhype: 1.25 } : null) },
   { id: 'ferrailleur', name: 'Le Ferrailleur', rarity: 'rare', payoff: true, text: 'Each Bulk played: ×1.5 Hype', onHand: c => times(1.5, c.bulk) },
   { id: 'le_flambeur', name: 'Le Flambeur', rarity: 'rare', payoff: true, text: '×Hype: 1, +1 per $20 you hold', onHand: c => (c.bankroll >= 20 ? { xhype: 1 + Math.floor(c.bankroll / 20) } : null) },
