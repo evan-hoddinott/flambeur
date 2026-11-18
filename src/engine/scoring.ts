@@ -1,4 +1,4 @@
-import { BULK_VALUE, cardValue, has, type Card } from './cards.ts'
+import { BULK_VALUE, bestFinish, cardValue, has, type Card } from './cards.ts'
 import { getDef, type HandCtx, type Owned } from './collectibles.ts'
 import { HAND_BASE, HAND_NAMES, evaluateHand, type HandType } from './hands.ts'
 import { randInt, type Rng } from './rng.ts'
@@ -75,14 +75,19 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
   for (const card of hand.scoring) {
     if (blank(card)) continue
     const times = card.stamp === 'signed' ? 2 : 1
+    // a sticker wears the best finish of the other cards played with it
+    const finish = card.finish ?? (card.variant === 'sticker' ? bestFinish(played.filter(c => c.id !== card.id)) : null)
+    const tag = (name: string) => (card.finish === null && finish !== null ? `Sticker ${name}` : name)
     for (let t = 0; t < times; t++) {
-      add('card', card.id, null, { value: cardValue(card) })
-      if (card.finish === 'foil') add('Foil', card.id, null, { value: 30 })
-      if (card.finish === 'holo') add('Holo', card.id, null, { hype: 4 })
-      if (card.finish === 'prism') add('Prism', card.id, null, { grade: 1 })
-      if (card.finish === 'misprint') add('Misprint', card.id, null, { hype: ctx.rng ? randInt(ctx.rng, 0, 8) : 4 })
+      add(card.variant === 'jumbo' ? 'Jumbo' : 'card', card.id, null, { value: cardValue(card) * (card.variant === 'jumbo' ? 3 : 1) })
+      if (finish === 'foil') add(tag('Foil'), card.id, null, { value: 30 })
+      if (finish === 'holo') add(tag('Holo'), card.id, null, { hype: 4 })
+      if (finish === 'prism') add(tag('Prism'), card.id, null, { grade: 1 })
+      if (finish === 'misprint') add(tag('Misprint'), card.id, null, { hype: ctx.rng ? randInt(ctx.rng, 0, 8) : 4 })
       if (card.stamp === 'first') add('1st Edition', card.id, null, { hype: 1 + card.bonusHype })
       if (card.stamp === 'damaged') add('Damaged', card.id, null, { grade: 1 })
+      if (card.knockoff?.kind === 'marked') add('Marked', card.id, null, { grade: 1 })
+      if (card.knockoff?.kind === 'beer') add('Beer-stained', card.id, null, { hype: 6 })
       // forge tiers: ★2 +5 hype, ★3 +10 hype and +1 grade. crown is a permanent +1 grade
       if (card.tier === 2) add('★★', card.id, null, { hype: 5 })
       if (card.tier >= 3) add('★★★', card.id, null, { hype: 10, grade: 1 })

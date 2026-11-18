@@ -1,4 +1,4 @@
-import { isBridge, isWild, rankCounts, type Card } from './cards.ts'
+import { SUITS, isBridge, isCrayon, isWild, rankCounts, suitsOf, type Card } from './cards.ts'
 
 export const HAND_TYPES = [
   'high', 'pair', 'twopair', 'trips', 'straight', 'flush', 'fullhouse', 'quads', 'straightflush', 'royalflush',
@@ -60,11 +60,18 @@ type RankHand = { type: HandType; ranks: number[] }
 
 function rankHand(cards: Card[], useTraits: boolean): RankHand {
   const totals = new Map<number, number>()
+  let crayons = 0
   for (const c of cards) {
-    for (const [rank, n] of rankCounts(c, useTraits)) totals.set(rank, (totals.get(rank) ?? 0) + n)
+    if (isCrayon(c)) crayons++
+    else for (const [rank, n] of rankCounts(c, useTraits)) totals.set(rank, (totals.get(rank) ?? 0) + n)
   }
   // biggest group first, ties broken by higher rank
   const groups = [...totals.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])
+  // crayons are any rank, and joining the biggest group always makes the best rank hand. all crayon = aces
+  if (crayons > 0) {
+    if (groups.length === 0) groups.push([14, 0])
+    groups[0][1] += crayons
+  }
   const [top, second] = groups
   if (top[1] >= 4) return { type: 'quads', ranks: [top[0]] }
   if (top[1] >= 3 && second && second[1] >= 2) return { type: 'fullhouse', ranks: [top[0], second[0]] }
@@ -77,14 +84,15 @@ function rankHand(cards: Card[], useTraits: boolean): RankHand {
 function isFlush(cards: Card[], useTraits: boolean): boolean {
   if (cards.length < 5) return false
   const fixed = useTraits ? cards.filter(c => !isWild(c)) : cards
-  return fixed.every(c => c.suit === fixed[0]?.suit)
+  return fixed.length === 0 || SUITS.some(s => fixed.every(c => suitsOf(c).includes(s)))
 }
 
 // returns the top rank of the best straight, or null. needs exactly 5 cards.
 // bridge cards fill any missing rank. A can be low (A2345, top = 5)
 function straightTop(cards: Card[], useTraits: boolean): number | null {
   if (cards.length !== 5) return null
-  const fixed = useTraits ? cards.filter(c => !isBridge(c)) : cards
+  // crayons fill a gap like a bridge, traits or not
+  const fixed = cards.filter(c => !isCrayon(c) && !(useTraits && isBridge(c)))
   const ranks = fixed.map(c => c.rank)
   if (new Set(ranks).size !== ranks.length) return null // a repeated rank can't be in a straight
   for (let top = 14; top >= 5; top--) {
@@ -129,12 +137,15 @@ export function evaluateHand(played: Card[]): HandResult {
   // which cards score: straights/flushes use all five, rank hands use the cards of those ranks
   const usesAll = [type, ...bonus].some(h => FAMILIES[h].includes('run') || FAMILIES[h].includes('suit'))
   const rankHandScored = FAMILIES[type].includes('rank') || bonus.some(h => FAMILIES[h].includes('rank'))
+  // a crayon's printed rank means nothing, so it never counts as the high card
+  const printed = cards.some(c => !isCrayon(c)) ? cards.filter(c => !isCrayon(c)) : cards
+  const top = printed.reduce((best, c) => (c.rank > best.rank ? c : best))
   let scoring: Card[]
   if (usesAll) scoring = cards
-  else if (rankHandScored) scoring = cards.filter(c => rankWith.ranks.some(r => (rankCounts(c).get(r) ?? 0) > 0))
-  else scoring = [cards.reduce((best, c) => (c.rank > best.rank ? c : best))]
+  else if (rankHandScored) scoring = cards.filter(c => isCrayon(c) || rankWith.ranks.some(r => (rankCounts(c).get(r) ?? 0) > 0))
+  else scoring = [top]
 
-  const highest = cards.reduce((best, c) => (c.rank > best.rank ? c : best)).rank
+  const highest = top.rank
   const mainRanks = FAMILIES[type].includes('rank') ? rankWith.ranks : [highest]
   const rankScored = FAMILIES[type].includes('rank') || bonus.includes(rankWith.type)
   return { type, bonus, scoring, mainRanks, rankRanks: rankScored ? rankWith.ranks : [] }

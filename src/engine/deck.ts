@@ -1,7 +1,7 @@
 // tables: the 9 rounds are 3 tables (1-3, 4-6, 7-9). the deck only shuffles at the start of a table.
 // every round you're dealt a fresh hand. played cards go to the discard until the next table,
 // unplayed ones go back into the pile. folding mucks the whole hand
-import type { Card, Suit } from './cards.ts'
+import { stuckMate, type Card, type Suit } from './cards.ts'
 import { randInt, shuffled, type Rng } from './rng.ts'
 
 export type Piles = {
@@ -29,7 +29,18 @@ export function startTable(p: Piles, rng: Rng): void {
 export function dealFresh(p: Piles, size: number): Card[] {
   if (p.hand.length > 0) throw new Error('dealing on top of a hand that was never cleaned up')
   p.hand = p.pile.splice(0, Math.max(0, size))
+  pullStuck(p)
   return p.hand
+}
+
+// beer-stained pairs are drawn together: half a pair in hand pulls the other half off the pile, even past hand size
+function pullStuck(p: Piles): void {
+  for (let i = 0; i < p.hand.length; i++) {
+    const mate = stuckMate(p.hand[i], p.pile)
+    if (!mate) continue
+    p.pile.splice(p.pile.indexOf(mate), 1)
+    p.hand.push(mate)
+  }
 }
 
 // throw back any number, redraw one fewer (free = redraw them all). the redraw comes off the top first,
@@ -41,6 +52,7 @@ export function mulliganHand(p: Piles, tossIds: number[], rng: Rng, free: boolea
   p.hand = p.hand.filter(c => !toss.has(c.id))
   const drawn = p.pile.splice(0, free ? tossed.length : tossed.length - 1)
   p.hand.push(...drawn)
+  pullStuck(p)
   for (const c of tossed) shuffleIn(p, c, rng)
   return drawn
 }
@@ -74,7 +86,7 @@ export function takeOut(p: Piles, id: number): Card {
 
 // what's left in a pile, for the deck viewer. sorted high to low, bulk last
 export function pileView(cards: Card[]): { cards: Card[]; byRank: Map<number, number>; bySuit: Map<Suit, number>; bulk: number } {
-  const sorted = cards.slice().sort((a, b) => Number(a.bulk) - Number(b.bulk) || b.rank - a.rank || a.suit.localeCompare(b.suit))
+  const sorted = cards.slice().sort((a, b) => Number(a.bulk) - Number(b.bulk) || b.rank - a.rank || a.suit.localeCompare(b.suit) || a.id - b.id)
   const byRank = new Map<number, number>()
   const bySuit = new Map<Suit, number>()
   let bulk = 0

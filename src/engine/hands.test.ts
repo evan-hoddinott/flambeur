@@ -7,7 +7,8 @@ import { appraise, emptyLevels } from './scoring.ts'
 import { autoKeep, buildForged, forgePlan, grindOnFold } from './forge.ts'
 import { starterOffer } from './starters.ts'
 
-const c = (rank: number, suit: Suit, extra: Partial<Card> = {}) => newCard(rank, suit, extra)
+const ids = { nextCardId: 1 }
+const c = (rank: number, suit: Suit, extra: Partial<Card> = {}) => newCard(ids, rank, suit, extra)
 const forged = (rank: number, suit: Suit, tier: number, traits: Trait[], extra: Partial<Card> = {}) => c(rank, suit, { tier, traits, ...extra })
 const score = (cards: Card[]) =>
   appraise(cards, { levels: emptyLevels(), display: [], displaySlots: 5, deckSize: 52, bankroll: 20, ante: 2, betMax: false, twist: null, rng: null })
@@ -157,7 +158,7 @@ test('picked traits still forge after the plan is rebuilt (chooser → finishRou
   const first = forgePlan(hand)
   const second = forgePlan(hand)
   assert.ok(first && second)
-  assert.doesNotThrow(() => buildForged(second, autoKeep(first), 1))
+  assert.doesNotThrow(() => buildForged(second, autoKeep(first), 1, ids))
 })
 
 test('folding grinds the highest card in place, keeping stamp and grade', () => {
@@ -181,6 +182,48 @@ test('two Splits with different ranks both stay as candidates', () => {
   assert.ok(p)
   const splits = p.candidates.filter(t => t.kind === 'split').map(t => (t as { rank: number }).rank).sort((a, b) => a - b)
   assert.deepEqual(splits, [4, 7, 9])
+})
+
+test('crayon joins the pair: 9 9 + crayon is trips, (30 + 9 + 9 + 0) × 3 = 144', () => {
+  const a = score([c(9, 'S'), c(9, 'H'), c(5, 'D', { knockoff: { kind: 'crayon' } }), c(2, 'C'), c(4, 'S')])
+  assert.equal(a.hand, 'trips')
+  assert.equal(a.total, 144)
+})
+
+test('crayon turns two pair into a full house: (45 + 10+10+7+7+0) × 4 = 316', () => {
+  const a = score([c(13, 'S'), c(13, 'H'), c(7, 'D'), c(7, 'C'), c(2, 'S', { knockoff: { kind: 'crayon' } })])
+  assert.equal(a.hand, 'fullhouse')
+  assert.equal(a.total, 316)
+})
+
+test('crayon fills a straight gap: 5 6 7 _ 9 = (35 + 5+6+7+0+9) × 4 = 248', () => {
+  const a = score([c(5, 'S'), c(6, 'H'), c(7, 'D'), c(9, 'C'), c(2, 'S', { knockoff: { kind: 'crayon' } })])
+  assert.equal(a.hand, 'straight')
+  assert.deepEqual(a.bonus, [])
+  assert.equal(a.total, 248)
+})
+
+test('wrong suit ♠ that also counts as ♥ makes a heart flush: (35 + 2+5+7+9+10) × 4 = 272', () => {
+  const a = score([c(2, 'H'), c(5, 'H'), c(7, 'H'), c(9, 'H'), c(10, 'S', { knockoff: { kind: 'wrongsuit', suit: 'H' } })])
+  assert.equal(a.hand, 'flush')
+  assert.equal(a.total, 272)
+})
+
+test('marked king: pair of kings 60 × 2^1 = 120. beer-stained king: 30 × (2 + 6) = 240', () => {
+  assert.equal(score([c(13, 'S', { knockoff: { kind: 'marked' } }), c(13, 'H'), c(2, 'D'), c(5, 'C'), c(9, 'S')]).total, 120)
+  assert.equal(score([c(13, 'S', { knockoff: { kind: 'beer', stuckTo: 999 } }), c(13, 'H'), c(2, 'D'), c(5, 'C'), c(9, 'S')]).total, 240)
+})
+
+test('jumbo 9 scores its value 3×: pair of 9s = (10 + 27 + 9) × 2 = 92', () => {
+  assert.equal(score([c(9, 'S', { variant: 'jumbo' }), c(9, 'H'), c(2, 'D'), c(5, 'C')]).total, 92)
+})
+
+test('sticker K next to a foil K wears foil too: (10 + 10+30 + 10+30) × 2 = 180', () => {
+  assert.equal(score([c(13, 'S', { variant: 'sticker' }), c(13, 'H', { finish: 'foil' }), c(2, 'D'), c(5, 'C'), c(9, 'S')]).total, 180)
+})
+
+test('sticker copies the best finish played, even off a non-scoring card: prism beats holo, 30 × (2+4) × 2^1 = 360', () => {
+  assert.equal(score([c(13, 'S', { variant: 'sticker' }), c(13, 'H', { finish: 'holo' }), c(9, 'D', { finish: 'prism' }), c(2, 'C'), c(5, 'S')]).total, 360)
 })
 
 test('starter box offer is 3 different decks and the same for the same seed', () => {

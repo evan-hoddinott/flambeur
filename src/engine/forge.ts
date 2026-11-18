@@ -1,4 +1,4 @@
-import { MAX_TIER, bestFinish, newBulk, newCard, type Card, type Trait } from './cards.ts'
+import { MAX_TIER, bestFinish, newBulk, newCard, type Card, type Ids, type Trait } from './cards.ts'
 import { evaluateHand, type HandType } from './hands.ts'
 
 // forging folds the hand and merges every card that scored into one card.
@@ -86,20 +86,20 @@ export function autoKeep(plan: ForgePlan): Trait[] {
 }
 
 // the forged card plus one bulk for every card eaten beyond the first, so forging never shrinks the deck
-export function buildForged(plan: ForgePlan, keep: Trait[], round: number): { forged: Card; bulk: Card[] } {
+export function buildForged(plan: ForgePlan, keep: Trait[], round: number, ids: Ids): { forged: Card; bulk: Card[] } {
   if (keep.length > plan.tier) {
     throw new Error(`keeping ${keep.length} traits on a ★${plan.tier} card`)
   }
   const offered = new Set(plan.candidates.map(t => JSON.stringify(t)))
   for (const t of keep) if (!offered.has(JSON.stringify(t))) throw new Error('keeping a trait the plan never offered')
-  const forged = newCard(plan.rank, plan.suit, {
+  const forged = newCard(ids, plan.rank, plan.suit, {
     tier: plan.tier,
     traits: keep,
     grind: plan.grind,
     finish: bestFinish(plan.merged),
     pulledRound: round,
   })
-  const bulk = plan.merged.slice(1).map(() => newBulk(round))
+  const bulk = plan.merged.slice(1).map(() => newBulk(ids, round))
   return { forged, bulk }
 }
 

@@ -1,6 +1,6 @@
 import { SUITS, SUIT_GLYPH, isForged, isWild, type Card, type Suit } from './cards.ts'
 import type { HandResult, HandType } from './hands.ts'
-import { pick, type Rng } from './rng.ts'
+import { next, pick, type Rng } from './rng.ts'
 
 export type Rarity = 'common' | 'uncommon' | 'rare'
 
@@ -57,7 +57,7 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   // collection
   { id: 'team_bag', name: 'Team Bag', rarity: 'uncommon', text: '+3 Hype per empty display slot', onHand: c => (c.emptySlots > 0 ? { hype: 3 * c.emptySlots } : null) },
   { id: 'black_light', name: 'Black Light', rarity: 'uncommon', text: '+1 Grade if 3+ scored cards have a Finish', onHand: c => (c.hand.scoring.filter(x => x.finish).length >= 3 ? { grade: 1 } : null) },
-  { id: 'card_sleeves', name: "Smith's Apron", rarity: 'uncommon', text: '+1 Grade if you played a forged card', onHand: c => (c.played.some(isForged) ? { grade: 1 } : null) },
+  { id: 'card_sleeves', name: "Chef's Apron", rarity: 'uncommon', text: '+1 Grade if you played a flambéed card', onHand: c => (c.played.some(isForged) ? { grade: 1 } : null) },
   { id: 'tournament_badge', name: 'Tournament Badge', rarity: 'uncommon', text: '+15 Hype if you bet Max', onHand: c => (c.betMax ? { hype: 15 } : null) },
   { id: 'deck_box', name: 'Deck Box', rarity: 'common', text: 'Draw 9 cards instead of 8' },
   { id: 'price_sticker', name: 'Price Sticker', rarity: 'common', text: '+$1 every round you win' },
@@ -65,7 +65,7 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   // forging and combos
   { id: 'combo_platter', name: 'Combo Platter', rarity: 'uncommon', text: '+10 Hype per bonus hand', onHand: c => (c.hand.bonus.length ? { hype: 10 * c.hand.bonus.length } : null) },
   { id: 'specialist', name: 'Specialist', rarity: 'uncommon', text: '+15 Hype if you scored no bonus hands', onHand: c => (c.hand.bonus.length === 0 ? { hype: 15 } : null) },
-  { id: 'forge_hammer', name: 'Forge Hammer', rarity: 'uncommon', text: 'Each scored forged card: +20 Value', onCard: c => (isForged(c) ? { value: 20 } : null) },
+  { id: 'forge_hammer', name: 'Chalumeau', rarity: 'uncommon', text: 'Each scored flambéed card: +20 Value', onCard: c => (isForged(c) ? { value: 20 } : null) },
   { id: 'participation_trophy', name: 'Participation Trophy', rarity: 'common', text: 'Grind bonuses are ×10', onCard: c => (c.grind > 0 ? { value: 9 * c.grind } : null) },
   {
     id: 'triple_threat', name: 'Triple Threat', rarity: 'rare', text: '+1 Grade if the hand scores a rank hand, a straight and a flush',
@@ -93,7 +93,7 @@ export function getDef(id: string): CollectibleDef {
 
 export function rollParam(def: CollectibleDef, rng: Rng): string | null {
   if (def.roll === 'suit') return pick(rng, SUITS)
-  if (def.roll === 'rank') return String(2 + Math.floor(rng() * 13))
+  if (def.roll === 'rank') return String(2 + Math.floor(next(rng) * 13))
   return null
 }
 

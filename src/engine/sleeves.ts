@@ -3,7 +3,7 @@ import { STONKS_MULT, tableOf } from './economy.ts'
 import { SUITS, type Card, type Finish, type Suit } from './cards.ts'
 import { makeRng, pick, randInt } from './rng.ts'
 
-export type SleeveId = 'big_hands' | 'restock' | 'hot_market' | 'riser' | 'deep_pockets' | 'bulk_deal'
+export type SleeveId = 'big_hands' | 'restock' | 'hot_market' | 'riser' | 'deep_pockets' | 'bulk_deal' | 'archival'
 
 export const SLEEVES: readonly { id: SleeveId; name: string; text: string }[] = [
   { id: 'big_hands', name: 'Big Hands', text: '+1 hand size' },
@@ -12,6 +12,7 @@ export const SLEEVES: readonly { id: SleeveId; name: string; text: string }[] = 
   { id: 'riser', name: 'Display Riser', text: '+1 display case slot' },
   { id: 'deep_pockets', name: 'Deep Pockets', text: 'Interest caps at +$4 instead of +$2' },
   { id: 'bulk_deal', name: 'Bulk Deal', text: 'Binning a Bulk card always costs $1' },
+  { id: 'archival', name: 'Archival Sleeve', text: 'Damaged cards never tear, and grading never comes back damaged' },
 ]
 
 export function getSleeve(id: SleeveId): { id: SleeveId; name: string; text: string } {
