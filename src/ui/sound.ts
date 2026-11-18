@@ -83,3 +83,40 @@ export function bell(): void {
   tone(3136, 400, 'sine', 0.025)
   tone(2093, 500, 'sine', 0.02, 10)
 }
+
+// your turn to bet: a soft two-note chime, quieter than the bell
+export function turn(): void {
+  tone(784, 260, 'sine', 0.05)
+  tone(1175, 420, 'sine', 0.045, 110)
+}
+
+// a loose double chime on the tabac door, distinct from the single desk bell
+export function doorBell(): void {
+  tone(1047, 320, 'sine', 0.05)
+  tone(1568, 200, 'sine', 0.025, 12)
+  tone(1319, 440, 'sine', 0.045, 100)
+}
+
+export function thunk(): void {
+  tone(94, 100, 'triangle', 0.13)
+  tone(158, 38, 'square', 0.025)
+}
+
+// a coin dragged over scratch foil: a short dry noise, brighter when you rub faster
+export function scratch(speed: number): void {
+  const a = audio()
+  if (!a) return
+  const len = Math.floor(a.sampleRate * 0.07)
+  const buf = a.createBuffer(1, len, a.sampleRate)
+  const data = buf.getChannelData(0)
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len)
+  const src = a.createBufferSource()
+  const filter = a.createBiquadFilter()
+  filter.type = 'bandpass'
+  filter.frequency.value = 1800 + 2600 * speed
+  const g = a.createGain()
+  g.gain.value = 0.05 + 0.05 * speed
+  src.buffer = buf
+  src.connect(filter).connect(g).connect(a.destination)
+  src.start()
+}

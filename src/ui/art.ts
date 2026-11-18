@@ -1,17 +1,18 @@
 // the atlases (duel + cards from aseprite, shop from art/shop/counter.py), sprite lookup by slice name, and the card compositor.
 // card faces are assembled at runtime from parts, the same recipe as art/cards/build.py
+import collectiblePng from '../../art/collectibles/collectibles.png'
+import collectibleJson from '../../art/collectibles/collectibles.json'
 import duelPng from '../../art/duel/duel.png'
 import duelJson from '../../art/duel/duel.json'
 import cardsPng from '../../art/cards/cards.png'
 import cardsJson from '../../art/cards/cards.json'
 import shopPng from '../../art/shop/shop.png'
 import shopJson from '../../art/shop/shop.json'
-import { rankLabel, isWild, type Card, type Suit } from '../engine/cards.ts'
+import { rankLabel, traitName, type Card, type Suit } from '../engine/cards.ts'
 import type { StarterId } from '../engine/starters.ts'
-import { drawText } from './font.ts'
 
 export type Sprite = {
-  img: HTMLImageElement
+  img: HTMLImageElement | HTMLCanvasElement
   x: number; y: number; w: number; h: number
   px: number; py: number // pivot, from the sprite's top-left
   center: { x: number; y: number; w: number; h: number } | null // 9-slice middle
@@ -34,8 +35,8 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 export async function loadArt(): Promise<void> {
-  const [duel, cards, shop] = await Promise.all([loadImage(duelPng), loadImage(cardsPng), loadImage(shopPng)])
-  for (const [img, data] of [[duel, duelJson], [cards, cardsJson], [shop, shopJson]] as const) {
+  const [duel, cards, shop, collectibles] = await Promise.all([loadImage(duelPng), loadImage(cardsPng), loadImage(shopPng), loadImage(collectiblePng)])
+  for (const [img, data] of [[duel, duelJson], [cards, cardsJson], [shop, shopJson], [collectibles, collectibleJson]] as const) {
     for (const s of (data.meta.slices as SliceJson[])) {
       const k = s.keys[0]
       sprites.set(s.name, { img, ...k.bounds, px: k.pivot?.x ?? 0, py: k.pivot?.y ?? 0, center: k.center ?? null })
@@ -44,13 +45,32 @@ export async function loadArt(): Promise<void> {
 }
 
 export function sprite(name: string): Sprite {
-  const s = sprites.get(name)
+  const s = sprites.get(name) ?? fromPlaceholder(name)
   if (!s) throw new Error(`no sprite ${name}`)
   return s
 }
 
 export function hasSprite(name: string): boolean {
-  return sprites.has(name)
+  return sprites.has(name) || placeholders.has(name)
+}
+
+// stand-ins for art that isn't drawn yet (ui/placeholders.ts). painted the first time they're asked for, so the
+// fonts are loaded by then. a real sprite with the same name in an atlas always wins
+type Placeholder = { w: number; h: number; px: number; py: number; paint: (g: CanvasRenderingContext2D) => void }
+const placeholders = new Map<string, Placeholder>()
+
+export function placeholder(name: string, w: number, h: number, paint: Placeholder['paint'], pivot = { x: 0, y: 0 }): void {
+  placeholders.set(name, { w, h, px: pivot.x, py: pivot.y, paint })
+}
+
+function fromPlaceholder(name: string): Sprite | null {
+  const p = placeholders.get(name)
+  if (!p) return null
+  const img = canvas(p.w, p.h)
+  p.paint(ctx2d(img))
+  const s: Sprite = { img, x: 0, y: 0, w: p.w, h: p.h, px: p.px, py: p.py, center: null }
+  sprites.set(name, s)
+  return s
 }
 
 // ---------- small canvas helpers ----------
@@ -103,7 +123,7 @@ function mirrorPair(g: CanvasRenderingContext2D, part: CanvasImageSource & { wid
   g.restore()
 }
 
-function partCanvas(name: string): HTMLCanvasElement {
+export function partCanvas(name: string): HTMLCanvasElement {
   const s = sprite(name)
   const c = canvas(s.w, s.h)
   blit(ctx2d(c), name, 0, 0)
@@ -132,18 +152,16 @@ export function suitInk(suit: Suit): string {
   return suit === 'S' || suit === 'C' ? INK.dark : INK.red
 }
 
-// the printed face only: rank, suit, pips or court. modifiers that have no art yet are drawn by the caller
-const faces = new Map<string, HTMLCanvasElement>()
-export function faceCanvas(rank: number, suit: Suit, joker = false): HTMLCanvasElement {
-  const key = joker ? 'joker' : `${rank}${suit}`
-  const hit = faces.get(key)
+const prints = new Map<string, HTMLCanvasElement>()
+function printedFace(rank: number, suit: Suit, joker: boolean, inset: boolean, wax: boolean): HTMLCanvasElement {
+  const key = [rank, suit, joker, inset, wax].join('|')
+  const hit = prints.get(key)
   if (hit) return hit
   const c = canvas(64, 88)
   const g = ctx2d(c)
-  blit(g, 'base/paper', 0, 0)
   if (joker) {
     mirrorPair(g, partCanvas('court/joker'), 12, 10)
-    mirrorPair(g, partCanvas('index/joker'), 5, 6)
+    mirrorPair(g, partCanvas('index/joker'), inset ? 7 : 5, inset ? 8 : 6)
   } else {
     const r = rankLabel(rank)
     const ink = suitInk(suit)
@@ -163,11 +181,23 @@ export function faceCanvas(rank: number, suit: Suit, joker = false): HTMLCanvasE
         }
       }
     } else mirrorPair(g, partCanvas(`court/${r}/${suit}`), 12, 10)
-    mirrorPair(g, tinted(`index/rank/${r}`, ink), 4, 4)
-    mirrorPair(g, tinted(`index/suit/${suit}`, ink), 5, 16)
+    mirrorPair(g, wax ? partCanvas('index/wax') : tinted(`index/rank/${r}`, ink), inset ? 7 : 4, inset ? 8 : 4)
+    mirrorPair(g, tinted(`index/suit/${suit}`, ink), inset ? 8 : 5, inset ? 20 : 16)
   }
-  faces.set(key, c)
+  prints.set(key, c)
   return c
+}
+
+const faces = new Map<string, HTMLCanvasElement>()
+export function faceCanvas(rank: number, suit: Suit, joker = false): HTMLCanvasElement {
+  const key = [rank, suit, joker].join('|')
+  let face = faces.get(key)
+  if (!face) {
+    face = partCanvas('base/paper')
+    ctx2d(face).drawImage(printedFace(rank, suit, joker, false, false), 0, 0)
+    faces.set(key, face)
+  }
+  return face
 }
 
 const backs = new Map<string, HTMLCanvasElement>()
@@ -189,77 +219,146 @@ export function backCanvas(box: StarterId | null): HTMLCanvasElement {
   return c
 }
 
-// bulk: a weak stone card with no rank or suit. no sprite yet, so a grey slab cut from the paper stock
-let bulkCard: HTMLCanvasElement | null = null
-function bulkCanvas(): HTMLCanvasElement {
-  if (bulkCard) return bulkCard
-  const c = canvas(64, 88)
+export const specialInk = {
+  chase: '#e8c260', sticker: '#ffffff', rookie: '#3e66a0', jumbo: '#bfa77e',
+  joker: '#7a4ab0', crayon: '#cf403c', bulk: '#43342e', foil: '#e8c260',
+  holo: '#b088e0', prism: '#ff7a24', misprint: '#19c8cd', first: '#a82a38',
+  signed: '#28497a', gold: '#c99a3a', damaged: '#e6c269', marked: '#cf403c',
+  wrongsuit: '#de559b', beer: '#a36b33',
+}
+export const tierInk = ['', '#e8501a', '#ffb03a', '#fffbe8']
+export const stockScale = (card: Card) => card.variant === 'jumbo' ? 1.5 : 1
+
+function silhouette(source: HTMLCanvasElement, color: string): HTMLCanvasElement {
+  const c = canvas(source.width, source.height)
   const g = ctx2d(c)
-  blit(g, 'base/paper', 0, 0)
-  g.globalCompositeOperation = 'source-atop'
-  g.fillStyle = '#6b625a'
-  g.globalAlpha = 0.85
-  g.fillRect(0, 0, 64, 88)
-  g.globalAlpha = 1
-  g.fillStyle = '#4a433e'
-  for (let i = 0; i < 9; i++) g.fillRect(10 + ((i * 23) % 40), 14 + ((i * 37) % 60), 4 + (i % 3) * 2, 2)
-  g.globalCompositeOperation = 'source-over'
-  drawText(g, '+5', 32, 40, { color: '#e3d2a8', bold: true, align: 'center' })
-  bulkCard = c
+  g.drawImage(source, 0, 0)
+  g.globalCompositeOperation = 'source-in'
+  g.fillStyle = color
+  g.fillRect(0, 0, c.width, c.height)
   return c
 }
 
-// the full card as a 64x88 canvas: face plus stand-ins for modifiers that don't have art yet
 const cards = new Map<string, HTMLCanvasElement>()
 export function cardCanvas(card: Card): HTMLCanvasElement {
-  if (card.bulk) return bulkCanvas()
-  const wild = isWild(card)
-  const key = `${card.joker ? 'joker' : `${card.rank}${card.suit}`}|${card.tier}|${card.finish ?? ''}|${card.stamp ?? ''}|${wild}`
+  const { rank, suit, variant, finish, stamp, tier, traits, knockoff } = card
+  const joker = card.joker === 'crayon' ? 'joker/crayon' : card.joker ? 'joker' : null
+  const icons = traits.map(t => traitName(t).split('/')[0].toLowerCase().replace('wild suit', 'wild'))
+  const markOffset = stamp ? card.id % 7 : 0
+  const key = [card.grind, card.bonusHype, card.grade, card.bulk, rank, suit, variant, joker, finish, stamp, markOffset, knockoff?.kind,
+    knockoff?.kind === 'wrongsuit' && knockoff.suit, tier, ...icons].join('|')
   const hit = cards.get(key)
   if (hit) return hit
-  const face = faceCanvas(card.rank, card.suit, !!card.joker)
-  if (!card.tier && !card.finish && !card.stamp && !wild) {
-    cards.set(key, face)
-    return face
+  if (card.bulk) {
+    const slab = partCanvas('base/bulk')
+    cards.set(key, slab)
+    return slab
   }
-  const c = canvas(64, 88)
-  const g = ctx2d(c)
-  g.drawImage(face, 0, 0)
-  // finish trim, until the finish shaders exist: a 1px colored line inside the printed border
-  const trim: Record<string, string> = { foil: '#e8c260', holo: '#b088e0', prism: '#8fd14f', misprint: '#d04a4e' }
-  if (card.finish) {
-    g.strokeStyle = trim[card.finish]
-    g.lineWidth = 1
-    g.strokeRect(1.5, 1.5, 61, 85)
-  }
-  // tier stars at (52,4), (52,12), (52,20)
-  for (let i = 0; i < card.tier; i++) star(g, 56, 8 + i * 8, '#ff7a24')
-  if (wild) star(g, 32, 80, '#7a4ab0')
-  // stamps: a small round ink stamp bottom-left
-  const stampInk: Record<string, string> = { first: '#1c1513', signed: '#28497a', gold: '#c99a3a', damaged: '#5c4a36' }
-  if (card.stamp) {
-    g.fillStyle = stampInk[card.stamp]
-    g.globalAlpha = 0.85
-    g.beginPath()
-    g.arc(9, 79, 4, 0, Math.PI * 2)
-    g.fill()
+  if (!card.grade && !card.grind && !card.bonusHype && !variant && !joker && !tier && !finish && !stamp && !knockoff) return faceCanvas(rank, suit)
+  const stock = partCanvas('base/paper')
+  const g = ctx2d(stock)
+  const frame = joker ?? (variant === 'rookie' || variant === 'chase' ? variant : null)
+  if (frame) blit(g, 'frame/' + frame, 0, 0)
+  const print = printedFace(rank, suit, !!joker, !!frame || !!finish, knockoff?.kind === 'crayon')
+  if (finish === 'misprint') {
+    g.globalAlpha = 0.66
+    g.drawImage(silhouette(print, specialInk.misprint), -2, 0)
+    g.drawImage(silhouette(print, '#e3439e'), 2, 1)
     g.globalAlpha = 1
   }
-  cards.set(key, c)
-  return c
-}
-
-function star(g: CanvasRenderingContext2D, x: number, y: number, fill: string): void {
-  g.fillStyle = '#1c1513'
-  g.fillRect(x - 3, y - 1, 7, 3)
-  g.fillRect(x - 1, y - 3, 3, 7)
-  g.fillStyle = fill
-  g.fillRect(x - 2, y, 5, 1)
-  g.fillRect(x, y - 2, 1, 5)
+  if (finish && finish !== 'misprint') {
+    g.globalCompositeOperation = 'source-atop'
+    blit(g, 'finish/' + (finish === 'prism' ? 'embers' : finish), 0, 0)
+    g.globalCompositeOperation = 'source-over'
+  }
+  if (finish && frame === 'chase') {
+    const plaque = sprite('frame/chase')
+    g.drawImage(plaque.img, plaque.x+18, plaque.y, 28, 9, 18, 0, 28, 9)
+  }
+  g.drawImage(print, 0, 0)
+  if (stamp) {
+    const name = 'stamp/' + stamp
+    const s = sprite(name)
+    g.save()
+    g.translate(32 + markOffset - 3, 44 + (markOffset * 3 % 7) - 3)
+    g.rotate((markOffset - 3) * Math.PI / 45)
+    blit(g, name, -Math.floor(s.w / 2), -Math.floor(s.h / 2))
+    g.restore()
+  }
+  if (knockoff?.kind === 'wrongsuit') {
+    const x = frame || finish ? 8 : 5
+    const y = frame || finish ? 20 : 16
+    const second = tinted('index/suit/' + knockoff.suit, suitInk(knockoff.suit))
+    g.drawImage(second, x+2, y+2)
+    g.drawImage(tinted('index/suit/' + suit, suitInk(suit)), x, y)
+    g.translate(x+1, y+11)
+    g.rotate(Math.PI / 15)
+    g.drawImage(second, 0, 0)
+    g.resetTransform()
+  } else if (knockoff) {
+    const [x,y] = knockoff.kind === 'marked' ? [1,1] : knockoff.kind === 'beer' ? [9,36] : [12,10]
+    blit(g, 'knock/' + knockoff.kind, x, y)
+  }
+  const edge = variant === 'sticker' ? 2 : 0
+  const depth = variant === 'jumbo' ? 3 : 0
+  const body = canvas(64 + edge*2 + depth, 88 + edge*2 + depth)
+  const bg = ctx2d(body)
+  if (edge) blit(bg, 'base/diecut', 0, 0)
+  if (depth) {
+    bg.drawImage(silhouette(stock, '#5c4a36'), depth, depth)
+    bg.drawImage(silhouette(stock, '#bfa77e'), 2, 2)
+    bg.drawImage(silhouette(stock, '#8c7656'), 1, 1)
+  }
+  bg.drawImage(stock, edge, edge)
+  if (edge) {
+    blit(bg, 'variant/gloss', edge, edge)
+    blit(bg, 'variant/peel', edge, edge+73)
+  }
+  const rim = tier === 3 ? 2 : tier ? 1 : 0
+  const c = canvas(body.width + 2*rim, body.height + 2*rim + (icons.length ? 9 : 0))
+  const out = ctx2d(c)
+  for (let ring = rim; ring > 0; ring--) {
+    const color = silhouette(body, ring === 2 ? '#ff7a24' : tierInk[tier])
+    for (const [x,y] of [[-ring,0],[ring,0],[0,-ring],[0,ring]]) out.drawImage(color, rim+x, rim+y)
+  }
+  out.drawImage(body, rim, rim)
+  for (let i = 0; i < tier; i++) blit(out, 'tier/star', rim+edge+49, rim+edge+8+i*10)
+  if (icons.length) {
+    const w = 4 + 10*icons.length
+    const x = Math.floor((c.width-w)/2)
+    const y = c.height-11
+    blit(out, 'trait/plate/' + icons.length, x, y)
+    icons.forEach((icon,i) => blit(out, 'trait/'+icon, x+2+i*10,y+1))
+  }
+  let finished = c
+  if (card.grade !== null) {
+    finished = canvas(Math.max(72, c.width + 8), c.height + 18)
+    const slab = ctx2d(finished)
+    slab.drawImage(partCanvas('slab/case'), 0, 0, finished.width, finished.height)
+    slab.drawImage(c, 4, 17)
+    blit(slab, 'slab/label', 4, 3)
+    blit(slab, 'slab/digits/' + card.grade, 54, 4)
+  }
+  if (card.grind || card.bonusHype) {
+    const tagged = canvas(finished.width + 12, finished.height)
+    const ctx = ctx2d(tagged)
+    ctx.drawImage(finished, 0, 0)
+    for (const [kind, value, y] of [['value', card.grind, 32], ['hype', card.bonusHype, 43]] as const) {
+      if (!value) continue
+      const x = finished.width - 4
+      blit(ctx, 'tag/' + kind, x, y)
+      const digits = String(value)
+      if (digits.length < 3) blit(ctx, 'digits/plus', x + 4, y + 2)
+      for (let i = 0; i < digits.length; i++) blit(ctx, 'digits/' + digits[i], x + 15 - (digits.length - i) * 4, y + 2)
+    }
+    finished = tagged
+  }
+  cards.set(key, finished)
+  return finished
 }
 
 // for the DOM screens (draft, shop, packs) until they're rebuilt as scenes
-const urls = new Map<HTMLCanvasElement, string>()
+const urls = new WeakMap<HTMLCanvasElement, string>()
 export function canvasUrl(c: HTMLCanvasElement): string {
   let u = urls.get(c)
   if (!u) {

@@ -131,9 +131,19 @@ button:is(.package-button,.starter-choice):focus-visible { outline: 2px solid #e
 }
 @media (prefers-reduced-motion: reduce) { .package-button.shake { animation: none; } }
 @keyframes shake { 20%{transform:rotate(-4deg)} 40%{transform:rotate(4deg)} 60%{transform:rotate(-3deg)} 80%{transform:rotate(2deg)} }
-.pulls { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin: 18px 0; }
-.pull { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.pull .glowback { width: 70px; height: 100px; border-radius: 9px; background: #20313a; border: 3px solid var(--glow); box-shadow: 0 0 18px var(--glow); animation: pulse 1.2s infinite; cursor: pointer; }
+.packbox.packview { max-width: 1180px; }
+.packview h2 { font: 80px/80px var(--didone); color: var(--gold); text-shadow: var(--outline); }
+.pull-help { margin: 8px 0 0; }
+.pulls { display: flex; flex-wrap: wrap; gap: 22px; justify-content: center; margin: 18px 0; padding-top: 40px; }
+.pull { display: flex; flex-direction: column; align-items: center; gap: 8px; transition: transform .18s cubic-bezier(.3,1.6,.6,1); cursor: pointer; }
+.pull.to-deck { transform: translateY(-36px); }
+.pull .card.art.big { width: 128px; height: 176px; cursor: pointer; }
+.pull.to-deck .card.art { box-shadow: 0 0 0 3px var(--gold), 0 0 24px rgba(242,193,78,.55), 0 10px 0 rgba(0,0,0,.35); }
+.pull .card.art .tag { position: static; transform: none; margin-top: 6px; }
+.pull-tag { font: 16px/18px var(--tiny); text-transform: uppercase; padding: 3px 10px; border: 2px solid var(--line); color: var(--muted); background: rgba(0,0,0,.35); }
+.pull-tag.hidden { visibility: hidden; }
+.pull.to-deck .pull-tag { color: var(--ink); background: var(--gold); border-color: var(--gold); }
+.pull .glowback { width: 128px; height: 176px; border-radius: 4px; image-rendering: pixelated; outline: 3px solid var(--glow); box-shadow: 0 0 18px var(--glow); animation: pulse 1.2s infinite; cursor: pointer; }
 @keyframes pulse { 50% { box-shadow: 0 0 4px var(--glow); } }
 .pull .extra { width: 130px; min-height: 100px; border-radius: 9px; padding: 8px; display: grid; place-items: center; font-weight: 700; }
 .pull .extra.col { background: linear-gradient(135deg, #2a2140, var(--purple)); color: var(--gold); }
@@ -160,3 +170,99 @@ button:is(.package-button,.starter-choice):focus-visible { outline: 2px solid #e
 
 /* the duel, shop and title scenes: one canvas, letterboxed by the renderer */
 canvas.stage { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; background: #0e0b0a; z-index: 1; touch-action: manipulation; }
+
+/* deck viewer, balatro style: stats left, a row per suit */
+.overlay.deckview { place-items: stretch; padding: 16px; }
+.dv { display: grid; grid-template-columns: 260px 1fr; gap: 20px; width: 100%; min-height: 100%; }
+.dv-side { display: flex; flex-direction: column; gap: 12px; text-align: left; background: rgba(0,0,0,.35); border: 2px solid var(--line); padding: 14px; align-self: start; }
+.dv-side h2 { font: 40px/40px var(--didone); color: var(--gold); text-shadow: var(--outline); }
+.dv-tabs { display: flex; flex-direction: column; gap: 6px; }
+.dv-tabs button { text-align: left; min-height: 0; padding: 4px 10px; }
+.dv-ranks { display: grid; grid-template-columns: repeat(4, 26px 26px); gap: 2px 4px; }
+.dv-ranks span { color: var(--muted); text-align: right; }
+.dv-ranks b { text-align: left; }
+.dv-suits { display: flex; gap: 12px; }
+.dv .red, .dv-suits .red { color: #ff6b6b; }
+.dv-info { min-height: 78px; padding: 8px; background: var(--cream); color: var(--ink); border-radius: 2px; }
+.dv-info .muted { color: #5a5048; }
+.dv-main { display: flex; flex-direction: column; gap: 14px; justify-content: center; min-width: 0; padding-top: 14px; }
+.dv-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dv-suit { font: 40px/40px var(--didone); width: 34px; text-align: center; flex: none; text-shadow: var(--outline); }
+.dv-cards { display: grid; flex: 1; min-width: 0; }
+.dv-card { position: relative; box-shadow: -3px 3px 0 rgba(0,0,0,.4); transition: transform .12s; cursor: default; }
+.dv-card img { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+.dv-card.out { filter: brightness(.38) saturate(.5); }
+.dv-card:hover { transform: translateY(-14px); z-index: 2; filter: none; }
+@media (max-width: 760px) { .dv { grid-template-columns: 1fr; } }
+
+.card-chip::before {
+  content: '';
+  display: inline-block;
+  width: .55em;
+  height: .55em;
+  margin-right: .25em;
+  background: var(--ink);
+  outline: 1px solid #8c7656;
+}
+
+.collectible-art {
+  display: inline-block;
+  flex: none;
+  image-rendering: pixelated;
+  background-repeat: no-repeat;
+  animation: collectible-idle 880ms steps(4, end) infinite;
+}
+@keyframes collectible-idle { to { background-position-x: 133.333333%; } }
+@media (prefers-reduced-motion: reduce) {
+  .collectible-art { animation: none; }
+}
+
+.vitrine-tray {
+  display: flex;
+  align-items: flex-end;
+  justify-content: safe center;
+  overflow-x: auto;
+  padding: 38px 9px 10px;
+  border: 4px ridge #9c7028;
+  background: #2a0910;
+  position: relative;
+}
+.vitrine-piece { display: grid; justify-items: center; flex: none; }
+.vitrine-caption {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  right: 6px;
+  text-align: center;
+  font: 16px/16px var(--tiny);
+  color: var(--cream);
+  visibility: hidden;
+}
+.vitrine-piece:is(:hover, :focus-within) .vitrine-caption { visibility: visible; }
+.vitrine-piece button { min-height: 26px; padding: 2px 4px; }
+
+.patron-ending { position: relative; height: 84px; width: 180px; margin: 0 auto 12px; }
+.patron-ending img { position: absolute; image-rendering: pixelated; }
+.debt-paper { width: 144px; left: 18px; top: 3px; }
+.payment-stamp { width: 126px; left: 28px; top: 26px; transform: rotate(-8deg); }
+.wax-seal { width: 22px; left: 118px; top: 52px; }
+@media (prefers-reduced-motion: no-preference) {
+  .payment-stamp { animation: payment-slam .6s both; }
+  .paid .debt-paper { animation: paper-burn .85s 1s steps(12) forwards; }
+  .paid .wax-seal { animation: seal-drop .55s 1.25s both; }
+  .unpaid .debt-paper { animation: ledger-close .9s .7s both; transform-origin: left; }
+  @keyframes payment-slam { 0%, 38% { opacity: 0; transform: rotate(-12deg) scale(1.8); } 65% { opacity: 1; transform: rotate(-8deg) scale(.94); } }
+  @keyframes paper-burn { 45% { filter: sepia(1) saturate(5); } to { clip-path: polygon(0 100%,100% 100%,100% 100%,0 100%); filter: brightness(.25); } from { clip-path: polygon(0 0,100% 0,100% 100%,0 100%); } }
+  @keyframes seal-drop { from { opacity: 0; transform: translateY(-34px); } 72% { transform: translateY(3px) rotate(12deg); } }
+  @keyframes ledger-close { to { transform: perspective(250px) rotateY(-52deg); filter: brightness(.45); } }
+}
+
+.spoil-flight { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; pointer-events: none; image-rendering: pixelated; z-index: 8; }
+
+.album-grid { display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 3px; max-width: 660px; margin: auto; }
+.album-grid img { width: 100%; image-rendering: pixelated; }
+.album-grid .unseen { filter: brightness(.2) sepia(.7); opacity: .5; }
+.album-modifiers { font-size: .85em; color: #8c7656; }
+.album-modifiers .found { color: #e8c260; }
+.pull { position: relative; }
+.pull .album-new { position: absolute; z-index: 2; width: 48px; height: 20px; right: -2px; top: 17px; image-rendering: pixelated; pointer-events: none; transform: rotate(7deg); }

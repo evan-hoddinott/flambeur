@@ -1,0 +1,39 @@
+import { JOKERS, SUITS, SUIT_GLYPH, VARIANTS, rankLabel, type Card } from '../engine/cards.ts'
+import { canvasUrl, faceCanvas } from './art.ts'
+
+const store = 'flambeur:album:1'
+const seen = new Set<string>()
+
+function read(): void {
+  try {
+    const entries: unknown = JSON.parse(localStorage.getItem(store) ?? '[]')
+    if (Array.isArray(entries)) for (const key of entries) if (typeof key === 'string') seen.add(key)
+  } catch { /* the album still works for this session when storage is unavailable */ }
+}
+
+export function recordPull(card: Card): boolean {
+  read()
+  const size = seen.size
+  seen.add(card.rank + card.suit)
+  for (const [group, id] of Object.entries({ finish: card.finish, stamp: card.stamp, type: card.variant, joker: card.joker, knock: card.knockoff?.kind })) {
+    if (id) seen.add(group + '/' + id)
+  }
+  if (size === seen.size) return false
+  try { localStorage.setItem(store, JSON.stringify([...seen])) } catch { /* retain the session copy */ }
+  return true
+}
+
+export function albumPage(): string {
+  read()
+  const faces = SUITS.map(suit => Array.from({ length: 13 }, (_, i) => {
+    const rank = i + 2
+    const label = rankLabel(rank) + SUIT_GLYPH[suit]
+    return `<img class="${seen.has(rank + suit) ? '' : 'unseen'}" src="${canvasUrl(faceCanvas(rank, suit))}" alt="${label}" title="${label}">`
+  }).join('')).join('')
+  const sets: [string, string[]][] = [
+    ['finish', ['foil','holo','prism','misprint']], ['stamp', ['first','signed','gold','damaged']],
+    ['type', Object.keys(VARIANTS)], ['joker', Object.keys(JOKERS)], ['knock', ['crayon','marked','wrongsuit','beer']],
+  ]
+  const modifiers = sets.map(([group, ids]) => `<p>${ids.map(id => `<span class="${seen.has(group+'/'+id) ? 'found' : ''}">${id}</span>`).join(' ')}</p>`).join('')
+  return `<div class="album-grid">${faces}</div><div class="album-modifiers">${modifiers}</div>`
+}
