@@ -23,7 +23,7 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 | `docs/ART.md` | **The art style source of truth**: rendering rules, palette, scenes, characters, cards, motion, UI. Research behind it: `docs/balatro-visual-research.md`. |
 | `docs/DUEL.md` | Duel scene spec: layout, characters and the 10 masks, table, room, HUD, sprite list. |
 | `docs/SHOP.md` | Shop scene spec: first-person tabac counter, the offer shelf, binder, grading window, pack rip, sprite list. |
-| `docs/CARDS.md` | Card art spec for the art agent: every segmented sprite, sizes, layout, layer order, export. |
+| `docs/CARDS.md` | Card art spec for the art agent: every segmented sprite, sizes, layout, layer order, export. §0.5 = special cards are Balatro-loud, one visual channel per modifier slot. |
 | `docs/READABILITY.md` | How interactables read: color-coded ticket buttons, outlined text, prop hover cues. Amends ART.md §13. |
 | `pitch.html` | Visual pitch page for Evan's friend. It's published on It as `pull-rate-pitch` (its old name) and is older than DESIGN.md. |
 | `collectibles-draft.md` | An old 58-idea collectible brainstorm with a Codex review. It's superseded by DESIGN.md and `src/engine/collectibles.ts`. |
@@ -32,7 +32,8 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 
 ```bash
 pnpm dev                     # vite dev server (or the "flambeur" config in .claude/launch.json, port 5174)
-                             # dev only: open /?quick to auto-draft straight to the first deal, /?quick&shop for the round 2 shop
+                             # dev only: open /?quick to auto-draft straight to the first deal, /?quick&shop for the round 2 shop,
+                             # /?quick&wild for a rival that bets at random (folds and flambés come up fast)
 pnpm test                    # node:test, src/engine/*.test.ts
 pnpm exec tsc --noEmit -p .  # typecheck
 pnpm build                   # typecheck + vite build
@@ -49,27 +50,36 @@ src/engine/      pure, deterministic game logic. no DOM. this is the part that l
   cards.ts         Card (rank, suit, finish, stamp, tier, traits, grind...), trait helpers
   hands.ts         evaluateHand: primary hand + bonus hands from flambéed traits
   scoring.ts       appraise(): Value × Hype × 2^Grade, plus a Step list the UI animates
-  forge.ts         forgePlan / autoKeep / buildForged, grindOnFold
-  betting.ts       betting state machine (fold/forge/min/max → call/raise → call/fold), settle
-  deck.ts          hand / pile / discard, tables: startTable, fresh deal, mulligan, cleanup, takeOut
-  sleeves.ts       sleeves (run-wide upgrades) + STONKS (seeded hot rank/suit/finish)
+  forge.ts         forgePlan / autoKeep / buildForged, grindCard (flamber with no pair)
+  betting.ts       min/max self-bets: the opening bet and the last push, settle (no fold)
+  deck.ts          hand / pile / discard: shuffle every round, draw, refill, cleanup, takeOut
+  sleeves.ts       pochettes (run-wide upgrades, ids say sleeve) + STONKS (seeded hot rank/suit/finish)
   match.ts         THE GAME: phase state machine. newMatch / step / legal / view / pending / defaultAction / replay / check.
                    N seats in pairs, plain-JSON state, per-seat rng streams, ids from match.nextCardId. see docs/architecture.md
   match.test.ts    fuzz (2 + 10 seats), replay = live, JSON round trip, no view leaks
-  twists.ts        tournament round twists (rounds 3/6/9, forced play)
-  starters.ts      6 starter boxes (Rules knobs), row draft (4 rows of 8, keep 3)
-  shop.ts          packs, collectible offers (no repeats until pool exhausted), restock
-  collectibles.ts  the display-case pool (jokers) as data + effect hooks
-  economy.ts       blinds, paycheck, interest, streaks, prices
+  round.test.ts    v2 rules by hand: best of 3, knockout, flamber, self-bets, marker, rival bust, spoils, inserts, scoring order
+  twists.ts        boss twists (rounds 3/6/9/12)
+  starters.ts      6 starter boxes (Rules knobs), full 2–A decks, row draft (4 rows of 6, keep 3 = 18)
+  shop.ts          small/big shop stock, packs, collectible offers (no repeats until pool exhausted), restock,
+                   the 13 inserts (INSERTS), spoils cards, the shopkeeper sign
+  collectibles.ts  the display-case pool as data + effect hooks, left to right, the 10 ×Hype payoffs
+  rivals.ts        the 10 solo rivals as data (lane deck, upgrades, case by Table), buildRival, rivalOrder
+  economy.ts       blinds, knockout K, house/KO/momentum/skip, interest, le patron's marker, rival stacks, prices
   bot.ts           botAction(match, seat): one action at a time, same rules as people. also the sim's policies
+                   (greedy/cautious/random/nobuy) and REF_SCORE (rival p50 per hand)
   *.test.ts        focused tests with hand-computed expected values
-src/main.ts      the UI driver. the table is the duel scene, the shop is the tabac scene, draft/packs/binder/grading are still the throwaway DOM harness
+src/main.ts      the UI driver. the table is the duel scene, the shop is the tabac scene, draft/packs/binder/grading/the shop's Sleeve
+                 are still the throwaway DOM harness. dev: /?quick&big = first big shop, /?quick&auto = your seat plays itself to the end
 src/ui/art.ts    loads art/duel + art/cards atlases (aseprite slices), composites cards at runtime like art/cards/build.py
 src/ui/duel.ts   the duel scene on one canvas: layout from art/duel/review.py, springs, idle motion, count-up, slips
-src/ui/shop.ts   the tabac on one canvas: the buraliste, the offer shelf, sign, STONKS board, tickets. art from art/shop/*.py (`python art/shop/counter.py` rebuilds shop.png/json)
+src/ui/shop.ts   the tabac on one canvas: the buraliste, the offer shelf, sign, STONKS board, tickets, le patron + the scouting dossier
+                 (big shop), the Sleeve on the zinc. art from art/shop/*.py (`python art/shop/counter.py` rebuilds shop.png/json)
+src/ui/placeholders.ts  flat stand-ins for v2 sprites not drawn yet (docs/V2-ART.md), registered under their real ids. delete each when its art lands
+src/ui/collectibles.ts  collectible art on the vitrine
 src/ui/font.ts   bitmap text from art/fonts (sans, tiny, didone, chalk). glyphs are text grids in art/fonts/*.txt, `python art/fonts/build.py` rebuilds (also the woff2s style.css uses for DOM text)
 src/ui/sound.ts  webaudio synth sfx
-sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balance tool
+sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balance tool. prints decisions/hands/KO per round, round-12 reach,
+                 shop share, marker misses and REF_SCORE
 ```
 
 ## How to work here
@@ -120,7 +130,7 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
   - You play 1–5 cards. Played cards go to the discard until the next Table, and unplayed ones go back into the pile.
   - Fold or flambé mucks your whole hand.
   - If the pile can't deal you any cards, you lose the round.
-- **Mulligan:** throw back any number. They go into the pile, you redraw one fewer, and your hand size drops by 1 for the rest of the Table. There's no mulligan budget.
+- **Mulligan:** your whole hand goes back, the pile shuffles, and you draw a full hand. Then you throw one card back into the pile, and your hand size drops by 1 for the rest of the Table. Classic's free one skips the throw-back. There's no mulligan budget.
 - **Hidden info:** the rival sees your hand size and how many times you mulliganed, never how many cards you locked.
 - **Gold Border** is a side bet: +$3 on a showdown win, −$3 on a loss.
 - **Sleeves** are small run-wide buffs like Balatro vouchers. One of them (Archival Sleeve) protects cards from tearing and shipping damage. One offered per Table, in the shop before the boss.
@@ -147,39 +157,23 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
   - Everything is **pixel art**, with no CSS skins.
   - Target layout is a **Pokémon-battle perspective**: your character from behind with your hand at the bottom, the rival and their card backs across the table.
   - Cosmetics are unlockable through play, never bought.
+  - Special cards are as visually distinct as Balatro's: card types change the whole frame, not a corner badge (CARDS.md §0.5).
 - **Platform:** browser game. Get solo rules right first; multiplayer (async battle royale, then live 10-player) comes later as a server around the same engine. Not an MMO.
 
-## Status (end of Mon Nov 16)
+## Status (end of Wed Nov 18)
 
-**Built:**
-- the engine, sim and tests, all passing
-- starter boxes with the row draft
-- persistent deck
-- flambéing tiers and traits with bonus hands
-- 29 collectibles
-- shop and packs
-- betting with comeback rules
-- a count-up with sound
-- seeded daily runs and a local leaderboard
+**v2 is built** (`docs/V2.md` slices 1–10, rules in DESIGN.md): best of 3 hands with refill and discards, knockout, Max as a self-bet plus the last push, no fold, Flamber as a hand, a reshuffle every round, Le Patron's marker, the 10-rival roster with stacks and lane builds, spoils, small/big shops with rotating services, the Sleeve with 13 inserts, 2–A starter boxes (rows of 6, keep 3 = 18), ordered ×Hype scoring with the 10 payoffs and Bulk Bin, the §15 rewrites, bots for all of it (`nobuy` added), the new sim metrics, and the UI for every new piece (art missing for some: `src/ui/placeholders.ts`).
 
-**Done Nov 16 (later):** solo is now a duel vs one persistent rival (easy/medium/high roller), tournament rounds 3/6/9 force a showdown with a seeded twist, paycheck only on showdown + 2× ante house bonus, deck floor 16, Thin Binder at 18. Research + reasoning: `docs/balance-and-design-report.md`.
+**Sim, greedy vs Medium, Classic, 1000 runs:** see DESIGN.md, Tuning. Every §0 target hits except shop share (~47% vs ≤ 40%, explained there). Tuned: knockout K 6/8/10/12, rival upgrades 3 per Table, `REF_SCORE` per hand.
 
-**Built Nov 16 night:** Tables, Bulk (deck floor is gone), the Binder + STONKS, Momentum, the Gold Border side bet, Sleeves, the grading desk, a deck viewer in the test UI. Bots sort pulls and hold the binder for STONKS. `REF_SCORE` is now calibrated from every dealt hand, not showdowns. Sim numbers: DESIGN.md, Economy, "Tables sim".
-
-**Built Nov 17:** the engine core is `match.ts` (multiplayer-ready, per docs/architecture.md section 2), `run.ts` is gone. 12 rounds, chip-lead win + margin score, sudden death past 12 for bust-only modes, flambé costs the Max (Min for a 2× underdog), 4-button betting, instant grading. Rng is sfc32 seeded by cyrb128 stream names, so every seed changed. The solo test UI and the sim both drive `step()`. 12-round sim numbers: DESIGN.md, Economy, "12-round sim".
-
-**Built Nov 17 (afternoon):** online play in the test UI (rooms, quick match, online daily, server board), the grading desk with shippers, the Archival Sleeve, the shopkeeper sign, knockoffs, scratchers, card types (Chase, Sticker, Rookie, Jumbo) with pack lanes, Jokers (max 2 per deck), bots that ship and scratch, `REF_SCORE` recalibrated. Every slice is deployed to flambeur.example.com. Details and sim numbers: DESIGN.md, Decisions log and Economy, "Full sim pass". Still to do: the seeded golden-path demo run, saved for the very end.
+**Verified:** tests, typecheck and build pass. A full `/?quick&auto` run in headless Chromium (draft → round 12 → results) throws nothing; Play/Flamber/Discard, bets, reveal, tally, spoils and both shops checked by hand. Only console noise: `/api/me` 502 with no game server running.
 
 **Open problems:**
-- **Win condition:** surviving round 9 counts as a win even if the rival ends richer.
-- **Flambé Box and Collector** still lean cautious (+3 to +7).
-- **The pile never runs dry** under Tables (0 empty-pile losses in the sim), so folding early costs hand quality but never boss cards outright.
-- **Greedy decks still bloat** (p50 58–76): every special pull defaults to Deck.
-
-**Not built yet:**
-- *Identity tier:* shopkeeper traits and rapport, knockoffs, Joker cards, inserts (Wishlist etc.), the rest of the collectible pool, bots that grade.
-- *UI:* the pixel-art table view and cosmetics.
-- *Multiplayer:* battle royale.
+- **Shop share** of the greedy bot's actions is ~47%.
+- **High Roller is a wall** (greedy ~5–7%).
+- **Not built:** Deuces Wild, the Album, cosmetics, near-miss pack reveals (V2.md §17), the seeded golden-path demo run.
+- **Art:** the v2 sprites are placeholders (list in `src/ui/placeholders.ts`).
+- **Multiplayer:** the server runs the v2 engine, but online play hasn't been retested on it.
 
 ## Gotchas
 
