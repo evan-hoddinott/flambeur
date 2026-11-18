@@ -20,6 +20,7 @@ STOCKS = {
     "highroller": ("High Roller", "GRAND JEU", "#120e08", "#2a2010", "#3d2a10", "#6b4a1a"),
     "bargain": ("Bargain Bin", "SOLDES", "#3d2a10", "#5c4a36", "#8c7656", "#bfa77e"),
     "collector": ("Collector", "ARCHIVES", "#2a1440", "#4e2a78", "#7a4ab0", "#b088e0"),
+    "standard": ("Standard", "STANDARD", "#0f2a20", "#174034", "#1f5a46", "#3a8040"),
     "sealed": ("Flambeur", "FLAMBEUR", "#2a0910", "#4e1020", "#7a1a2c", "#a82a38"),
 }
 
@@ -62,7 +63,12 @@ def tile(kind):
 def device(kind):
     im = Image.new("RGBA", (44, 40))
     d = ImageDraw.Draw(im)
-    if kind == "classic":
+    if kind == "standard":
+        d.polygon([(9,5),(35,5),(34,23),(29,30),(22,35),(15,30),(10,24)], fill="#174034", outline=GILT)
+        d.line([(11,7),(32,7)], fill=LIGHT)
+        f = label("F","didone",LIGHT)
+        center(im, f, 22, 11)
+    elif kind == "classic":
         # two cast, opposed F punches share a single crossbar
         punch = [(5,8),(25,8),(25,15),(23,15),(21,11),(14,11),(14,20),
                  (20,20),(21,17),(23,17),(23,25),(21,25),(20,23),(14,23),
@@ -201,10 +207,34 @@ def carton(kind):
     center(im,title,38,91-title.height//2)
     for x in (14,61):
         d.line([(x-2,100),(x+2,100)],fill=GILT)
-    center(im,label("DÉPART" if kind=="sealed" else "32","tiny","#e3d2a8"),38,98)
+    center(im,label("DÉPART" if kind=="sealed" else ("52" if kind=="standard" else "32"),"tiny","#e3d2a8"),38,98)
     return im
+
+
+def opening_art(kind):
+    box = carton(kind)
+    if kind != "sealed":
+        d = ImageDraw.Draw(box)
+        d.polygon([(5,14),(13,1),(72,0),(81,5),(70,13)], fill=STOCKS[kind][4], outline=DEEP)
+        d.polygon([(7,13),(17,8),(75,6),(69,13)], fill=CREAM, outline=INK)
+        d.line((12,12,70,9), fill=MID)
+        box.save(OUT / f"{kind}-open.png")
+        return
+    for frame in (1,2):
+        torn = box.copy()
+        d = ImageDraw.Draw(torn)
+        lip = [(3,36),(13,39),(23,36),(31,42),(44,39),(55,44),(71,40),(84,34)]
+        d.line(lip, fill=CREAM)
+        d.line([(x, y + frame*4) for x,y in lip], fill="#bfa77e")
+        d.line([(4,37),(1,49+frame*8),(13,43+frame*3)], fill=LIGHT)
+        torn.save(OUT / f"sealed-tear-{frame}.png")
+    for name, bounds in [("lid",(0,0,88,42)), ("base",(0,42,88,112))]:
+        piece = Image.new("RGBA",box.size)
+        piece.paste(box.crop(bounds),bounds[:2])
+        piece.save(OUT / f"sealed-{name}.png")
 
 
 if __name__ == "__main__":
     for kind in STOCKS:
         carton(kind).save(OUT / f"{kind}.png", optimize=True)
+        opening_art(kind)
