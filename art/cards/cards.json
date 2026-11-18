@@ -113,7 +113,7 @@
     "format": "RGBA8888",
     "size": {
       "w": 278,
-      "h": 192
+      "h": 644
     },
     "scale": "1",
     "slices": [
@@ -977,6 +977,790 @@
             "pivot": {
               "x": 0,
               "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "frame/chase",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 192,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "frame/rookie",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 64,
+              "y": 192,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "frame/joker",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 128,
+              "y": 192,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "frame/joker/crayon",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 192,
+              "y": 192,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "base/diecut",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 280,
+              "w": 68,
+              "h": 92
+            }
+          }
+        ]
+      },
+      {
+        "name": "variant/gloss",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 68,
+              "y": 280,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "variant/peel",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 132,
+              "y": 280,
+              "w": 14,
+              "h": 14
+            }
+          }
+        ]
+      },
+      {
+        "name": "base/bulk",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 146,
+              "y": 280,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "finish/foil",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 210,
+              "y": 280,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "finish/holo",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 372,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "finish/embers",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 64,
+              "y": 372,
+              "w": 64,
+              "h": 88
+            }
+          }
+        ]
+      },
+      {
+        "name": "stamp/first",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 128,
+              "y": 372,
+              "w": 30,
+              "h": 30
+            }
+          }
+        ]
+      },
+      {
+        "name": "stamp/signed",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 158,
+              "y": 372,
+              "w": 48,
+              "h": 20
+            }
+          }
+        ]
+      },
+      {
+        "name": "stamp/gold",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 206,
+              "y": 372,
+              "w": 24,
+              "h": 26
+            }
+          }
+        ]
+      },
+      {
+        "name": "stamp/damaged",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 230,
+              "y": 372,
+              "w": 36,
+              "h": 19
+            }
+          }
+        ]
+      },
+      {
+        "name": "knock/marked",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 460,
+              "w": 24,
+              "h": 32
+            }
+          }
+        ]
+      },
+      {
+        "name": "knock/beer",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 24,
+              "y": 460,
+              "w": 48,
+              "h": 48
+            }
+          }
+        ]
+      },
+      {
+        "name": "knock/crayon",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 72,
+              "y": 460,
+              "w": 40,
+              "h": 68
+            }
+          }
+        ]
+      },
+      {
+        "name": "index/wax",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 112,
+              "y": 460,
+              "w": 9,
+              "h": 11
+            }
+          }
+        ]
+      },
+      {
+        "name": "tier/star",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 121,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/twin",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 130,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/triplet",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 139,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/quad",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 148,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/split",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 157,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/household",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 166,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/bridge",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 175,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/wild",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 184,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/crown",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 193,
+              "y": 460,
+              "w": 9,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/plate/1",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 202,
+              "y": 460,
+              "w": 14,
+              "h": 11
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/plate/2",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 216,
+              "y": 460,
+              "w": 24,
+              "h": 11
+            }
+          }
+        ]
+      },
+      {
+        "name": "trait/plate/3",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 240,
+              "y": 460,
+              "w": 34,
+              "h": 11
+            }
+          }
+        ]
+      },
+      {
+        "name": "tag/value",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 528,
+              "w": 16,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "tag/hype",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 16,
+              "y": 528,
+              "w": 16,
+              "h": 9
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/0",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 32,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/1",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 36,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/2",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 40,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/3",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 44,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/4",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 48,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/5",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 52,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/6",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 56,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/7",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 60,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/8",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 64,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/9",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 68,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "digits/plus",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 72,
+              "y": 528,
+              "w": 4,
+              "h": 6
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/case",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 76,
+              "y": 528,
+              "w": 72,
+              "h": 106
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/label",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 148,
+              "y": 528,
+              "w": 64,
+              "h": 12
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/1",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 212,
+              "y": 528,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/2",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 222,
+              "y": 528,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/3",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 232,
+              "y": 528,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/4",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 242,
+              "y": 528,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/5",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 252,
+              "y": 528,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/6",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 262,
+              "y": 528,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/7",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 634,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/8",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 10,
+              "y": 634,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/9",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 20,
+              "y": 634,
+              "w": 10,
+              "h": 10
+            }
+          }
+        ]
+      },
+      {
+        "name": "slab/digits/10",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 30,
+              "y": 634,
+              "w": 10,
+              "h": 10
             }
           }
         ]

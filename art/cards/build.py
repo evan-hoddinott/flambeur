@@ -1,9 +1,11 @@
 """Rebuild cards.png, cards.json, and the deck previews with python build.py."""
+import io
 import json
 from pathlib import Path
 import subprocess
 
 from PIL import Image, ImageChops
+from specials import layers
 
 ROOT = Path(__file__).resolve().parent
 
@@ -29,6 +31,26 @@ def export():
             bounds["y"] += frame["y"]
             x, y, w, h = (bounds[k] for k in ("x", "y", "w", "h"))
             parts[name] = atlas.crop((x, y, x + w, y + h)).convert("RGBA")
+        original = atlas.convert("RGBA")
+    # Pack the generated layers below Aseprite's sheet, keeping its slice coordinates.
+    x, y, row = 0, original.height, 0
+    extras = layers()
+    positions = {}
+    for name, im in extras.items():
+        if x + im.width > original.width:
+            x, y, row = 0, y + row, 0
+        positions[name] = (x, y)
+        bounds = dict(x=x, y=y, w=im.width, h=im.height)
+        data["meta"]["slices"].append(dict(name=name, keys=[dict(frame=0, bounds=bounds)]))
+        x += im.width
+        row = max(row, im.height)
+    sheet = Image.new("RGBA", (original.width, y + row))
+    sheet.paste(original)
+    for name, im in extras.items():
+        sheet.paste(im, positions[name])
+    sheet.save(ROOT / "cards.png")
+    data["meta"]["size"] = dict(w=sheet.width, h=sheet.height)
+    parts.update(extras)
     path.write_text(json.dumps(data, indent=2) + "\n")
     return parts
 
@@ -108,12 +130,20 @@ def review(parts):
     joker = parts["base/paper"].copy()
     mirror_pair(joker, parts["court/joker"], 12, 10)
     mirror_pair(joker, parts["index/joker"], 5, 6)
+    joker.alpha_composite(parts["frame/joker"])
     place(joker, "joker", 0, 4)
     (previews / "backs").mkdir(exist_ok=True)
     for col, box in enumerate(BOXES, start=2):
         place(back(parts, box), f"backs/{box}", col, 4)
     sheet = felt.resize((felt.width * 3, felt.height * 3), Image.Resampling.NEAREST)
-    sheet.save(ROOT / "review.png")
+    result = subprocess.run(["node", ROOT / "render-review.mjs"], capture_output=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr.decode())
+    with Image.open(io.BytesIO(result.stdout)) as rows:
+        review_sheet = Image.new("RGB", (sheet.width, sheet.height + rows.height * 3))
+        review_sheet.paste(sheet)
+        review_sheet.paste(rows.resize((sheet.width, rows.height * 3), Image.Resampling.NEAREST), (0, sheet.height))
+        review_sheet.save(ROOT / "review.png")
     # Last row, from the first box back through the last.
     sheet.crop((144 * 3, 384 * 3, (152 + 72 * len(BOXES)) * 3, sheet.height)).save(ROOT / "backs-review.png")
 
