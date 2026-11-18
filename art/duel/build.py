@@ -2,12 +2,13 @@
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent
-GROUPS = ("you", "masks", "rival", "table", "chips", "lamp", "room", "hud")
+GROUPS = ("you", "masks", "rival", "table", "chips", "lamp", "room", "hud", "round")
 
 
 def export_parts():
@@ -101,10 +102,51 @@ def contact_sheet(parts):
     sheet.save(ROOT / "parts.png")
 
 
+def draw_round():
+    from round_hud import parts as round_parts
+    from gestures import parts as gestures
+    from tickets import parts as tickets
+
+    parts = round_parts() | gestures() | tickets()
+    palette = [tuple(map(int,line.split()[:3])) for line in (ROOT.parent/"palette/flambeur.gpl").read_text().splitlines() if line.strip() and line.strip()[0].isdigit()]
+    colors = {}
+    items = []
+    x = y = row = 0
+    width = 320
+    for name, image in parts.items():
+        if x + image.width > width:
+            x, y, row = 0, y + row + 2, 0
+        anchor = name.startswith("hud/stamp/") or name == "hud/ko/stamp"
+        items.append(dict(name=name,x=x,y=y,w=image.width,h=image.height,
+                          px=image.width//2 if anchor else 0,py=image.height//2 if anchor else 0))
+        x += image.width + 2
+        row = max(row,image.height)
+    sheet = Image.new("RGBA",(width,y+row))
+    for item in items:
+        image = parts[item["name"]]
+        for _,color in image.getcolors(image.width*image.height):
+            if color not in colors:
+                nearest = min(palette,key=lambda rgb:sum((a-b)**2 for a,b in zip(rgb,color[:3])))
+                colors[color] = (*nearest,color[3])
+        image.putdata([colors[color] for color in image.get_flattened_data()])
+        sheet.alpha_composite(image,(item["x"],item["y"]))
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        sheet.save(base/"round.png")
+        (base/"parts.json").write_text(json.dumps(items))
+        subprocess.run(["aseprite","-b","--script-param",f"sheet={base/'round.png'}",
+                        "--script-param",f"manifest={base/'parts.json'}","--script-param",
+                        f"palette={ROOT.parent/'palette/flambeur.gpl'}","--script-param",
+                        f"out={ROOT/'round.aseprite'}","--script",str(ROOT/"round_layers.lua")],check=True)
+
+
 def main():
     from deckstack import stack_review
+    sys.path.insert(0, str(ROOT.parent / "cards"))
     from review import review, tilt_review
 
+    if "--draw" in sys.argv:
+        draw_round()
     parts, slices, version = export_parts()
     pack(parts, slices, version)
     for key, part in parts.items():

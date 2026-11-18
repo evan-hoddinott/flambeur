@@ -442,7 +442,28 @@ def review(parts,pivots,centers):
     sheet=Image.new("RGB",(1280,720))
     for i,scene in enumerate(scenes):
         sheet.paste(scene,((i%2)*640,(i//2)*360))
+    captures = [folder / ("v2-"+state+".png") for state in ("mid-round","thrown","spoils")]
+    if all(path.exists() for path in captures):
+        overview = Image.new("RGB",(1280,1440))
+        for i,path in enumerate(captures):
+            with Image.open(path) as img:
+                overview.paste(img.resize((640,360),Image.Resampling.BOX),((i%2)*640,(i//2)*360))
+        overview.paste(scenes[1],(640,360))
+        overview.paste(sheet,(0,720))
+        sheet=overview
     sheet.save(ROOT/"review.png")
+    masks = sorted(k.split("/")[1] for k in parts if k.startswith("mask/") and k.endswith("/front"))
+    faces = Image.new("RGB",(len(masks)*120,4*100))
+    for table in range(4):
+        proof = Proof(parts,pivots,centers,table==3)
+        for i,mask in enumerate(masks):
+            proof.rival=mask
+            proof.room()
+            proof.lamp()
+            proof.players()
+            tile=proof.canvas.image.resize((640,360),Image.Resampling.BOX).crop((332,5,452,105))
+            faces.paste(tile,(i*120,table*100))
+    faces.save(ROOT/"previews/mask-lineup.png")
 
 
 

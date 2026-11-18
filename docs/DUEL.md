@@ -273,12 +273,13 @@ Two **name plates**, each a **wood-and-brass frame holding a paper card**:
 ### 7.2 Betting tickets
 - Color-coded **raffle tickets** slide in from the right into the action column when it's your turn: **Fold / Flamber / Min / Max**, each with its price chip. When you face a Max: **Match $X / Fold**. The look, colors and states are READABILITY.md §4–5.
 - `hud/ticket/face` + `hud/ticket/plinth` (tint greyscale, multiplied by the action color in code) + `hud/ticket/chip` + `hud/stamp/<choice>` (the ink stamp that slams on at press). `hud/slip` is no longer used.
-- Tickets you can't use go flat and dark with a strike line, not hidden.
+- Tickets you can't use go flat and dark with a strike line, not hidden, and say why where the price was (READABILITY.md §10).
+- Every bet, yours and the rival's, also lands on the felt as a full-size ticket: yours left of the pot, theirs right. They stay through the tally.
 - Keys: 1–4 press the tickets top to bottom, Space or Enter presses the primary (Lock in, Continue).
 
 ### 7.3 La Vitrine (collectibles)
 - A wooden **pull tab** at the top-left reading **"Vitrine ▾"** (`hud/vitrine/tab`, 64×16).
-- Click it and a **glass display case** drops down (spring overshoot): `hud/vitrine/case` (9-slice, dark wood with a glass front and a glint). Your collectibles sit inside as 64×88 cards in a row (the collectible frame from CARDS.md).
+- Click it and a **glass display case** drops down (spring overshoot): `hud/vitrine/case` (9-slice, dark wood with a glass front and a glint). Your collectibles stand inside on the velvet floor, bottom-aligned, each at its own size (CARDS.md §14).
 - **Drag to rearrange.** Order matters for triggers, Balatro-style.
 - Close by clicking the tab again or anywhere outside. It doesn't block the scene while closed.
 - **The rival's collectibles are never shown.**
@@ -293,6 +294,14 @@ Two **name plates**, each a **wood-and-brass frame holding a paper card**:
 ### 7.6 Twist sign (tournament rounds)
 - A paper **placard on two strings** drops from the ceiling to the right of the lamp, swings, and settles (spring). `hud/twist/sign` (9-slice) + `hud/twist/string` (1×tileable). It carries the twist's name and its one-line rule.
 - Together with it: the lamp turns red and the crowd gathers (§6).
+
+### 7.7 Beats (built Nov 17)
+The moments that say whose turn it is and what just happened. The full list and timings are READABILITY.md §10. Where they sit:
+- **Round track:** paper pills across the top center: `Pick » Bets » Showdown » Tally`.
+- **1er token:** a brass puck (drawn in code for now, `hud/token/premier` later) on the corner of the first bettor's plate, nearest the middle: yours at (156,148), theirs at (486,66). Its caption sits above your plate or under theirs until the first bet lands.
+- **Locked cards:** face down on your card spots (`NEAR_ROW`). The rival gets a squared stack on theirs (`FAR_ROW`).
+- **À vous** and the **ending callout:** centered over the felt at x 300. The callout is a plate frame with a dimmed band behind it.
+- **"is deciding…":** in the action column while the rival is to act, in place of the hint.
 
 ---
 
