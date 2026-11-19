@@ -318,9 +318,11 @@ export function drawFiche(g: CanvasRenderingContext2D): void {
   if (shown && shown.key !== pinned?.key) paintFiche(g, shown.e, shown.anchor, { age: t - shownAt, side: shown.side })
 }
 
-// the scene's one call: right-click pins, a 400 ms hold pins (and eats the click it ends with), Esc clears.
+// the scene's one call: right-click pins, a 400 ms finger hold pins (and eats the tap it ends with).
+// any left click, Esc or a new scene takes the pin down, so a pin never outstays the thing it was about.
 // returns a detach for when the canvas goes away
 export function ficheInput(cv: HTMLCanvasElement, toStage: (e: MouseEvent) => { x: number; y: number }): () => void {
+  clearFiche()
   let hold: { timer: number; x: number; y: number } | null = null
   let held = false
   const cancel = () => {
@@ -337,6 +339,9 @@ export function ficheInput(cv: HTMLCanvasElement, toStage: (e: MouseEvent) => { 
     if (e.button !== 0) return
     cancel()
     held = false
+    pinned = null
+    // a slow mouse click is still a click: only a finger can hold to pin
+    if (!touch) return
     const p = toStage(e)
     hold = { x: p.x, y: p.y, timer: window.setTimeout(() => {
       hold = null
@@ -370,6 +375,7 @@ export function ficheInput(cv: HTMLCanvasElement, toStage: (e: MouseEvent) => { 
   window.addEventListener('keydown', key)
   return () => {
     cancel()
+    clearFiche()
     cv.removeEventListener('contextmenu', menu)
     cv.removeEventListener('pointerdown', down)
     cv.removeEventListener('pointermove', move)
