@@ -3,6 +3,7 @@
 import fontsPng from '../../art/fonts/fonts.png'
 import fontsJson from '../../art/fonts/fonts.json'
 import { canvas, ctx2d } from './art.ts'
+import { GRADE, HYPE, LOSS, MONEY, VALUE } from './ink.ts'
 
 export type FontName = 'sans' | 'tiny' | 'didone' | 'chalk'
 
@@ -112,7 +113,7 @@ export function wrapText(s: string, width: number, font: FontName, bold = false)
 }
 
 // ---------- rich text: the rules markup (docs/UX.md §6) ----------
-// {v}+30 Value{/} cream on an ink chip, {h} hype, {x}×1.5 Hype{/} cream on a flame chip, {g} grade, {$} money, {-} a loss,
+// {v}+30 Value{/} cream on a value-blue chip, {h} hype, {x}×1.5 Hype{/} cream on a flame chip, {g} grade, {$} money, {-} a loss,
 // [Bulk] a keyword (brass underline), a newline breaks. a token never wraps apart
 
 type Mark = 'v' | 'h' | 'x' | 'g' | '$' | '-'
@@ -122,10 +123,10 @@ type Placed = Part & { x: number; w: number }
 export const RICH_LINE = 11
 const CHIP_PAD = 2
 const MARKS = new Set(['v', 'h', 'x', 'g', '$', '-'])
-const CHIP: Partial<Record<Mark, string>> = { v: '#2e2320', x: '#e8501a' }
-// on paper the score colors drop one step so they read on cream. on the felt they're the color language as is
-const PAPER_INK: Record<Mark, string> = { v: '#f6ecd2', x: '#fffbe8', h: '#e8501a', g: '#9c7028', $: '#3a8040', '-': '#a82a38' }
-const FELT_INK: Record<Mark, string> = { v: '#f6ecd2', x: '#fffbe8', h: '#ff7a24', g: '#e8c260', $: '#6fcf6f', '-': '#d04a4e' }
+// the two chip stats (Value, ×Hype) sit on a chip of their color, the rest are bold text in it (ink.ts)
+const CHIP: Partial<Record<Mark, string>> = { v: VALUE.paper, x: HYPE.paper }
+const PAPER_INK: Record<Mark, string> = { v: '#f6ecd2', x: '#fffbe8', h: HYPE.paper, g: GRADE.paper, $: MONEY.paper, '-': LOSS.paper }
+const FELT_INK: Record<Mark, string> = { v: '#f6ecd2', x: '#fffbe8', h: HYPE.felt, g: GRADE.felt, $: MONEY.felt, '-': LOSS.felt }
 
 export type RichStyle = { felt?: boolean; color?: string }
 

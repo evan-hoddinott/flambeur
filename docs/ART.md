@@ -97,16 +97,20 @@ One **master palette** of about 40 colors, used by every sprite. **Shaders are f
 | Violet | `#2a1440` `#4e2a78` `#7a4ab0` `#b088e0` | Absinthe's partner, deep shadows, Holo base |
 
 ### Color language (locked)
-The score has its own colors, used everywhere: counters, floating numbers, particles, tooltip keywords and HUD plates. Learn it once and it reads everywhere.
+The score has its own colors, used everywhere: counters, floating numbers, particles, tooltip keywords, card legends, the rules paper and HUD plates. Learn it once and it reads everywhere. The code is `src/ui/ink.ts`; nothing else hard-codes a stat color.
 
-| Meaning | Color | Why |
-|---|---|---|
-| **Value** | cream `#f6ecd2` | The card's printed worth, paper and ink |
-| **Hype** | flame orange `#ff7a24` | Hype is heat |
-| **Grade** | gold `#e8c260` | Grading slabs, gold standard |
-| **Money** ($, bankroll, pot) | green `#6fcf6f` | Banknotes |
-| Danger / losing / bust | burgundy `#d04a4e` | |
-| Psychedelic / rare | absinthe `#8fd14f` + violet | Only on rare and high moments |
+**One color, one meaning.** A stat's color is never used for anything else, and anything that feeds a stat wears that stat's color: Foil adds Value so its marker is Value blue, Holo and ★ cards add Hype so they're flame, Prism adds Grade so it's gold. Seeing the color on a card tells you what the card does to the score.
+
+| Meaning | Felt / paper | Why | Wears it |
+|---|---|---|---|
+| **Value** | blue `#8ec5ff` / `#2f5d9a` | Balatro's chips are blue. Cream (the old Value color) was every label's color, so Value never stood out | Foil, Bulk, Rookie, Jumbo, grind, the Value chip in rules text |
+| **Hype** | flame `#ff7a24` / `#e8501a` | Hype is heat | Holo, Misprint, 1st Edition, Beer-stained, ★ tiers, Flamber (it makes ★ cards, and ★ adds Hype) |
+| **Grade** | gold `#e8c260` / `#9c7028` | Grading slabs, gold standard. **Only Grade**: callouts, names and titles are cream, not gold | Prism, Damaged, graded cards |
+| **Money** ($, bankroll, pot) | green `#6fcf6f` / `#3a8040` | Banknotes. Both seats' bankrolls are green; the plate's position says whose it is | Gold Border, Chase, STONKS, prices |
+| Danger / losing / bust | burgundy `#d04a4e` / `#a82a38` | | |
+| Psychedelic / rare | absinthe `#8fd14f` + violet `#b088e0` | Only on rare and high moments | Jokers, the Grail |
+
+Selection (a picked chip, the selected sort button) is a plate tint, not a text color, so a gold tint on paper doesn't read as Grade. Highlighted words on the felt use pale cream `#fff0b0`.
 
 The **Appraisal** total uses the **flame ramp**: it starts cream and heats toward white-hot as it climbs (see Big moments).
 

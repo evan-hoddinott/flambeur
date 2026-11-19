@@ -21,6 +21,7 @@ import { stonksMult } from './engine/sleeves.ts'
 import { progress, land, mix, still, whipPan } from './ui/motion.ts'
 import * as sfx from './ui/sound.ts'
 import { loadArt, faceCanvas, backCanvas, cardCanvas, tinted } from './ui/art.ts'
+import { cardInk } from './ui/ink.ts'
 import { loadFonts, measure, plainText, wrapText } from './ui/font.ts'
 import { loadLogo } from './ui/logo.ts'
 import { loadTitle, panTo, showTitle, type TitleOnline } from './ui/title.ts'
@@ -721,7 +722,7 @@ function starterPanel(): Panel {
         ui.text(s.name, x + cw / 2, ty, { align: 'center', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
         ty += 13
         ty += ui.lines(s.deckText, x + cw / 2, ty, cw, { align: 'center', ...FELT_TEXT }) + 4
-        ui.lines(s.twist, x + cw / 2, ty, cw, { align: 'center', color: '#e8c260', outline: FELT_TEXT.outline })
+        ui.lines(s.twist, x + cw / 2, ty, cw, { align: 'center', color: '#fff0b0', outline: FELT_TEXT.outline })
         if (id !== 'standard') ui.fiche(entry('hud', `box-${id}`), x, y, cw, box.h - 20)
       })
     },
@@ -760,7 +761,7 @@ function draftPanel(): Panel {
         ui.hit(box.x, y, box.w, rowH - 2, () => toggle(i))
         ui.text(`${on ? '★ ' : ''}${row.label}`, left, y, {
           font: 'tiny',
-          color: on ? '#e8c260' : FELT_TEXT.color,
+          color: on ? '#fff0b0' : FELT_TEXT.color,
           outline: FELT_TEXT.outline,
         })
         row.cards.forEach((c, j) => {
@@ -1040,11 +1041,7 @@ function packPanel(): Panel {
 
 // a face-down pull hints at what's under it
 function glowInk(card: Card): string | undefined {
-  if (card.joker || card.tier) return '#b088e0'
-  if (card.finish === 'prism') return '#e8c260'
-  if (card.stamp) return '#3a8040'
-  if (card.finish) return '#3e66a0'
-  return undefined
+  return cardInk(card)
 }
 
 // ---------- shop ----------

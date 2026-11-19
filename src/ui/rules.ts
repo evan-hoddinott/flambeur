@@ -3,6 +3,7 @@ import { rip } from './sound.ts'
 // row, value/hype with your levels), how a hand works on the right. the carnet's Hands page draws the same two columns
 import { faceCanvas, sprite } from './art.ts'
 import { drawText, measure, wrapText } from './font.ts'
+import { HYPE, VALUE } from './ink.ts'
 import { HAND_BASE, HAND_NAMES, HAND_TYPES, type HandType } from '../engine/hands.ts'
 import { LEVEL_HYPE, LEVEL_VALUE } from '../engine/scoring.ts'
 import type { Suit } from '../engine/cards.ts'
@@ -14,7 +15,6 @@ const INK = '#1c1513'
 const PENCIL = '#43342e'
 const FADED = '#8c7656'
 const BURGUNDY = '#7a1a2c'
-const FLAME = '#a8260a'
 const PAPER = '#e3d2a8'
 const CREAM = '#f6ecd2'
 const CREASE = '#bfa77e'
@@ -56,8 +56,9 @@ export function handsColumn(g: CanvasRenderingContext2D, v: SeatView, x: number,
   const lv = x + w - 6
   drawText(g, 'HAND', x, y, { font: 'tiny', color: BURGUNDY })
   drawText(g, 'EXAMPLE', cards, y, { font: 'tiny', color: BURGUNDY })
-  drawText(g, 'VALUE', val, y, { font: 'tiny', color: BURGUNDY, align: 'center' })
-  drawText(g, 'HYPE', hype, y, { font: 'tiny', color: BURGUNDY, align: 'center' })
+  // the columns wear their stat's color, so the sheet teaches the same colors as the score tag
+  drawText(g, 'VALUE', val, y, { font: 'tiny', color: VALUE.paper, align: 'center' })
+  drawText(g, 'HYPE', hype, y, { font: 'tiny', color: HYPE.paper, align: 'center' })
   drawText(g, 'LV', lv, y, { font: 'tiny', color: BURGUNDY, align: 'right' })
   const top = y + 10
   HAND_TYPES.forEach((h, i) => {
@@ -71,8 +72,8 @@ export function handsColumn(g: CanvasRenderingContext2D, v: SeatView, x: number,
     drawText(g, HAND_NAMES[h], x, mid, { font: 'sans', color: INK })
     EXAMPLES[h].split(' ').forEach((code, j) => mini(g, code, cards + j * 16, ry + 2, Math.min(24, rowH - 3)))
     const up = level > 0
-    drawText(g, String(HAND_BASE[h].value + LEVEL_VALUE * level), val, mid, { font: 'sans', color: up ? BURGUNDY : INK, align: 'center', bold: up })
-    drawText(g, String(HAND_BASE[h].hype + LEVEL_HYPE * level), hype, mid, { font: 'sans', color: FLAME, align: 'center', bold: up })
+    drawText(g, String(HAND_BASE[h].value + LEVEL_VALUE * level), val, mid, { font: 'sans', color: VALUE.paper, align: 'center', bold: up })
+    drawText(g, String(HAND_BASE[h].hype + LEVEL_HYPE * level), hype, mid, { font: 'sans', color: HYPE.paper, align: 'center', bold: up })
     drawText(g, String(level + 1), lv, mid, { font: 'sans', color: up ? BURGUNDY : FADED, align: 'right', bold: up })
   })
   return 10 + HAND_TYPES.length * rowH

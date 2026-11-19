@@ -5,6 +5,7 @@ import { collectible, drawCollectible, opaque } from './collectibles.ts'
 // layout is the art proof's (art/shop/counter.py), in 640x360 stage units. spec: docs/SHOP.md, frame zones: docs/UX.md §2.
 // main.ts owns the game, this file only draws a ShopState and reports clicks back through it
 import { cardCanvas, sprite, ctx2d, blit, canvas, nineSlice } from './art.ts'
+import { MONEY as CASH } from './ink.ts'
 import { drawText, measure, plainText, wrapText, type TextStyle } from './font.ts'
 import { rankLabel, SUIT_GLYPH, type Card } from '../engine/cards.ts'
 import { getKeeper, INSERTS, type Insert } from '../engine/shop.ts'
@@ -657,7 +658,7 @@ function stonks(v: SeatView): void {
   const [big, mult] = stonksBig(hot, hotMarket)
   if (big.length <= 2) text(big, x + 40, y + 28, { color: CREAM, scale: 3, align: 'center' })
   else text(big, x + 40, y + 34, { font: 'chalk', color: CREAM, align: 'center' })
-  text(mult, x + 68, y + 31, { font: 'chalk', color: '#e8c260' })
+  text(mult, x + 68, y + 31, { font: 'chalk', color: CASH.felt })
   text('se vend', x + 68, y + 43, { font: 'chalk', color: '#bfa77e' })
   // french is flavor, english is the rule (from the Fiche map, so the board and its Fiche say the same thing)
   wrapText(plainText(rule.text[0]), 112, 'tiny').slice(0, 2).forEach((row, i) => text(row, x + 62, y + 56 + i * 7, { font: 'tiny', color: PAPER, align: 'center' }))
@@ -1505,7 +1506,7 @@ function chart(t: Lotto): void {
   g.fillStyle = '#ffb03a'
   g.fillRect(x + 8, y + 58 - bar, 10, 2)
   text(hand, x + 60, y + 28, { color: INK, align: 'center' })
-  text('+1 level', x + 60, y + 42, { color: MONEY, align: 'center' })
+  text('+1 level', x + 60, y + 42, { color: '#7a1a2c', align: 'center', bold: true })
 }
 
 // brass and absinthe rays turning slowly behind a grail

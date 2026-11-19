@@ -49,7 +49,7 @@ These are bold printed tickets. The face is the main color, the plinth is the da
 
 | Action | Face | Plinth | Label | Why |
 |---|---|---|---|---|
-| **Lock in** (play your cards) | felt blue `#3e66a0` | `#0f1d33` | cream | Balatro's Play is blue, and blue is already *you* (your bankroll) |
+| **Lock in** (play your cards) | felt blue `#3e66a0` | `#0f1d33` | cream | Balatro's Play is blue, and playing is what makes Value (blue, ART.md color language) |
 | **Max** | burgundy `#a82a38` | `#2a0910` | cream | Pushing hard. Red is danger |
 | **Match $X** | burgundy `#a82a38` | `#2a0910` | cream | It's paying the Max, so it gets the Max's color |
 | **Min** | money green `#3a8040` | `#1e4a24` | cream | The cheap bet. Money green |

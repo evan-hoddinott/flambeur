@@ -2,7 +2,8 @@
 // a didone name, a chalk type pill, rule lines in the §6 markup, a flavor line and a footer.
 // call fiche(entry, anchor) every frame something is hovered and drawFiche(g) last
 import type { Entry, Kind } from '../engine/glossary.ts'
-import { sprite, tinted, specialInk, tierInk } from './art.ts'
+import { sprite, tinted, specialInk } from './art.ts'
+import { modifierInk, starInk } from './ink.ts'
 import { drawText, measure, wrapText, richText, richSize, plainText } from './font.ts'
 
 type Rect = { x: number; y: number; w: number; h: number }
@@ -32,21 +33,21 @@ const PILL: Record<Kind, string> = {
 }
 const CARD_KINDS = new Set<Kind>(['card', 'finish', 'stamp', 'knockoff', 'trait', 'tier', 'variant', 'joker', 'bulk'])
 
-// a card line starts with its modifier's name. that name picks the square's color, same inks as the card art
+// a card line starts with its modifier's name. that name picks the square's color: the stat it feeds (ink.ts)
 const LINE_INK: [string, string][] = ([
-  ['Chase', specialInk.chase], ['Sticker', specialInk.sticker], ['Rookie', specialInk.rookie], ['Jumbo', specialInk.jumbo],
+  ['Chase', modifierInk('chase')], ['Sticker', modifierInk('sticker')], ['Rookie', modifierInk('rookie')], ['Jumbo', modifierInk('jumbo')],
   ['Crayon Joker', specialInk.crayon], ['Joker', specialInk.joker], ['Sticky Fingers', specialInk.joker], ['Double or Nothing', specialInk.joker],
   ['Courtier', specialInk.joker], ['Catalyst', specialInk.joker], ['Poker Face', specialInk.joker], ["Rival's Card", specialInk.joker],
-  ['Bulk', specialInk.bulk], ['Gold foil', specialInk.foil], ['Foil', specialInk.foil], ['Holographic', specialInk.holo], ['Holo', specialInk.holo],
-  ['Embers', specialInk.prism], ['Prism', specialInk.prism], ['Misprint', specialInk.misprint], ['1st Edition', specialInk.first],
-  ['Signed', specialInk.signed], ['Gold Border', specialInk.gold], ['Damaged', specialInk.damaged], ['Crayon', specialInk.crayon],
-  ['Marked', specialInk.marked], ['Wrong Suit', specialInk.wrongsuit], ['Beer-stained', specialInk.beer],
+  ['Bulk', modifierInk('bulk')], ['Gold foil', modifierInk('foil')], ['Foil', modifierInk('foil')], ['Holographic', modifierInk('holo')],
+  ['Holo', modifierInk('holo')], ['Embers', modifierInk('prism')], ['Prism', modifierInk('prism')], ['Misprint', modifierInk('misprint')],
+  ['1st Edition', modifierInk('first')], ['Signed', modifierInk('signed')], ['Gold Border', modifierInk('gold')], ['Damaged', modifierInk('damaged')],
+  ['Crayon', modifierInk('crayon')], ['Marked', modifierInk('marked')], ['Wrong Suit', modifierInk('wrongsuit')], ['Beer-stained', modifierInk('beer')],
 ] as [string, string][]).sort((a, b) => b[0].length - a[0].length)
 
 function lineInk(line: string): string {
   const s = plainText(line).trim()
   const stars = s.match(/^★+/)
-  if (stars) return tierInk[Math.min(3, stars[0].length)]
+  if (stars) return starInk(stars[0].length)
   const hit = LINE_INK.find(([name]) => s.toLowerCase().startsWith(name.toLowerCase()))
   return hit ? hit[1] : BRASS
 }

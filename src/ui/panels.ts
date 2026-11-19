@@ -101,7 +101,7 @@ export function drawPanel(g: CanvasRenderingContext2D, now: number, mouse: { x: 
     nineSlice(g, 'hud/plate/frame', box.x - 4, box.y - 4, box.w + 8, box.h + 8)
     nineSlice(g, 'hud/plate/paper', box.x, box.y, box.w, box.h)
   }
-  const ink = p.felt ? { title: '#e8c260', help: CREAM, outline: OUTLINE } : { title: '#7a1a2c', help: '#5c4a36', outline: undefined }
+  const ink = p.felt ? { title: '#fff0b0', help: CREAM, outline: OUTLINE } : { title: '#7a1a2c', help: '#5c4a36', outline: undefined }
   drawText(g, p.title, box.x + box.w / 2, box.y + 4, { font: 'didone', color: ink.title, align: 'center', outline: ink.outline })
   let top = box.y + 26
   if (p.help) {

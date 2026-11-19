@@ -5,7 +5,8 @@ import { progress, mix, juiceAt, spring, springs, stepSprings } from './motion.t
 // layout is the art proof's (art/duel/review.py), in 640x360 stage units. main.ts owns the game,
 // this file only draws a DuelState and reports clicks back through it
 import { laneArt } from './lanes.ts'
-import { sprite, canvas, ctx2d, blit, backCanvas, cardCanvas, stockScale, specialInk, tierInk, type Sprite, nineSlice } from './art.ts'
+import { sprite, canvas, ctx2d, blit, backCanvas, cardCanvas, stockScale, specialInk, type Sprite, nineSlice } from './art.ts'
+import { GRADE, HYPE, MONEY as CASH, RARE, VALUE, modifierInk, starInk } from './ink.ts'
 import { HAND_NAMES } from '../engine/hands.ts'
 import { tableOf } from '../engine/economy.ts'
 import { JOKERS, VARIANTS, knockoffName, traitName, type Card } from '../engine/cards.ts'
@@ -64,7 +65,7 @@ const FAR = 116 // felt far edge
 const NEAR = 330 // felt near edge
 const FELTS = ['green', 'blue', 'burgundy', 'black']
 const RED = '#d04a4e'
-const MONEY = '#b8f0a0'
+const MONEY = CASH.felt
 const INK = '#2e2320'
 const CREAM = '#f6ecd2'
 const BURGUNDY = '#7a1a2c'
@@ -114,8 +115,8 @@ let lastCardHits: CardHit[] = [] // last frame's, for hover while this frame is 
 
 const insertColors: Record<Insert, string> = {
   stylo: '#28497a', broyeuse: '#8c7656', photocopie: '#3e9ab0', reprint: '#c99a3a',
-  foil: GOLD, holo: '#b088e0', prism: '#ff7a24', tampon: BURGUNDY, allumettes: '#e8501a',
-  checklist: '#4a9a74', code: '#a82a38', wishlist: '#b088e0', grail: GOLD,
+  foil: VALUE.paper, holo: HYPE.paper, prism: GRADE.paper, tampon: BURGUNDY, allumettes: '#e8501a',
+  checklist: '#4a9a74', code: '#a82a38', wishlist: '#b088e0', grail: RARE,
 }
 type InsertTarget = { old: Card; card: Card; x: number; y: number; w: number; h: number; r: number }
 let insertFx: { id: Insert; at: number; targets: InsertTarget[] } | null = null
@@ -1149,7 +1150,7 @@ function spoilsTable(st: DuelState): void {
   const box = spriteBox('hud/spoils/placard', sign.x, sign.y)
   look(box.x, box.y, box.w, box.h, rule('spoils'))
   const who = sp.toPick === null ? '' : mine ? 'Your pick' : `${st.rival.name} picks`
-  text(who, 320, 166, { font: 'sans', color: mine ? GOLD : CREAM, align: 'center', bold: true, outline: OUTLINE })
+  text(who, 320, 166, { font: 'sans', color: CREAM, align: 'center', bold: true, outline: OUTLINE })
   // hovering one shows it against your deck in the compare dock (main opens the dock)
   let hovered: Card | null = null
   sp.cards.forEach((c, i) => {
@@ -1317,9 +1318,9 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   if (lostIt) g.globalAlpha = 0.6
   nine('hud/score/tag', x, y, w, 44)
   text(label, x + w / 2, y + 4, { font: 'tiny', color: BURGUNDY, align: 'center' })
-  // value cream-on-ink chip, hype in flame, grade in gold
-  const parts: [string, string][] = [[fmt(v), INK], [' × ', '#8c7656'], [hypeText(hy), FLAME]]
-  if (gr) parts.push([` × 2^${gr}`, '#9c7028'])
+  // each factor in its stat's color (ink.ts), so the tag reads the same as the Fiche and the floats
+  const parts: [string, string][] = [[fmt(v), VALUE.paper], [' × ', '#8c7656'], [hypeText(hy), HYPE.paper]]
+  if (gr) parts.push([` × 2^${gr}`, GRADE.paper])
   const widths = parts.map(([s]) => measure(s, 'sans') + 1)
   let px = x + w / 2 - widths.reduce((s, n) => s + n, 0) / 2
   parts.forEach(([s, color], i) => {
@@ -1433,16 +1434,16 @@ function hand(st: DuelState, t: number): void {
 export function cardTags(card: Card) {
   const tags: { label: string; color: string }[] = []
   const add = (label: string, color = '#c99a3a') => tags.push({ label, color })
-  if (card.bulk) add('Bulk: +5 Value', specialInk.bulk)
-  if (card.variant) add(VARIANTS[card.variant].name, specialInk[card.variant])
+  if (card.bulk) add('Bulk: +5 Value', modifierInk('bulk'))
+  if (card.variant) add(VARIANTS[card.variant].name, modifierInk(card.variant))
   if (card.joker) add(JOKERS[card.joker].name + ': ' + JOKERS[card.joker].text, specialInk[card.joker === 'crayon' ? 'crayon' : 'joker'])
-  if (card.finish) add(({ foil: 'Foil', holo: 'Holo', prism: 'Prism', misprint: 'Misprint' })[card.finish], specialInk[card.finish])
-  if (card.stamp) add(({ first: '1st Edition', signed: 'Signed', gold: 'Gold Border', damaged: 'Damaged' })[card.stamp], specialInk[card.stamp])
-  if (card.knockoff) add(knockoffName(card.knockoff), specialInk[card.knockoff.kind])
-  if (card.grade !== null) add('Grade ' + card.grade)
-  if (card.tier) add('★'.repeat(card.tier), tierInk[card.tier])
+  if (card.finish) add(({ foil: 'Foil', holo: 'Holo', prism: 'Prism', misprint: 'Misprint' })[card.finish], modifierInk(card.finish))
+  if (card.stamp) add(({ first: '1st Edition', signed: 'Signed', gold: 'Gold Border', damaged: 'Damaged' })[card.stamp], modifierInk(card.stamp))
+  if (card.knockoff) add(knockoffName(card.knockoff), modifierInk(card.knockoff.kind))
+  if (card.grade !== null) add('Grade ' + card.grade, GRADE.paper)
+  if (card.tier) add('★'.repeat(card.tier), starInk(card.tier))
   for (const t of card.traits) add(traitName(t))
-  if (card.grind) add('+' + card.grind + ' Value')
+  if (card.grind) add('+' + card.grind + ' Value', VALUE.paper)
   return tags
 }
 
@@ -1654,7 +1655,7 @@ function plate(x: number, y: number, mine: boolean, st: DuelState, bankroll: num
   g.save()
   g.translate(x + 12, y + 41)
   g.scale(j.s, j.s)
-  text(`$${bankroll}`, 0, -17, { font: 'didone', color: mine ? '#3e66a0' : BURGUNDY })
+  text(`$${bankroll}`, 0, -17, { font: 'didone', color: CASH.paper })
   g.restore()
   // the solo rival's money is the stack it sat down with: bust it and the table is yours
   if (!mine && st.view.others[0].rival) text('stack', x + 12, y + 44, { font: 'tiny', color: '#8c7656' })
@@ -1719,8 +1720,8 @@ function premier(st: DuelState): void {
   const y = meFirst ? 110 : 74
   const align = meFirst ? 'left' : 'right'
   // under their plate the didone runs into the puck, so a long name drops to the sans
-  if (!meFirst && measure(who, 'didone') > 128) text(who, left, y + 4, { font: 'sans', color: GOLD, align, bold: true, outline: OUTLINE })
-  else text(who, left, y, { font: 'didone', color: GOLD, align, outline: OUTLINE })
+  if (!meFirst && measure(who, 'didone') > 128) text(who, left, y + 4, { font: 'sans', color: CREAM, align, bold: true, outline: OUTLINE })
+  else text(who, left, y, { font: 'didone', color: CREAM, align, outline: OUTLINE })
   text(why, left, y + 19, { font: 'sans', color: CREAM, align, outline: OUTLINE })
 }
 
@@ -1766,7 +1767,7 @@ function turnBanner(): void {
   if (age >= TURN_MS) return
   const alpha = Math.min(1, age / 120, (TURN_MS - age) / 300)
   const y = 160 - age * 0.012
-  text('À vous', 300, y, { font: 'didone', color: GOLD, align: 'center', scale: 2, outline: OUTLINE, alpha })
+  text('À vous', 300, y, { font: 'didone', color: CREAM, align: 'center', scale: 2, outline: OUTLINE, alpha })
   text('your bet', 300, y + 32, { font: 'sans', color: CREAM, align: 'center', bold: true, outline: OUTLINE, alpha })
 }
 
@@ -1967,7 +1968,7 @@ function colText(st: DuelState, bottom: number): number {
     text(`is deciding${dots}`, COL.x + 2, y - 10, { font: 'sans', color: CREAM, outline: OUTLINE })
     const name = st.rival.name
     const big = measure(name, 'didone') <= W - COL.x - 4
-    text(name, COL.x + 2, big ? y - 30 : y - 24, { font: big ? 'didone' : 'chalk', bold: !big, color: GOLD, outline: OUTLINE })
+    text(name, COL.x + 2, big ? y - 30 : y - 24, { font: big ? 'didone' : 'chalk', bold: !big, color: CREAM, outline: OUTLINE })
     return y - 30
   }
   const hint = st.hint ? wrap(st.hint, COL.w - 4, 'sans') : []
@@ -2069,7 +2070,7 @@ function vitrineTab(st: DuelState, t: number): void {
   st.view.me.display.forEach((_, i) => {
     g.fillStyle = OUTLINE
     g.fillRect(75 + i * 5, 6 + drop, 4, 4)
-    g.fillStyle = GOLD
+    g.fillStyle = CREAM
     g.fillRect(76 + i * 5, 7 + drop, 2, 2)
   })
 }
@@ -2138,10 +2139,10 @@ export async function countUp(sd: ShowdownView): Promise<void> {
         const s = springs.get(`card${card.id}`)
         if (s) {
           const bits: [string, string][] = []
-          if (st.value) bits.push([`+${st.value}`, CREAM])
-          if (st.hype) bits.push([`+${st.hype} Hype`, FLAME])
-          if (st.xhype !== 1) bits.push([`×${st.xhype} Hype`, FLAME])
-          if (st.grade) bits.push([`×2^${st.grade}`, GOLD])
+          if (st.value) bits.push([`+${st.value} Value`, VALUE.felt])
+          if (st.hype) bits.push([`+${st.hype} Hype`, HYPE.felt])
+          if (st.xhype !== 1) bits.push([`×${st.xhype} Hype`, HYPE.felt])
+          if (st.grade) bits.push([`+${st.grade} Grade`, GRADE.felt])
           bits.forEach(([s_, color], b) => floats.push({ text: s_, x: s.at.x, y: s.at.y - 30 - b * 11, color, t: now }))
         }
       }
