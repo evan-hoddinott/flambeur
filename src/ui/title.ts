@@ -8,6 +8,8 @@ import titleJson from '../../art/title/title.json'
 import { canvas, ctx2d, sprite, tinted } from './art.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
 import * as sfx from './sound.ts'
+import { LANG_TAB, langTab } from './frame.ts'
+import { toggleLang } from './lang.ts'
 import { INTRO_FRAMES, IDLE_FRAMES, LOGO_H, LOGO_W, firelight, frameMs, logoFrame } from './logo.ts'
 
 export type TitleBoard = { title: string; rows: string[][]; empty: string }
@@ -697,6 +699,8 @@ function street(t: number): void {
   reflection(CAROTTE.x + 9, 'rgba(208,74,78,', 8, t)
   reflection(552, 'rgba(255,176,58,', 40, t)
 
+  // FR · EN, top right of the street
+  langTab(g, hit('lang', W - LANG_TAB.w - 6, 0, LANG_TAB.w, LANG_TAB.h, toggleLang), W - LANG_TAB.w - 6)
   // the casino's marquee: CASINO and a chase of bulbs
   text('CASINO', W / 2, SIDEWALK - 92, { font: 'chalk', color: '#e8c260', align: 'center', bold: true })
   for (let i = 0; i < 16; i++) {

@@ -16,7 +16,8 @@ import { getRival, type RivalId } from '../engine/rivals.ts'
 import { cardEntry, entry, KEYWORDS, type Entry } from '../engine/glossary.ts'
 import type { SeatView, ShopOfferView } from '../engine/match.ts'
 import * as sfx from './sound.ts'
-import { drawBand, runStrip } from './frame.ts'
+import { LANG_TAB, drawBand, langTab, runStrip, vitrineWord } from './frame.ts'
+import { toggleLang } from './lang.ts'
 import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
 import { drawDrawer, drawerKey, drawerOpen, drawerPointer, openDrawer, setDrawerHover, type DrawerThing } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
@@ -55,7 +56,6 @@ const CREAM = '#f6ecd2'
 const PAPER = '#e3d2a8'
 const TAN = '#8c7656'
 const MONEY = '#3a8040'
-const BLUE = '#3e66a0'
 const BRASS = '#c99a3a'
 const GREY = '#43342e'
 
@@ -633,7 +633,9 @@ function room(st: ShopState): void {
   const overTab = hit(8, 0, tab.w, tab.h, () => openDrawer('vitrine'))
   if (overTab) outline(imageOf('hud/vitrine/tab'), 8, 2)
   pin('hud/vitrine/tab', 8, overTab ? 2 : 0)
+  vitrineWord(g, 8, overTab ? 2 : 0)
   tip(() => entry('hud', 'vitrine'), 8, 0, tab.w, tab.h)
+  langTab(g, hit(LANG_TAB.x, LANG_TAB.y, LANG_TAB.w, LANG_TAB.h, toggleLang))
   stonks(st.view)
   const clock = st.clock()
   if (clock) {
@@ -713,6 +715,10 @@ function sign(v: SeatView): void {
   g.fillStyle = 'rgba(14,11,10,.65)'
   g.fillRect(-47, -25, 96, 52)
   pin('shop/sign', -48, -26)
+  // LA MAISON is painted into the sign: paper over it, then the words as text so they swap to english
+  g.fillStyle = PAPER
+  g.fillRect(-19, -19, 38, 5)
+  text('LA MAISON', 0, -20, { font: 'tiny', color: '#7a1a2c', align: 'center' })
   v.keeper.forEach((id, i) => text(`· ${getKeeper(id).name}`, -42, -10 + i * 11, { color: INK }))
   g.restore()
   if(v.me.shop?.rolledOver) {
@@ -1014,7 +1020,7 @@ function plate(v: SeatView): void {
   nine('hud/plate/paper', x + 5, y + 5, w - 10, h - 10)
   pin(`mask/${myMask(v)}/icon`, x + 20, y + 17)
   text(v.me.name === 'You' ? 'Vous' : v.me.name, x + 34, y + 9, { color: INK })
-  text(`$${plateMoney(v.me.bankroll)}`, x + 12, y + 24, { font: 'didone', color: BLUE })
+  text(`$${plateMoney(v.me.bankroll)}`, x + 12, y + 24, { font: 'didone', color: CASH.paper })
   tip(() => entry('hud', 'bankroll'), x + 8, y + 22, 56, 22)
   // the shop has no hand or discards, so only the Sleeve's icon, in the duel's first icon slot
   const ix = x + 70

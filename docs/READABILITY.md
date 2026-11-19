@@ -154,7 +154,16 @@ Built Nov 17 2026. §1–9 make it clear what you can press. This section makes 
 
 ### Language
 
-The French is the flavor, the English is the rule. Callouts and bubbles show the French big and the English under it. Explanations (the 1er caption, the hint, the reasons) are English only.
+The French is the flavor, the English is the rule. Explanations (the 1er caption, the hint, the reasons) are English only.
+
+There are two modes, switched by the **FR · EN** chip at the top of the title, the duel and the shop (stored in `flambeur:lang`). **English is the default**, so a first-timer reads every rule word in their own language.
+
+- **English:** every French word that names a screen, a round or an action swaps to English (Manche → Round, Vitrine → Display, À vous → Your turn, Tapis → All in). Callouts show only the English line, big.
+- **French:** the French as written, with the English under it in callouts and bubbles.
+- **Both:** names stay French and always glint: Flamber and Flambé, Le Patron, the rivals, the packs' keepers, the French-named collectibles, TABAC. Mechanic words are English in English mode; names are identity and stay.
+- **The glint:** French letters catch a band of light that sweeps across the screen every 4.2 s (brass on paper, white-gold on the felt), so French reads as gilt lettering. None under reduced motion, and never on cached canvases (the felt), where a glint would freeze.
+
+`src/ui/lang.ts` holds the one word table, and `drawText` runs every string through it, so call sites keep writing the French. A new French word goes in that table, or it shows French in both modes without glinting. French that is painted into a sprite (the VITRINE tab, the felt's PIOCHE / DÉFAUSSE, the house sign) is covered and redrawn as text. Pack art (LE ROUSSI, BISCUITS) stays painted; those are brand names.
 
 ### Testing
 

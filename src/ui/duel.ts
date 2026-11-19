@@ -18,7 +18,8 @@ import { insertFace, insertMark } from './placeholders.ts'
 import type { Appraisal } from '../engine/scoring.ts'
 import type { StarterId } from '../engine/starters.ts'
 import * as sfx from './sound.ts'
-import { STRIP, announce, bandShowing, drawBand, runStrip, skipBand } from './frame.ts'
+import { LANG_TAB, STRIP, announce, bandShowing, drawBand, langTab, runStrip, skipBand, vitrineWord } from './frame.ts'
+import { lang, toggleLang } from './lang.ts'
 import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
 import { closeDrawer, deckCounts, drawDrawer, drawerKey, drawerOpen, drawerPointer, openDrawer, setCompareHover, setDrawerActions, setDrawerHover } from './drawer.ts'
@@ -589,7 +590,7 @@ let roomLayer: HTMLCanvasElement | null = null
 let feltLayer: HTMLCanvasElement | null = null
 
 function layers(table: number, tournament: boolean): void {
-  const key = `${table}|${tournament}`
+  const key = `${table}|${tournament}|${lang()}`
   if (key === roomKey) return
   roomKey = key
   roomLayer = buildRoom()
@@ -613,6 +614,16 @@ function buildRoom(): HTMLCanvasElement {
     }
   }
   r.putImageData(img, 0, 0)
+  return c
+}
+
+// a pile print with its painted word (rows 77-83, between the corner marks) cleared out
+function unworded(name: string): HTMLCanvasElement {
+  const s = sprite(name)
+  const c = canvas(s.w, s.h)
+  const p = ctx2d(c)
+  p.drawImage(s.img, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h)
+  p.clearRect(14, 77, s.w - 28, 7)
   return c
 }
 
@@ -656,8 +667,18 @@ function buildFelt(table: number, tournament: boolean): HTMLCanvasElement {
   }
   print('felt/print/pot', 322, 191, 145, 35)
   print('felt/print/crest', 307, 191, 49, 28)
+  // the pile prints come with PIOCHE / DÉFAUSSE painted in. that band is cleared and the word drawn as text, so it
+  // reads in either language
   for (const [name, x, y, s] of [['pile', 223, 158, 0.64], ['pile', MY_PILE.x, MY_PILE.y, 0.96], ['discard', MY_DISCARD.x, MY_DISCARD.y, 0.84]] as const) {
-    print(`felt/print/${name}`, x, y, Math.round(72 * s), Math.round(55 * s))
+    const w = Math.round(72 * s)
+    const h = Math.round(55 * s)
+    const art = unworded(`felt/print/${name}`)
+    f.save()
+    f.imageSmoothingEnabled = true
+    f.globalAlpha = table === 4 ? 1 : 0.8
+    f.drawImage(art, Math.round(x - w / 2), Math.round(y - h / 2), w, h)
+    drawText(f, name === 'pile' ? 'PIOCHE' : 'DÉFAUSSE', x, Math.round(y - h / 2 + h * 0.84) - 3, { font: 'tiny', color: '#8c7656', align: 'center' })
+    f.restore()
   }
   tile('rail/far', 0, FAR - 4, W, 6, f)
   tile('rail/near', 0, NEAR - 4, W, 18, f)
@@ -1492,6 +1513,7 @@ function frameZones(st: DuelState, t: number): void {
   if (twist && tw) look(twist.x, twist.y, twist.w, twist.h, () => entry('twist', tw.id, tw))
   vitrineTab(st, t)
   carnetTab()
+  langChip()
   rulesBall(st, t)
 }
 
@@ -2066,7 +2088,9 @@ function vitrineTab(st: DuelState, t: number): void {
   look(8, 0, 64, 18, rule('vitrine'))
   const drop = over ? 2 : 0
   if (over) outline('hud/vitrine/tab', 8, drop)
-  pin('hud/vitrine/tab', 8, drop + (over ? Math.sin(t * 8) * 0.3 : 0))
+  const bob = drop + (over ? Math.sin(t * 8) * 0.3 : 0)
+  pin('hud/vitrine/tab', 8, bob)
+  vitrineWord(g, 8, Math.round(bob))
   st.view.me.display.forEach((_, i) => {
     g.fillStyle = OUTLINE
     g.fillRect(75 + i * 5, 6 + drop, 4, 4)
@@ -2081,6 +2105,10 @@ function carnetTab(): void {
   const drop = over ? 2 : 0
   nine('hud/plate/paper', x, -4 + drop, 46, 18, over ? CREAM : '#e3d2a8')
   text('Carnet ?', x + 23, 2 + drop, { font: 'tiny', color: BURGUNDY, align: 'center' })
+}
+
+function langChip(): void {
+  langTab(g, hit(LANG_TAB.x, LANG_TAB.y, LANG_TAB.w, LANG_TAB.h, toggleLang))
 }
 
 function effects(): void {

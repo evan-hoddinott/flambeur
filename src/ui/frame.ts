@@ -2,6 +2,7 @@
 // zone A, the run strip: Table · Manche, and tonight's or the next twist. hover the twist for its rule
 import { nineSlice } from './art.ts'
 import { drawText, measure } from './font.ts'
+import { lang } from './lang.ts'
 import { tableOf } from '../engine/economy.ts'
 import { twistName } from '../engine/twists.ts'
 import type { SeatView } from '../engine/match.ts'
@@ -40,9 +41,34 @@ export function runStrip(g: CanvasRenderingContext2D, v: SeatView, round = v.rou
   return { x: x + 6, y: y + 18, w: Math.min(w - 12, tw), h: 10 }
 }
 
+// ---------- the language chip ----------
+// FR · EN on a paper tab at the top of every scene, the current one lit. the scene hit-tests LANG_TAB and calls
+// toggleLang (lang.ts) on a click
+
+export const LANG_TAB = { x: 156, y: 0, w: 40, h: 16 }
+
+export function langTab(g: CanvasRenderingContext2D, over: boolean, x = LANG_TAB.x): void {
+  const { w } = LANG_TAB
+  const drop = over ? 2 : 0
+  nineSlice(g, 'hud/plate/paper', x, -4 + drop, w, 18, over ? '#f6ecd2' : '#e3d2a8')
+  const fr = lang() === 'fr'
+  drawText(g, 'FR', x + 12, 2 + drop, { font: 'tiny', color: fr ? BURGUNDY : '#a08a68', align: 'center' })
+  drawText(g, '·', x + 20, 2 + drop, { font: 'tiny', color: '#a08a68', align: 'center' })
+  drawText(g, 'EN', x + 28, 2 + drop, { font: 'tiny', color: fr ? '#a08a68' : BURGUNDY, align: 'center' })
+}
+
+// the vitrine tab's word is painted into its sprite. in english a patch of the tab's own ink covers it with DISPLAY
+export function vitrineWord(g: CanvasRenderingContext2D, x: number, y: number): void {
+  if (lang() === 'fr') return
+  g.fillStyle = '#2a2010'
+  g.fillRect(x + 10, y + 5, 30, 6)
+  drawText(g, 'DISPLAY', x + 25, y + 4, { font: 'tiny', color: '#e8c260', align: 'center' })
+}
+
 // ---------- zone F, the announcement band ----------
 // one rule callout at a time across the middle (K.O., rival sits down, marker due or paid, twist, spoils):
-// the french line big, the english under it (READABILITY §10). queued, ~1.6 s each, nothing drawn when empty
+// in french the french line big and the english under it (READABILITY §10), in english just the english.
+// queued, ~1.6 s each, nothing drawn when empty
 
 export type Tone = 'good' | 'bad' | 'plain'
 type Call = { fr: string; en: string; tone: Tone; t: number | null }
@@ -79,8 +105,11 @@ export function drawBand(g: CanvasRenderingContext2D, now: number, centerY = 195
   if (!c) return
   if (c.t === null) c.t = now
   const age = now - c.t
-  const scale = measure(c.fr, 'didone') * 2 <= 400 ? 2 : 1
-  const w = Math.max(measure(c.fr, 'didone') * scale, measure(c.en, 'sans', true)) + 40
+  // english mode: the english line goes big and there's nothing under it
+  const big = lang() === 'fr' ? c.fr : c.en
+  const small = lang() === 'fr' ? c.en : ''
+  const scale = measure(big, 'didone') * 2 <= 400 ? 2 : 1
+  const w = Math.max(measure(big, 'didone') * scale, measure(small, 'sans', true)) + 40
   const h = 30 + 14 * scale
   const pop = still?.matches || age >= 260 ? 1 : 0.6 + 0.4 * (1 - Math.exp(-age / 50)) + 0.12 * Math.exp(-age / 90)
   const ink = TONE[c.tone]
@@ -94,7 +123,7 @@ export function drawBand(g: CanvasRenderingContext2D, now: number, centerY = 195
   g.scale(pop, pop)
   nineSlice(g, 'hud/plate/frame', -w / 2 - 5, -h / 2 - 5, w + 10, h + 10)
   nineSlice(g, 'hud/plate/paper', -w / 2, -h / 2, w, h)
-  drawText(g, c.fr, 0, -h / 2 + 4, { font: 'didone', color: ink.big, align: 'center', scale })
-  drawText(g, c.en, 0, h / 2 - 15, { font: 'sans', color: ink.small, align: 'center', bold: true })
+  drawText(g, big, 0, -h / 2 + 4, { font: 'didone', color: ink.big, align: 'center', scale })
+  if (small) drawText(g, small, 0, h / 2 - 15, { font: 'sans', color: ink.small, align: 'center', bold: true })
   g.restore()
 }

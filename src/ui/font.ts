@@ -3,6 +3,7 @@
 import fontsPng from '../../art/fonts/fonts.png'
 import fontsJson from '../../art/fonts/fonts.json'
 import { canvas, ctx2d } from './art.ts'
+import { say, segments } from './lang.ts'
 import { GRADE, HYPE, LOSS, MONEY, VALUE } from './ink.ts'
 
 export type FontName = 'sans' | 'tiny' | 'didone' | 'chalk'
@@ -62,46 +63,109 @@ export function capHeight(font: FontName): number {
   return fonts[font].cap
 }
 
-// faux bold: every glyph drawn twice, 1px apart, one px wider
+// faux bold: every glyph drawn twice, 1px apart, one px wider. measures the string as it'll show, in the current language
 export function measure(s: string, font: FontName, bold = false): number {
+  return Math.max(0, advance(say(s), font, bold) - 1)
+}
+
+function advance(s: string, font: FontName, bold: boolean): number {
   let w = 0
   for (const ch of shown(font, s)) w += ch === ' ' ? fonts[font].space : glyph(font, ch).g[6] + (bold ? 1 : 0)
-  return Math.max(0, w - 1)
+  return w
 }
 
 export type TextStyle = { font?: FontName; color?: string; align?: 'left' | 'center' | 'right'; bold?: boolean; scale?: number; outline?: string }
 
+// s is written in french: lang.ts swaps it to english when that's on, and french runs glint
 export function drawText(g: CanvasRenderingContext2D, s: string, x: number, y: number, o: TextStyle = {}): void {
+  drawRuns(g, segments(s), x, y, o, true)
+}
+
+function drawRuns(g: CanvasRenderingContext2D, runs: { s: string; french: boolean }[], x: number, y: number, o: TextStyle, glints: boolean): void {
   const font = o.font ?? 'sans'
   const scale = o.scale ?? 1
   // 1px outline: the glyphs in the outline color at the 4 orthogonal offsets, then the text on top
   if (o.outline) {
-    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) drawText(g, s, x + dx * scale, y + dy * scale, { ...o, color: o.outline, outline: undefined })
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) drawRuns(g, runs, x + dx * scale, y + dy * scale, { ...o, color: o.outline, outline: undefined }, false)
   }
   const f = fonts[font]
-  const img = tinted(o.color ?? '#2e2320')
-  const w = measure(s, font, o.bold) * scale
+  const color = o.color ?? '#2e2320'
+  const w = Math.max(0, runs.reduce((sum, r) => sum + advance(r.s, font, !!o.bold), 0) - 1) * scale
   let cx = o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x
   // snap to the art grid so glyph pixels line up with everything else
   cx = Math.round(cx)
   const cy = Math.round(y)
-  for (const ch of shown(font, s)) {
-    if (ch === ' ') {
-      cx += f.space * scale
-      continue
+  const sweep = glints ? glintAt(g) : null
+  for (const run of runs) {
+    for (const ch of shown(font, run.s)) {
+      if (ch === ' ') {
+        cx += f.space * scale
+        continue
+      }
+      const { g: [gx, gy, gw, gh, top, left, adv], from } = glyph(font, ch)
+      // a fallback glyph from another font sits on this font's baseline
+      const dy = top + (f.ascent - from.ascent)
+      const lit = run.french && sweep !== null ? glint(color, sweep - cx) : color
+      const img = tinted(lit)
+      for (let b = 0; b < (o.bold ? 2 : 1); b++) g.drawImage(img, gx, gy, gw, gh, cx + (left + b) * scale, cy + dy * scale, gw * scale, gh * scale)
+      cx += (adv + (o.bold ? 1 : 0)) * scale
     }
-    const { g: [gx, gy, gw, gh, top, left, adv], from } = glyph(font, ch)
-    // a fallback glyph from another font sits on this font's baseline
-    const dy = top + (f.ascent - from.ascent)
-    for (let b = 0; b < (o.bold ? 2 : 1); b++) g.drawImage(img, gx, gy, gw, gh, cx + (left + b) * scale, cy + dy * scale, gw * scale, gh * scale)
-    cx += (adv + (o.bold ? 1 : 0)) * scale
   }
 }
 
+// ---------- the french glint ----------
+// a band of light that crosses the stage every few seconds, left to right. french letters it passes over brighten,
+// so the french reads as gilt lettering. still (reduced motion): no glint
+
+const GLINT_MS = 4200
+const GLINT_SWEEP = 0.7 // of each cycle the band is crossing, the rest is a pause
+const GLINT_W = 20 // half-width of the band, stage px
+const glintStill = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
+const lit = new Map<string, string[]>()
+
+// where the band is in this context's x, or null between sweeps. it crosses the on-screen canvas, a bit past both edges.
+// text drawn into an offscreen canvas never glints: a cached glint would stay lit forever
+function glintAt(g: CanvasRenderingContext2D): number | null {
+  if (glintStill?.matches || !(g.canvas instanceof HTMLCanvasElement) || !g.canvas.isConnected) return null
+  const k = (performance.now() % GLINT_MS) / GLINT_MS
+  if (k > GLINT_SWEEP) return null
+  const w = g.canvas.width
+  const band = w * (-0.06 + (k / GLINT_SWEEP) * 1.12)
+  // back into the text's own units, under whatever scale and translate the scene set
+  const m = g.getTransform()
+  return m.a ? (band - m.e) / m.a : null
+}
+
+// the color a letter d px from the band's center gets: ink warms to brass, cream goes white-gold
+function glint(color: string, d: number): string {
+  const step = Math.abs(d) < GLINT_W / 3 ? 2 : Math.abs(d) < GLINT_W ? 1 : 0
+  if (!step) return color
+  let ramp = lit.get(color)
+  if (!ramp) {
+    const [r, g, b] = rgb(color)
+    const dark = r * 0.3 + g * 0.59 + b * 0.11 < 128
+    const to = dark ? [201, 140, 40] : [255, 246, 208]
+    ramp = [color, mix([r, g, b], to, 0.5), mix([r, g, b], to, dark ? 0.85 : 1)]
+    lit.set(color, ramp)
+  }
+  return ramp[step]
+}
+
+function rgb(color: string): [number, number, number] {
+  const m = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
+  if (!m) return [128, 128, 128] // rgba() inks: treat as mid, they get the brass
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
+}
+
+function mix(a: number[], b: number[], t: number): string {
+  return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('')
+}
+
+// wraps the string as it'll show (in the current language)
 export function wrapText(s: string, width: number, font: FontName, bold = false): string[] {
   const lines: string[] = []
   let line = ''
-  for (const word of s.split(' ')) {
+  for (const word of say(s).split(' ')) {
     const next = line ? `${line} ${word}` : word
     if (line && measure(next, font, bold) > width) {
       lines.push(line)
@@ -180,13 +244,20 @@ function layoutRich(text: string, maxW: number): Placed[][] {
     const words: Part[][] = [[]]
     for (const part of para) {
       if (part.mark || part.keyword) {
-        words[words.length - 1].push(part)
+        words[words.length - 1].push({ ...part, s: say(part.s) })
         continue
       }
-      part.s.split(' ').forEach((piece, i) => {
-        if (i > 0) words.push([])
-        if (piece) words[words.length - 1].push({ ...part, s: piece })
-      })
+      // a french run ("Le Patron") is one token, so it wraps whole and still glints when drawn
+      for (const run of segments(part.s)) {
+        if (run.french) {
+          words[words.length - 1].push({ ...part, s: run.s })
+          continue
+        }
+        run.s.split(' ').forEach((piece, i) => {
+          if (i > 0) words.push([])
+          if (piece) words[words.length - 1].push({ ...part, s: piece })
+        })
+      }
     }
     let line: Placed[] = []
     let x = 0
