@@ -4,7 +4,7 @@ Context for any agent (Claude, Codex, subagents) working in this repo. Read this
 
 ## What this is
 
-Flambeur is Evan's entry for the **KSU AI Club Hackathon** (Nov 16–20 2026, KSU Marietta). It's entered in two tracks: **IEEE AI Game Sprint** and **Nudox game track**. Demo and judging are **Friday Nov 20**.
+Flambeur is Evan's entry for the **KSU AI Club Hackathon** (Nov 16–20 2026, KSU Marietta). It's entered in two tracks: **IEEE AI Game Sprint** and the **Nudox track** (most organized codebase, see Nudox below). Demo and judging are **Friday Nov 20**.
 
 It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 - **Packs:** you rip booster packs to build a small deck of playing cards. Each card can have finishes, stamps and flambéed traits.
@@ -42,6 +42,17 @@ node sim/econ.ts --runs 1000 --policy greedy|cautious|random --difficulty easy|m
 ```
 
 The toolchain is Node 24 (runs `.ts` directly with type stripping), TypeScript 7, Vite 8 and pnpm. There are no runtime dependencies.
+
+## Nudox
+
+The Nudox track judges **codebase quality**: the code, the repo on GitHub, and the **commit history**. A cool project earns bonus points. Using Nudox is required, and the proof is a screenshot of the account's usage.
+
+- **Use the `nudox` MCP tools** (search, show, references, graph, outline) to find symbols and callers before you grep or read whole files. Only MCP tool calls count as usage.
+- **Setup:** it's installed in `~/.local/bin` and signed in with `nudox auth login`. Each machine registers the MCP server itself, in local scope (`.mcp.json` is not checked in):
+  `claude mcp add nudox -s local -- ~/.local/bin/nudox-mcp --project "$PWD"`
+- **Reindex** after big changes with `nudox add . --execution-intent interactive --wait`. Indexing fails with "Stale" while another session is writing files, so retry when the tree is quiet.
+- **Commits** are judged too. Make one focused commit per change, with a message that says what changed.
+- Nudox is in beta. Note real bugs you hit so Evan can report them.
 
 ## Layout
 
