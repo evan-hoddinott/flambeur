@@ -1,5 +1,6 @@
 // the screen frame (docs/UX.md §2): pieces every scene draws in the same spot, so the run reads the same everywhere.
-// zone A, the run strip: Table · Manche, and tonight's or the next twist. hover the twist for its rule
+// zone A, the top bar: Table · Manche centered at the top, then whatever the scene adds after it (the duel's hand
+// track). tonight's or the next twist hangs under it as a tag. hover either for its rule
 import { nineSlice } from './art.ts'
 import { drawText, measure } from './font.ts'
 import { lang } from './lang.ts'
@@ -9,7 +10,9 @@ import { twistName } from '../engine/twists.ts'
 import type { SeatView } from '../engine/match.ts'
 import { still } from './prefs.ts'
 
-export const STRIP = { x: 8, y: 18, w: 150, h: 36 }
+type Box = { x: number; y: number; w: number; h: number }
+
+export const BAR = { y: 4, h: 16 }
 const INK = '#2e2320'
 const BURGUNDY = '#7a1a2c'
 const ROMAN = ['I', 'II', 'III', 'IV']
@@ -26,22 +29,29 @@ export function twistLine(v: SeatView): string {
   return v.scout ? 'Nouvelle table ce soir' : ''
 }
 
-// returns the twist line's box, so the scene can hover it for the Fiche
-// the strip grows right to fit a long twist name, up to STRIP_MAX, then the line drops to the tiny font
-const STRIP_MAX = 192
-// signUp: the duel's twist sign is hanging, so the strip leaves the twist to it
-export function runStrip(g: CanvasRenderingContext2D, v: SeatView, round = v.round, signUp = false): { x: number; y: number; w: number; h: number } | null {
-  const { x, y } = STRIP
+// extra = how wide the scene's own part of the bar is. returns the round label's box, where the scene's part starts,
+// and the twist tag's box (null when there's no tag). signUp: the duel's twist sign is hanging, so no tag
+export function runStrip(g: CanvasRenderingContext2D, v: SeatView, round = v.round, signUp = false, extra = 0): { label: Box; extraX: number; twist: Box | null } {
+  const label = roundLabel(v, round)
+  const lw = measure(label, 'sans', true) + 12
+  const w = lw + extra
+  const x = Math.round(320 - w / 2)
+  nineSlice(g, 'hud/plate/paper', x, BAR.y, w, BAR.h, '#e3d2a8')
+  drawText(g, label, x + 6, BAR.y + 3, { font: 'sans', color: INK, bold: true })
+  if (extra) {
+    g.fillStyle = '#bfa77e'
+    g.fillRect(x + lw, BAR.y + 3, 1, 10)
+  }
+  const out = { label: { x, y: BAR.y, w: lw, h: BAR.h }, extraX: x + lw, twist: null as Box | null }
   const twist = signUp ? '' : twistLine(v)
-  const font = measure(twist, 'sans') + 12 <= STRIP_MAX ? 'sans' : 'tiny'
-  const tw = measure(twist, font)
-  const w = Math.max(STRIP.w, Math.min(STRIP_MAX, tw + 12))
-  const h = twist ? STRIP.h : 22
-  nineSlice(g, 'hud/plate/paper', x, y, w, h, '#e3d2a8')
-  drawText(g, roundLabel(v, round), x + 6, y + 4, { font: 'sans', color: INK, bold: true })
-  if (!twist) return null
-  drawText(g, twist, x + 6, y + (font === 'sans' ? 18 : 20), { font, color: BURGUNDY })
-  return { x: x + 6, y: y + 18, w: Math.min(w - 12, tw), h: 10 }
+  if (!twist) return out
+  const tw = measure(twist, 'tiny') + 10
+  const tx = Math.round(320 - tw / 2)
+  const ty = BAR.y + BAR.h
+  nineSlice(g, 'hud/plate/paper', tx, ty - 2, tw, 13, v.twist ? '#e8b0a0' : '#d8c8a0')
+  drawText(g, twist, 320, ty + 1, { font: 'tiny', color: BURGUNDY, align: 'center' })
+  out.twist = { x: tx, y: ty, w: tw, h: 11 }
+  return out
 }
 
 // ---------- the language chip ----------

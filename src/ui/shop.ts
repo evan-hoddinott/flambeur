@@ -613,7 +613,7 @@ function draw(st: ShopState): void {
   glow(320, 142, 124, 'rgba(202,135,55,.085)')
   bell(st)
   sign(v)
-  const twistBox = runStrip(g, v)
+  const twistBox = runStrip(g, v).twist
   pauseTab(g, hit(PAUSE_TAB.x, PAUSE_TAB.y, PAUSE_TAB.w, PAUSE_TAB.h, openPause))
   const twist = v.twist ?? v.nextTwist?.twist
   if (twistBox && twist) tip(() => entry('twist', twist.id, twist), twistBox.x, twistBox.y, twistBox.w, twistBox.h)

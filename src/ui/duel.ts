@@ -22,7 +22,7 @@ import type { Appraisal } from '../engine/scoring.ts'
 import type { StarterId } from '../engine/starters.ts'
 import * as sfx from './sound.ts'
 import * as music from './music.ts'
-import { STRIP, announce, drawBand, runStrip, skipBand } from './frame.ts'
+import { announce, drawBand, runStrip, skipBand } from './frame.ts'
 import { lang } from './lang.ts'
 import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } from './panels.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
@@ -1604,7 +1604,7 @@ function handReadout(st: DuelState): void {
   look(x, y, w, h, () => entry('hand', hand.type, me.levels[hand.type]))
 }
 
-const SHELF = { x: 8, y: 58, item: 34, gap: 6 }
+const SHELF = { x: 8, y: 22, item: 34, gap: 6 } // the top-left corner, where the run strip used to be
 const caseHits = new Map<number, number>() // slot → when it last fired
 
 function caseShelf(st: DuelState): void {
@@ -1702,57 +1702,66 @@ function hud(st: DuelState, t: number): void {
   if (st.tally && !st.counting && view.last && !calling()) top = tally(st)
   bandTop = colText(st, top - 6) - 8 // next frame's band starts above whatever is in the column
   sortTabs(st)
-  handTrack(st)
   frameZones(st)
 }
 
-// zone A: the run strip and the twist line. the bare table draws it too
+// zone A: the top bar (Table · Manche, then the hand track) and the twist tag. the bare table draws it too
+
 function frameZones(st: DuelState): void {
   const view = st.view
-  const twist = runStrip(g, view, st.settled && view.last ? view.last.round : view.round, !!view.twist)
+  // the engine clears hands when the round ends. keep showing the last one through the reveal and the tally
+  if (view.hands) lastHands = view.hands
+  else if (!st.settled) lastHands = null
+  const track = lastHands ? trackLayout(st, lastHands) : null
+  const bar = runStrip(g, view, st.settled && view.last ? view.last.round : view.round, !!view.twist, track?.w ?? 0)
   pauseTab(g, hit(PAUSE_TAB.x, PAUSE_TAB.y, PAUSE_TAB.w, PAUSE_TAB.h, openPause))
-  look(STRIP.x, STRIP.y, STRIP.w, 16, rule('round'))
+  look(bar.label.x, bar.label.y, bar.label.w, bar.label.h, rule('round'))
   const tw = view.twist ?? view.nextTwist?.twist
-  if (twist && tw) look(twist.x, twist.y, twist.w, twist.h, () => entry('twist', tw.id, tw))
+  if (bar.twist && tw) look(bar.twist.x, bar.twist.y, bar.twist.w, bar.twist.h, () => entry('twist', tw.id, tw))
+  if (lastHands && track) handTrack(st, lastHands, track, bar.extraX)
 }
 
-// "Main 2 / 3" across the top: how the round is won, in one place. one pip per hand (won, lost, tie, thrown, still
+// "Main 2 / 3" on the top bar: how the round is won, in one place. one pip per hand (won, lost, tie, thrown, still
 // to play), the score, and the K.O. line
 let lastHands: SeatView['hands'] = null
 
-function handTrack(st: DuelState): void {
-  // the engine clears hands when the round ends. keep showing the last one through the reveal and the tally
-  if (st.view.hands) lastHands = st.view.hands
-  else if (!st.settled) lastHands = null
-  const hv = lastHands
-  if (!hv) return
-  const me = st.view.me.seat
+// the hand track's pieces left to right, sized to the text as it shows (Main → Hand in english)
+function trackLayout(st: DuelState, hv: NonNullable<SeatView['hands']>) {
   const shown = st.settled && st.view.showdown ? st.view.showdown.hand : hv.hand
-  const x0 = 234
+  const label = `Main ${Math.min(3, shown)} / 3`
+  const score = `${hv.wins[0]}–${hv.wins[1]}`
+  const ko = `K.O. ${hv.knockout}×`
+  const pips = measure(label, 'sans', true) + 12
+  const scoreX = pips + 3 * 13 + 4
+  const rule = scoreX + measure(score, 'sans', true) + 6
+  const koX = rule + 6
+  return { label, score, ko, pips, scoreX, rule, koX, w: koX + measure(ko, 'sans', true) + 8 }
+}
+
+function handTrack(st: DuelState, hv: NonNullable<SeatView['hands']>, l: ReturnType<typeof trackLayout>, x0: number): void {
+  const me = st.view.me.seat
   const y = 4
-  const w = 172
-  nine('hud/plate/paper', x0, y, w, 16, '#e3d2a8')
-  look(x0, y, 58, 16, rule('plate-hand'))
-  look(x0 + 58, y, 74, 16, rule('hand-pips'))
-  text(`Main ${Math.min(3, shown)} / 3`, x0 + 6, y + 3, { font: 'sans', color: INK, bold: true })
+  look(x0, y, l.pips, 16, rule('plate-hand'))
+  look(x0 + l.pips, y, l.rule - l.pips, 16, rule('hand-pips'))
+  text(l.label, x0 + 6, y + 3, { font: 'sans', color: INK, bold: true })
   const dealing = !st.settled && st.view.phase === 'deal' && !st.view.me.locked
-  if (dealing && st.view.round === 1 && hv.hand === 1 && !st.selected.size) tip('goal', 'Best of 3 hands. The higher Appraisal takes each one.', { x: x0, y, w, h: 16 }, 'below')
+  if (dealing && st.view.round === 1 && hv.hand === 1 && !st.selected.size) tip('goal', 'Best of 3 hands. The higher Appraisal takes each one.', { x: x0, y, w: l.w, h: 16 }, 'below')
   for (let i = 0; i < 3; i++) {
     const hand = hv.hands[i]
     const state = !hand ? 'open' : hand.mine === null ? 'thrown' : hand.winner === null ? 'tie' : hand.winner === me ? 'won' : 'lost'
     const smoke = state === 'thrown' && !stillCards.matches && Math.floor(now / 320) % 2 ? '/1' : ''
-    const x = x0 + 62 + i * 13
+    const x = x0 + l.pips + i * 13
     const age = now - pipAt
     const flip = hand && i === hv.hands.length - 1 && age < 290 && !stillCards.matches ? Math.max(0.12, Math.abs(Math.cos(Math.PI * age / 290))) : 1
     const pop = flip === 1 ? 1 : 1+.15*Math.sin(Math.PI*progress(age,290))
     pin(`hud/hand/pip/${state}${smoke}`, x + 6 * (1 - flip*pop), y + 2, { sx: flip*pop, sy: pop })
   }
-  text(`${hv.wins[0]}–${hv.wins[1]}`, x0 + 112, y + 3, { font: 'sans', color: BURGUNDY, align: 'center', bold: true })
-  // the knockout line rides on the same plate, after a rule
+  text(l.score, x0 + l.scoreX, y + 3, { font: 'sans', color: BURGUNDY, bold: true })
+  // the knockout line rides on the same bar, after a rule
   g.fillStyle = '#bfa77e'
-  g.fillRect(x0 + 128, y + 3, 1, 10)
-  text(`K.O. ${hv.knockout}×`, x0 + 150, y + 3, { font: 'sans', color: BURGUNDY, align: 'center', bold: true })
-  const ko = { x: x0 + 130, y, w: 42, h: 16 }
+  g.fillRect(x0 + l.rule, y + 3, 1, 10)
+  text(l.ko, x0 + l.koX, y + 3, { font: 'sans', color: BURGUNDY, bold: true })
+  const ko = { x: x0 + l.rule, y, w: l.w - l.rule, h: 16 }
   look(ko.x, ko.y, ko.w, ko.h, rule('ko', st.view.round))
   if (dealing && hv.hand >= 2) tip('ko', `Win a hand by ${hv.knockout}× and the round ends there.`, ko, 'below')
 }
