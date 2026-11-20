@@ -29,7 +29,7 @@ Coordinates are art px on the 640×360 stage (×2.5 = screen px).
   - The marker is missing in the small shop.
 - **About 10 tooltip styles, and the rules are missing.**
   - Finishes, stamps, traits, ★ tiers and knockoffs show a name with no rule.
-  - Unexplained: K.O., MOYEN, the lane icon, the hand pips, the plate icons, STONKS (French only), twist rules in the shop, Bulk.
+  - Unexplained: K.O., MOYEN, the lane icon, the hand pips, the plate icons, STONKS (French only), twist rules in the shop, Ash.
 - **Names drift.** "Embers"/"Gold foil" vs Prism/Foil. Pack art (Le Roussi, Faux Frère) vs code (Repack, Off-Brand). Shred vs Bin.
 - **The DOM screens break the pixel-art language:** draft, pack rip, binder, grading, Sleeve, forge pick, results. The draft's Keep button sits below the fold.
 - **The corner button is a trap.** You press Continue in the bottom-right, and the next screen puts Discard or Max in that same spot.
@@ -65,11 +65,19 @@ Every piece of information has one home on the HUD. A world prop can repeat a nu
 
 ### 2b. The pause menu (Nov 19)
 
-A plain game pause: **Esc** or the **Pause** tab hanging off the top edge above the run strip (on the title, **Settings** beside FR · EN) dims the whole canvas and opens one paper sheet in the middle (`src/ui/pause.ts`). Esc goes to whatever else is open first: the carnet, a panel that closes on Esc, a pinned Fiche, the scratch ticket. While it's up it takes every click and key except **M**. Clicking off the sheet closes it.
+A plain game pause: **Esc** or the **Pause** tab hanging off the top edge above the run strip (on the title, **Settings** beside FR · EN) dims the whole canvas and opens the settings table in the middle (`src/ui/pause.ts`). Esc goes to whatever else is open first: the carnet, a panel that closes on Esc, a pinned Fiche, the scratch ticket. While it's up it takes every click and key except **M**. Clicking off the table closes it.
 
-- **Tabs** down the left: Sound, Game, Display, Access, Keys, Credits. Each row is a label and its control; hovering a row puts its one line at the foot of the sheet (the complexity rule).
+**The look (Nov 20):** a card table in miniature: green felt under a lamp, a padded burgundy rail with brass studs, the title in gold Didone. Everything you press is a bet ticket (READABILITY.md §4), so it reads like the rest of the game. Art: `art/duel/pause.py`, packed into the duel atlas by `art/duel/build.py`.
+
+- **Tabs** are full bet tickets with an icon. Choices, toggles and small buttons are **stubs** (`hud/stub/*`, the ticket cut to 13 px, same tint). One color rule: **gold** is what's chosen (the open tab, the picked stub), brown is everything else, **blue** goes back to play (Resume/Close), **red** loses the run (Abandon). Every stub in a row is the same width unless that runs off the page. Toggles always read On then Off.
+- **Sliders** are a red jeton riding a groove in the felt, brass behind it, the value on a price chip.
+- Rows sit under small section heads (Volume, Switches; Pace, Table, Help; Screen, Effects; Motion, Reading). The hovered row gets a gold pip, and its one line prints on a **receipt** at the foot of the page.
+- **Keys** are drawn as keycaps. **Credits** is set in Didone with a head per section.
+- **Motion:** the table slides up with a little overshoot, the page eases in on a tab change, a chosen stub bounces once. None of it with reduce motion on.
+
+- **Tabs** down the left: Sound, Game, Display, Access, Keys, Credits. Each row is a label and its control; hovering a row puts its one line on the receipt (the complexity rule).
 - **At the foot of the tabs:** Resume, Abandon run (in a run, tap twice) and First run (the seeded first run; tap twice in a run).
-- **Sound:** master, music, effects and room volumes (ten notches, click or drag), mute (M), mute when the tab is hidden, voice blips.
+- **Sound:** master, music, effects and room volumes (a jeton slider in tenths, click or drag), mute (M), mute when the tab is hidden, voice blips.
 - **Game:** speed 1×–3× (the count-up, the tally, the rival's pauses), count-up watch or skip, confirm bets (Max, or Max and Flamber, take a second press within 3 s; the ticket reads Sure?), hand order, hand preview, tips and tips again, Fiche delay, language, French glint.
 - **Display:** fullscreen (F anywhere), crisp or fill pixels, atmosphere (vignette, smoke, light leaks), screen shake off/low/full, frame rate 60/30/saver (saver goes to 15 after 5 s idle), pixel cursor.
 - **Access:** reduce motion (auto follows the system), calm flashes, four-color suits, high contrast text, Large Fiche (2×).
@@ -95,11 +103,13 @@ One prop, a brown leather **carnet** (a gambler's notebook), pokes out of the bo
 - **Click: it flies to the middle and opens.** A tab opens on that page; the cover opens where you last were. The elastic snaps off (thunk), the carnet grows to full size on its way to the center (the small sprite hands over to the big art at 95%), lands as the shut book with its tabs out of the right leaf, then the cover creaks and swings over the spine to become the left leaf. The left leaf holds the tab's contents, the right leaf the details (a Fiche, counts). Closing runs it backwards: the cover shuts, then it flies home.
 - **Open tabs** stick out of the right leaf's fore-edge, the open one pulled out furthest. Click one to turn to it.
 - **One viewer with tabs:** Étui · Classeur · Sleeve · Vitrine · Carnet. Hotkeys **D / B / S / V / ?** fly it open on the matching tab, the same key again or Esc closes it, and the tabs switch pages. Number keys and Space stay reserved for cards.
-- **Étui tab:**
-  - Filters: All / Pile / In hand / Played this Table / At grading (the card shown greyed, with its parcel).
-  - Bulk and Jokers get their own row.
-  - Sort by Rank / Suit / Value.
-  - Suit and rank counts, as the current viewer has (main.ts ~360–452).
+- **Étui tab: La Pile.** The deck as ruled lines of a French school notebook (Seyès violet rules, a red margin). Code: `src/engine/pile.ts` (pure grouping), `src/ui/pile.ts` (drawing).
+  - **Group by Rank · Suit · Type** (chips on the right leaf, **G** cycles). Rank is the default: 13 rank lines, then Any (Crayons) and Ash. Empty ranks stay as short faded lines so straight gaps show.
+  - **A line reads:** label in the margin, card count, `=N` in burgundy when the line counts as more or less than its printed cards, `+N?` for a Courtier that can become it. Then plain cards as ink pips (their suit in rank lines, their rank in suit lines), then special cards as cream chits with the index and a foot of one ink per modifier slot (`modifierInk`).
+  - **A card shows up everywhere it counts**, dotted: a Split/K Queen in the K line, a Wrong Suit ♣ diamond in ♣, a Wild card in every suit. A Twin counts 2, a Household 3 and 2.
+  - **Show** (mid-round only): Left to draw · Whole deck. It defaults to Left to draw, so nothing is greyed out. A card away at grading sits in its line, faded, with its parcel.
+  - **Pinned:** click a line's label to pin it (max 3, a 4th replaces the oldest). The right leaf lists pins with their counts, plus deck size. Pins carry across groupings.
+  - **Hover a card:** it's outlined, every line it counts in lights, and the right leaf shows it big with its Fiche.
 - **Vitrine tab:** collectibles in scoring order. The top-left VITRINE tab stays as a shortcut (it gets one pip per filled slot), and the shop uses the duel's canvas case instead of the DOM modal.
 - **"Show labels" toggle:** pins every caption. On by default for the demo.
 - The current pile prop on the duel table can stay as a passive count. The carnet is the button. The shop's bottom-bar deck stack and binder book go away.
@@ -115,17 +125,14 @@ One prop, a brown leather **carnet** (a gambler's notebook), pokes out of the bo
 
 ## 5. Compare mode: choosing next to your deck
 
-Whenever you're choosing cards (draft rows, pack sort, spoils, shop cards), the carnet **opens automatically, docked at reduced size** beside the offer.
+Whenever you're choosing cards (draft rows, pack sort, spoils), La Pile **docks on the left** on a scrap of carnet paper with the Étui's red tab on top. It's the same ledger as the Étui page, narrower, in the same grouping (G works here too). Facts only: counts, never odds or "take this" advice.
 
-- **Hovering an offer:**
-  - ghosts it into its suit row (a pulsing outline at its sort position)
-  - shows count changes: `♠ 6→7`, `Q 1→2`
-  - shows one payoff line: "5th ♥: flush lane", "makes a Q pair possible", "3rd Bulk"
-- **Draft:** shows the totals of all picked rows at once.
-- **Pack sort:** cards headed to the Deck ghost into the Étui, and cards headed to the Binder ghost into a Classeur page.
-- **Shop collectibles and scratchers:** the Vitrine or the Sleeve shows the slot it would take.
-- **Payoff lines** come from small pure helpers in `src/engine/`. If one can't be said in a line, it's cut.
-- **Build order:** pack sort first (the most frequent choice), then spoils, then draft.
+- **The receipt:** a tabac receipt clipped to the top holds your pins and the deck size, as `before → after` while an offer is hovered.
+- **Hovering an offer:** every line it would join lights, and its pip or chit pulses into each one (dotted in lines it only also counts in). Nothing else moves.
+- **Draft:** there's no deck yet, so the rows you'd keep are the ledger. It fills in as you choose which row to toss.
+- **Pack sort:** cards set to Deck pulse in. A card set to Binder lights nothing and the receipt says it's not going in your deck (STONKS shown if it's hot).
+- **D** opens the full carnet on La Pile over the choice, Esc comes back.
+- Not built yet: rule-word lights (hovering a collectible or insert lights the lines it triggers on and adds "Your deck: N cards are 2–6" to its Fiche) and a card's play history in its Fiche footer.
 
 ## 6. The Fiche: one description box
 
@@ -152,7 +159,7 @@ Every rules thing in the game is explained by the same box.
 {g}+1 Grade{/}    gold #e8c260
 {$}+$3{/}         money green
 {-}−$3{/}         burgundy
-[Bulk]            keyword, brass underline. spawns a sub-box
+[Ash]            keyword, brass underline. spawns a sub-box
 ```
 
 **Placement:**

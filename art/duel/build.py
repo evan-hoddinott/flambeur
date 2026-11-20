@@ -47,13 +47,21 @@ def export_parts():
                     slices.append(item)
     from ephemera import parts as paper_parts
     from booklet import parts as booklet_parts
-    for key, im in (paper_parts() | booklet_parts()).items():
+    from pause import parts as pause_parts, CENTERS as pause_centers
+    for key, im in pause_parts().items():
+        tint = key.startswith(("hud/stub/", "icon/pause/"))
+        for _, (r, g, b, a) in im.getcolors(im.width * im.height):
+            if a and ((r, g, b) not in (palette | greys if tint else palette) or a != 255):
+                raise ValueError(f"Off-palette pixel in {key}: {(r, g, b, a)}")
+    for key, im in (paper_parts() | booklet_parts() | pause_parts()).items():
         parts[key] = im
         w,h = im.size
         centered = key in ("rules/ball","rules/half")
         frame = dict(frame=0, bounds=dict(x=0,y=0,w=w,h=h), pivot=dict(x=w//2 if centered else 0,y=h//2 if centered else 0))
         if key == "fx/receipt":
             frame["center"] = dict(x=4,y=4,w=24,h=20)
+        if key in pause_centers:
+            frame["center"] = dict(zip("xywh", pause_centers[key]))
         slices.append(dict(name=key,keys=[frame]))
     return parts, slices, source["meta"]["version"]
 
