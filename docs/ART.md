@@ -375,7 +375,7 @@ Trait icons sit in a small strip at the bottom of the card, and the number of sl
 | Light leak | 0.6 s |
 
 ### Sound (paired with motion)
-Every trigger has a sound, and pitch rises through a chain (each scored card a step higher, like Balatro). Chips clatter, paper rustles, stamps thunk, fire whooshes and crackles. The existing synth in `src/ui/sound.ts` is the starting point.
+Every trigger has a sound, and pitch rises through a chain (each scored card a step higher, like Balatro). Chips clatter, paper rustles, stamps thunk, fire whooshes and crackles. The full event map, sources and mixer are in `docs/SOUND.md`, the music in `docs/MUSIC.md`.
 
 ---
 

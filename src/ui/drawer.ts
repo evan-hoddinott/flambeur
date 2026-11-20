@@ -1,5 +1,5 @@
 import { mix, still } from './motion.ts'
-import { creak, rip, thunk } from './sound.ts'
+import { bookClose, creak, getSettings, page as pageTurn, setSetting, thunk } from './sound.ts'
 // the drawer (UX.md §3): a worn leather carnet poking out of the bottom-left corner, the same in every scene. its
 // index tabs stick out with live counts, hover pulls it into view, a click or D/B/S/V/? flies it to the middle and
 // swings it open as one tabbed viewer, and compare mode docks it small beside an offer. stage units (640×360)
@@ -131,15 +131,17 @@ export function openDrawer(t: Tab, c?: Compare): void {
     return
   }
   if (tab === null && slide.at < 0.02) thunk() // the elastic snaps off
-  if (tab !== null && tab !== t) { pageTurnAt=performance.now(); rip(.035) }
+  if (tab !== null && tab !== t) { pageTurnAt=performance.now(); pageTurn() }
   tab = t
   lastTab = t
 }
 
 // closes the full viewer first, and the compare dock when nothing else is open
 export function closeDrawer(): void {
-  if (tab !== null) tab = null
-  else compare = null
+  if (tab !== null) {
+    tab = null
+    bookClose()
+  } else compare = null
 }
 
 export function drawerOpen(): boolean {
@@ -242,7 +244,10 @@ export function drawerPointer(x: number, y: number, down: boolean): boolean {
   }
   if (tab !== null) {
     // a click off the book (and its tabs) closes it
-    if (!inside(x, y, { x: SPINE - LEAF.w - 4, y: LEAF.top - 24, w: LEAF.w * 2 + TAB.out + 12, h: LEAF.h + 30 })) tab = null
+    if (!inside(x, y, { x: SPINE - LEAF.w - 4, y: LEAF.top - 24, w: LEAF.w * 2 + TAB.out + 12, h: LEAF.h + 30 })) {
+      tab = null
+      bookClose()
+    }
     return true
   }
   if (closed && overBook(x, y)) {
@@ -251,6 +256,18 @@ export function drawerPointer(x: number, y: number, down: boolean): boolean {
     return true
   }
   return !!compare && inside(x, y, { ...DOCK, h: dockH })
+}
+
+// what's under the mouse for the hover tick: a card in the book, a hit, or the carnet in its corner
+export function drawerHoverAt(): { key: string; card: boolean; x: number } | null {
+  const h = hovered as { thing: DrawerThing; anchor: Anchor } | null
+  if (h?.thing.card) return { key: `drawer-card${h.thing.card.id}`, card: true, x: h.anchor.x + h.anchor.w / 2 }
+  for (let i = hits.length - 1; i >= 0; i--) {
+    const r = hits[i]
+    if (inside(mouse.x, mouse.y, r)) return { key: `drawer${i}:${Math.round(r.w)}x${Math.round(r.h)}`, card: false, x: r.x }
+  }
+  const closed = tab === null && slide.at < 0.02 && !compare
+  return closed && overBook(mouse.x, mouse.y) ? { key: 'carnet', card: false, x: mouse.x } : null
 }
 
 // what the Étui counts: pile out of everything in your deck this round (grading and binder don't count)
@@ -900,9 +917,20 @@ function vitrine(g: CanvasRenderingContext2D, v: SeatView): void {
 
 // ---------- carnet ----------
 
-// the game's two switches live at the foot of the rules page, not on the table: the language and the tips
+// the game's switches live at the foot of the rules page, not on the table: the volume, the language and the tips.
+// M mutes anywhere
+const LEVELS: [string, number][] = [['Off', 0], ['Low', 0.35], ['Mid', 0.65], ['High', 1]]
 function settings(g: CanvasRenderingContext2D, y: number): void {
   let x = R.x
+  const now = getSettings()
+  for (const [label, key] of [['Sound', 'master'], ['Music', 'music']] as const) {
+    text(g, label, x, y - 14, { font: 'tiny', color: FADED })
+    x += measure(label, 'tiny') + 6
+    const at = LEVELS.reduce((a, b) => (Math.abs(b[1] - now[key]) < Math.abs(a[1] - now[key]) ? b : a))
+    for (const [name, level] of LEVELS) x += chip(g, name, x, y - 16, at[1] === level, () => setSetting(key, level)) + 3
+    x += 12
+  }
+  x = R.x
   text(g, 'Language', x, y + 2, { font: 'tiny', color: FADED })
   x += measure('Language', 'tiny') + 6
   for (const [id, label] of [['en', 'EN'], ['fr', 'FR']] as const) x += chip(g, label, x, y, lang() === id, () => setLang(id)) + 3

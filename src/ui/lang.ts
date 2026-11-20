@@ -2,6 +2,7 @@
 // in english, WORDS swap to their english, in french they glint. NAMES stay french in both and always glint.
 // call sites never translate, they keep writing the french. english is the default: a first-timer reads the rules
 // in their own words, and the french stays as the names, the barks and the glint
+import { toggle } from './sound.ts'
 import { RIVALS } from '../engine/rivals.ts'
 
 export type Lang = 'fr' | 'en'
@@ -66,6 +67,7 @@ export function lang(): Lang {
 }
 
 export function setLang(l: Lang): void {
+  if (l !== current) toggle(l === 'fr')
   current = l
   cache.clear()
   try {

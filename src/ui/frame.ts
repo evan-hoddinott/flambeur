@@ -3,6 +3,7 @@
 import { nineSlice } from './art.ts'
 import { drawText, measure } from './font.ts'
 import { lang } from './lang.ts'
+import { band } from './sound.ts'
 import { tableOf } from '../engine/economy.ts'
 import { twistName } from '../engine/twists.ts'
 import type { SeatView } from '../engine/match.ts'
@@ -95,7 +96,10 @@ export function drawBand(g: CanvasRenderingContext2D, now: number, centerY = 195
   while (calls[0]?.t != null && now - calls[0].t! >= BAND_MS) calls.shift()
   const c = calls[0]
   if (!c) return
-  if (c.t === null) c.t = now
+  if (c.t === null) {
+    c.t = now
+    band(c.tone)
+  }
   const age = now - c.t
   // english mode: the english line goes big and there's nothing under it
   const big = lang() === 'fr' ? c.fr : c.en

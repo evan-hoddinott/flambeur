@@ -20,6 +20,7 @@ import { KEYWORDS, entry, glossaryIds, traitEntry, type Entry, type Kind } from 
 import { stonksMult } from './engine/sleeves.ts'
 import { progress, land, mix, still, whipPan } from './ui/motion.ts'
 import * as sfx from './ui/sound.ts'
+import * as music from './ui/music.ts'
 import { loadArt, faceCanvas, backCanvas, cardCanvas, tinted } from './ui/art.ts'
 import { cardInk } from './ui/ink.ts'
 import { loadFonts, measure, plainText, wrapText } from './ui/font.ts'
@@ -149,6 +150,10 @@ function beat(ms: number): Promise<void> {
   })
 }
 window.addEventListener('pointerdown', () => skipBeat?.())
+// the music starts on the first click or key (browsers need one), on the sfx context and its music bus
+for (const ev of ['pointerdown', 'keydown'] as const) {
+  window.addEventListener(ev, () => void music.start(sfx.context() ?? undefined, sfx.musicBus() ?? undefined), { once: true })
+}
 window.addEventListener('keydown', e => {
   if (e.key === ' ' || e.key === 'Enter') skipBeat?.()
 })
@@ -201,8 +206,13 @@ function onEvents(events: Event[]): void {
     if (e.kind === 'patron' && e.seat === mySeat()) {
       patronMissed = !e.paid
       patronPaid = e.paid ? e.due : null
-      if (e.paid) announce('Le Patron est payé', 'You covered his marker', 'good')
-      else announce('Impayé', "You couldn't cover Le Patron's marker", 'bad')
+      if (e.paid) {
+        announce('Le Patron est payé', 'You covered his marker', 'good')
+        sfx.register()
+      } else {
+        announce('Impayé', "You couldn't cover Le Patron's marker", 'bad')
+        sfx.denied()
+      }
     }
     if (e.kind === 'rival' && e.seat !== mySeat()) {
       const r = getRival(e.rival)
@@ -557,6 +567,7 @@ async function show(): Promise<void> {
     busy = false
     if (sd.winner === mySeat()) sfx.win()
     else if (sd.winner !== null) sfx.lose()
+    else sfx.tie()
   }
   draw()
 }
@@ -569,6 +580,7 @@ function draw(): void {
   const phase = match || online ? v().phase : null
   if (lastPhase === 'shop' && phase !== 'shop') log = log.filter(l => !SHOP_LINE.test(l))
   lastPhase = phase
+  followMusic()
   docked = null
   setDrawerActions({})
   drawScreen()
@@ -765,7 +777,7 @@ function draftPanel(): Panel {
     if (sweepAt !== null || (!still.matches && performance.now() - dealAt < 950)) return
     if (picks.has(i)) picks.delete(i)
     else picks.add(i)
-    sfx.flip(false)
+    sfx.select(picks.has(i))
     render()
   }
   docked = { offers: rows.filter((_, i) => picks.has(i)).flatMap(r => r.cards), dest: 'deck' }
@@ -841,6 +853,9 @@ function newRip(cards: Card[]) {
   return {
     at: performance.now(),
     burst: false,
+    shook: false, // sounds already played, so each beat sounds once
+    fanned: false,
+    held: false,
     fastAt: null as number | null,
     doneAt: null as number | null,
     settled: false,
@@ -896,11 +911,16 @@ function packPanel(): Panel {
         g.scale(1, 1 - (Math.floor(t / 50) % 4 === 0 ? 0.035 * shake : 0))
         const w = mix(65, 126, lift),
           h = w * 1.42
+        if (t >= 300 && !p.shook) {
+          p.shook = true
+          sfx.rustle()
+        }
         if (t < 900) fit(g, 'shop/pack/' + open.kind, { x: -w / 2, y: -h / 2, w, h })
         else {
           if (!p.burst) {
             p.burst = true
             sfx.rip()
+            sfx.duck(-6, 1.6)
           }
           g.globalAlpha = 1 - burst
           for (const [half, sign] of [
@@ -932,6 +952,16 @@ function packPanel(): Panel {
       }
       const w = Math.min(64, (box.w - 12) / cards.length - 4)
       const rare = topPull(cards[last])
+      if (!p.fanned) {
+        p.fanned = true
+        sfx.fan()
+      }
+      // the god pull: the last card waits face down, the music drops out, a heartbeat
+      if (rare && !p.held && t >= flipStart(last) - 500 && !still.matches) {
+        p.held = true
+        sfx.duck(-24, 1.2)
+        sfx.heartbeat()
+      }
       const peak = t - flipStart(last) - 125
       const pilesY = box.y + box.h - 38
       cards.forEach((c, i) => {
@@ -949,6 +979,7 @@ function packPanel(): Panel {
           if (i === last && rare) {
             announce('La fée verte !', cardName(c), 'good')
             dropCigarette()
+            sfx.godPull()
           }
         }
         const flight = p.doneAt === null ? 0 : progress(ui.now - p.doneAt - i * 50, 400)
@@ -974,7 +1005,8 @@ function packPanel(): Panel {
             onClick: () => {
               if (p.toDeck.has(c.id)) p.toDeck.delete(c.id)
               else p.toDeck.add(c.id)
-              sfx.flip(false)
+              if (p.toDeck.has(c.id)) sfx.select(true)
+              else sfx.fwip() // into a binder sleeve
               render()
             },
           })
@@ -1045,7 +1077,7 @@ function packPanel(): Panel {
       if (p.doneAt !== null && !p.sent && !busy && (still.matches || ui.now - p.doneAt >= 400 + last * 50)) {
         p.sent = true
         closeCompare()
-        sfx.coin()
+        sfx.shove()
         void dispatch({ type: 'sortPack', toDeck: [...p.toDeck] })
       }
     },
@@ -1109,6 +1141,7 @@ function renderShop(): void {
     onLeave: () => {
       whipPan(app.querySelector('canvas.stage'),1)
       sfx.doorBell()
+      sfx.play('whoosh', { gain: 0.25, rate: 1.3 })
       patronPaid = null
       void dispatch({ type: 'leaveShop' })
     },
@@ -1326,8 +1359,7 @@ function gradingPanel(): Panel {
         const c = cards[i]
         ui.card(c, at.x, at.y, w, { onClick: () => {
           gradeOpen = false
-          sfx.coin()
-          void dispatch({ type: 'ship', cardId: c.id, shipper })
+          void dispatch({ type: 'ship', cardId: c.id, shipper }) // the shipper's sound plays in the shop
         } })
       })
     },
@@ -1404,8 +1436,7 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
     const use = (suit: Card['suit'] | null) => () => {
       insertSlot = null
       selected = new Set()
-      sfx.gradeUp()
-      void dispatch({ type: 'useInsert', slot, cardIds: ids, suit })
+      void dispatch({ type: 'useInsert', slot, cardIds: ids, suit }) // the insert's own sound plays as it lands
     }
     if (ins.id === 'checklist') {
       const suits = SUITS.map(x => ({ label: SUIT_GLYPH[x], kind: 'insert' as const, enabled: can({ type: 'useInsert', slot, cardIds: ids, suit: x }), onClick: use(x) }))
@@ -1440,7 +1471,6 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
     slips: [
       { label: 'Discard', price: `${me.discardsLeft} left`, kind: 'discard', enabled: n > 0 && can({ type: 'discard', cardIds: ids }), onClick: () => {
         selected = new Set()
-        sfx.flip(false)
         void dispatch({ type: 'discard', cardIds: ids })
       } },
       { label: 'Flamber', price: merges ? '★' : n ? '+1 Value' : '', kind: 'forge', enabled: n > 0 && can({ type: 'flamber', cardIds: ids, grind: merges || !grindable.length ? null : grindable[0].id }), onClick: () => {
@@ -1455,6 +1485,7 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
 
 function renderTable(): void {
   setPanel(null)
+  sfx.ambience('duel')
   const view_ = v()
   const me = view_.me
   const settled = resultHold && view_.showdown !== null
@@ -1525,7 +1556,6 @@ function renderTable(): void {
       if (def.cards[1] === 1 && can(action)) {
         insertSlot = null
         selected = new Set()
-        sfx.gradeUp()
         void dispatch(action)
       } else {
         insertSlot = slot
@@ -1545,7 +1575,6 @@ function renderTable(): void {
       render()
     },
     onSpoil: cardId => {
-      sfx.flip(true)
       void dispatch({ type: 'spoils', cardId })
     },
     onCard: id => {
@@ -1556,7 +1585,6 @@ function renderTable(): void {
         const ids = [...selected]
         selected = new Set()
         grindPick = false
-        sfx.gradeUp()
         return void dispatch({ type: 'flamber', cardIds: ids, grind: id })
       }
       // a beer-stained pair is picked and dropped together
@@ -1566,8 +1594,7 @@ function renderTable(): void {
         if (on) selected.add(x)
         else selected.delete(x)
       }
-      sfx.flip(false)
-      render()
+      render() // the duel hears the pick (duel.ts listen)
     },
     onPile: () => openDrawer('etui'),
   })
@@ -1611,7 +1638,7 @@ function forgePanel(plan: ForgePlan): Panel {
         const over = ui.hit(x, y, cw, h, () => {
           if (on) picks.keep = picks.keep.filter(k => k !== i)
           else picks.keep = [...picks.keep, i].slice(-plan.tier)
-          sfx.flip(false)
+          sfx.select(!on)
           render()
         })
         ui.nine('hud/plate/paper', x, y, cw, h, on ? '#e8c260' : over ? '#fff6dc' : undefined)
@@ -1625,7 +1652,7 @@ function forgePanel(plan: ForgePlan): Panel {
     buttons: [{ label: 'Flambé it', price: `${picks.keep.length}/${plan.tier}`, kind: 'go', enabled: picks.keep.length === plan.tier, onClick: () => {
       const traits: Trait[] = picks.keep.map(i => plan.candidates[i])
       forgeKeepPicks = null
-      sfx.gradeUp()
+      sfx.strike()
       void dispatch({ type: 'forgeKeep', traits })
     } }],
   }
@@ -1639,13 +1666,27 @@ let boardAsked = false
 let receiptAt: number | null = null
 let receiptLine = -1
 
+// the music follows the screen (docs/MUSIC.md §5): le tabac in the shop and after a won run, la fée verte in boss
+// rounds (on the next bar line), the house band everywhere else. a lost run slides the tape down to half speed
+function followMusic(): void {
+  const view_ = match || online ? v() : null
+  const lost = view_?.phase === 'over' && view_.result!.winner !== view_.me.seat
+  const scene = view_?.phase === 'shop' || (view_?.phase === 'over' && !lost) ? 'tabac' : lost || view_?.twist ? 'fee' : 'table'
+  music.setScene(scene, scene === 'fee' && !lost)
+  music.glide(lost ? 0.5 : 1, lost ? 2 : 0.5)
+}
+
 function overPanel(): Panel {
   const view_ = v()
-  receiptAt ??= performance.now()
   const res = view_.result!
   const me = view_.me
   const them = view_.others[0]
   const won = res.winner === me.seat
+  if (receiptAt === null) {
+    receiptAt = performance.now()
+    if (won) sfx.fanfare()
+    else sfx.busted()
+  }
   // the match ends in the round someone busts, so view_.round is the bust round
   const solo = view_.mode === 'solo' || view_.mode === 'daily'
   const how = won

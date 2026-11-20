@@ -1,0 +1,66 @@
+# the sound list for art/sfx/build.py. docs/SOUND.md §2, §4
+# pack <dir under raw/> <license> <author> <url>
+pack kenney-casino     CC0 Kenney        https://opengameart.org/content/54-casino-sound-effects-cards-dice-chips
+pack kenney-rpg        CC0 Kenney        https://opengameart.org/content/50-rpg-sound-effects
+pack kenney-interface  CC0 Kenney        https://opengameart.org/content/interface-sounds
+pack ui-sfx            CC0 Kenney        https://opengameart.org/content/51-ui-sound-effects-buttons-switches-and-clicks
+pack rubberduck-100    CC0 rubberduck    https://opengameart.org/content/100-cc0-sfx
+pack book-flips        CC0 starninjas    https://opengameart.org/content/10-book-page-flips
+pack misc              CC0 various       fire-1.wav:antumdeluge(opengameart.org/content/fire-crackling) whoosh2_0.wav:pyranostudios(/content/air-whoosh) typewriter*.wav:cassie-orbitgames(/content/typewriter-sounds) doorbell.wav:frosty-ham(/content/doorbell)
+
+# name           max_ms  highpass  sources (globs under raw/)
+
+# cards: short and dry, they're the sound you hear the most
+card-deal         150     150       kenney-casino/Audio/card-slide-[1-8].ogg
+card-hover         45     300       kenney-casino/Audio/card-slide-[1-6].ogg
+card-snap          70     200       kenney-casino/Audio/card-place-[1-4].ogg
+card-place        140     120       kenney-casino/Audio/card-place-[1-4].ogg
+card-shove        260     120       kenney-casino/Audio/card-shove-[1-4].ogg
+card-fan          420     150       kenney-casino/Audio/card-fan-[1-2].ogg
+card-riffle       700     150       kenney-casino/Audio/card-shuffle.ogg
+pack-open         450     120       kenney-casino/Audio/cards-pack-open-[1-2].ogg
+pack-take         350     150       kenney-casino/Audio/cards-pack-take-out-[1-2].ogg
+
+# chips and money
+chip-lay          180     100       kenney-casino/Audio/chip-lay-[1-3].ogg
+chip-stack        300     100       kenney-casino/Audio/chips-stack-[1-6].ogg
+chip-collide      250     100       kenney-casino/Audio/chips-collide-[1-4].ogg
+chip-handle       450     100       kenney-casino/Audio/chips-handle-[1-6].ogg
+coins             500     150       kenney-rpg/*/handleCoins*.ogg
+
+# paper and leather: the carnet, the fiche, tickets, the binder
+paper             300     150       rubberduck-100/paper_0[1-4].ogg
+page              350     150       book-flips/*.ogg kenney-rpg/*/bookFlip*.ogg
+book-open         500     100       kenney-rpg/*/bookOpen.ogg
+book-close        400      80       kenney-rpg/*/bookClose.ogg kenney-rpg/*/bookPlace*.ogg
+leather           400      80       kenney-rpg/*/handleSmallLeather*.ogg kenney-rpg/*/dropLeather.ogg
+creak             700      60       kenney-rpg/*/creak[1-3].ogg
+cloth             350     150       kenney-rpg/*/cloth[1-4].ogg
+
+# wood, stamps, slams, metal
+tok               120      80       rubberduck-100/wooden_0[1-3].ogg
+slam              350      40       rubberduck-100/slam_0[1-7].ogg
+hit               400      40       rubberduck-100/hit_0[1-4].ogg
+metal-click       200     150       kenney-rpg/*/metalClick.ogg kenney-rpg/*/metalLatch.ogg
+metal             600      60       rubberduck-100/metal_0[1-9].ogg rubberduck-100/metal_1[0-2].ogg
+latch             400     100       rubberduck-100/key_open_0[1-2].ogg
+box               500      60       rubberduck-100/wooded_box_open.ogg
+pot               500      60       kenney-rpg/*/metalPot[1-3].ogg
+
+# glass, bells
+glass             500     300       rubberduck-100/glass_0[1-5].ogg kenney-interface/*/glass_00[1-6].ogg
+bell             1200     200       rubberduck-100/bell_0[1-3].ogg
+gong             2500      40       rubberduck-100/gong_0[1-2].ogg
+doorbell         1600     150       misc/doorbell.wav
+door              900      60       rubberduck-100/door_open.ogg kenney-rpg/*/doorOpen_*.ogg
+
+# small ui ticks (raw material under the paper sounds)
+tick               60     300       kenney-interface/*/tick_00[124].ogg
+click              80     200       ui-sfx/click[1-5].wav
+switch             90     200       ui-sfx/switch[1-9].wav
+scratch           200     400       kenney-interface/*/scratch_00[1-5].ogg
+
+# fire and air
+fire             1800      80       misc/fire-1.wav
+whoosh            700      80       misc/whoosh2_0.wav
+typewriter        600     150       misc/typewriter[1-3].wav

@@ -175,6 +175,12 @@ export function showTitle(app: HTMLElement, next: TitleState): void {
   }
 }
 
+// the logo intro: a reel clack every 5 frames while they lock (the same beats as firelight in logo.ts), then the word catches
+function introSound(f: number): void {
+  if (f >= 15 && f < 55 && (f - 10) % 5 === 0) sfx.digitLock((f - 15) / 5, false)
+  if (f === 58) sfx.strike()
+}
+
 // jump the camera to a layer: 0 street, 1 cellar, 2 sewers
 export function panTo(layer: number): void {
   camTarget = SNAPS[layer]
@@ -290,7 +296,11 @@ function click(p: { x: number; y: number }): void {
   const wy = p.y + Math.round(cam)
   for (let i = hits.length - 1; i >= 0; i--) {
     const h = hits[i]
-    if (p.x >= h.x && p.x <= h.x + h.w && wy >= h.y && wy <= h.y + h.h) return h.act()
+    if (p.x >= h.x && p.x <= h.x + h.w && wy >= h.y && wy <= h.y + h.h) {
+      const mark = sfx.played()
+      h.act()
+      return sfx.quietSince(mark)
+    }
   }
   inp.blur()
 }
@@ -309,6 +319,7 @@ function tick(t: number): void {
   last = t
   while (left <= 0) {
     frame++
+    introSound(frame)
     if (frame >= INTRO_FRAMES + IDLE_FRAMES) frame = INTRO_FRAMES
     left += frameMs(frame)
   }
@@ -514,7 +525,11 @@ function hit(key: string, x: number, y: number, w: number, h: number, act: () =>
   if (over && hover !== key) {
     hover = key
     juice.set(key, now)
-  } else if (!over && hover === key) hover = ''
+    sfx.hover(key)
+  } else if (!over && hover === key) {
+    hover = ''
+    sfx.hover(null)
+  }
   return over
 }
 
@@ -542,7 +557,7 @@ function ticket(key: string, label: string, x: number, y: number, w: number, kin
   }
   const over = hit(key, x, y - 4, w, 31, () => {
     pressed = { key, t: now }
-    sfx.coin()
+    sfx.stamp()
     inp.blur()
     act()
   })

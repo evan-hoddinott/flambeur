@@ -21,11 +21,12 @@ import { collectible, drawCollectible } from './collectibles.ts'
 import type { Appraisal } from '../engine/scoring.ts'
 import type { StarterId } from '../engine/starters.ts'
 import * as sfx from './sound.ts'
+import * as music from './music.ts'
 import { STRIP, announce, drawBand, runStrip, skipBand } from './frame.ts'
 import { lang } from './lang.ts'
-import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
+import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } from './panels.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
-import { closeDrawer, deckCounts, drawDrawer, drawerKey, drawerOpen, drawerPointer, openDrawer, setCompareHover, setDrawerActions, setDrawerHover } from './drawer.ts'
+import { closeDrawer, deckCounts, drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, openDrawer, setCompareHover, setDrawerActions, setDrawerHover } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
 import { drawTips, tip, tipShowing } from './tips.ts'
 import { KEYWORDS, cardEntry, entry, type Entry } from '../engine/glossary.ts'
@@ -110,6 +111,7 @@ const juice = new Map<string, number>() // key -> start time
 
 type Hit = { x: number; y: number; w: number; h: number; onClick: () => void }
 let hits: Hit[] = []
+let deniedHits: Hit[] = [] // tickets you can't press: a click gets the dull tok
 let cuffHits: { slot: number; x: number; y: number; w: number; h: number }[] = []
 let dragInsert: { slot: number; x: number; y: number; pointer: number; moved: boolean } | null = null
 let suppressClick = false
@@ -134,6 +136,7 @@ export function insertUsed(id: Insert, cards: Card[]): void {
     return [{ ...pos, old: state!.view.me.hand.find(c => c.id === card.id) ?? card, card }]
   })
   insertFx = { id, targets, at: performance.now() }
+  sfx.insert(id)
 }
 
 function insertEffect(): void {
@@ -209,7 +212,7 @@ function insertEffect(): void {
 type Live = { v: number; h: number; g: number; label: string; step: string }
 let live: [Live, Live] | null = null
 
-let forgeFx: { at: number; cards: Card[]; result?: Card; bulk: number; landed: boolean } | null = null
+let forgeFx: { at: number; cards: Card[]; result?: Card; bulk: number; landed: boolean; rang: boolean } | null = null
 let reelAt = -Infinity
 let pendingBust: number | null = null
 let bustAt = -Infinity
@@ -219,9 +222,50 @@ export function rivalBusted(seat: number): void { pendingBust = seat }
 let markerAt = -Infinity
 let pipAt = -Infinity
 
+// what changed since the last view, as sound. driven by the view, so it works online too (docs/SOUND.md §4.3)
+function listen(prev: DuelState | null, next: DuelState): void {
+  if (!prev || prev.bare || next.bare) return
+  const a = prev.view
+  const b = next.view
+  if (b.round !== a.round) {
+    sfx.riffle() // the deck shuffles every round
+    if (b.twist) sfx.twist()
+  }
+  const had = new Set(a.me.hand.map(c => c.id))
+  const wait = b.round !== a.round ? 380 : 0
+  b.me.hand.filter(c => !had.has(c.id)).forEach((c, i) => sfx.deal(i, handX(b.me.hand, c.id), false, wait))
+  if (b.me.discardsLeft < a.me.discardsLeft) sfx.shove(MY_DISCARD.x)
+  if (!a.me.locked) {
+    for (const id of next.selected) if (!prev.selected.has(id)) sfx.select(true, springs.get(`card${id}`)?.at.x)
+    for (const id of prev.selected) if (!next.selected.has(id) && !b.me.locked) sfx.select(false, springs.get(`card${id}`)?.at.x)
+  }
+  if (!a.me.locked && b.me.locked) sfx.lock(b.me.locked.length, b.me.lockKind === 'flamber')
+  if (!a.bet && b.bet) sfx.ante()
+  if (b.bet?.stage === 'push' && a.bet?.stage !== 'push') sfx.heartbeat()
+  if (next.settled && !prev.settled && b.showdown) sfx.reveal(b.showdown.theirCards.length)
+  if (!a.spoils && b.spoils) sfx.spoils(b.spoils.cards.length)
+  if (a.spoils && b.spoils && b.spoils.picks.length > a.spoils.picks.length) {
+    if (b.spoils.picks.at(-1)!.card) sfx.select(true)
+    else sfx.coin()
+  }
+  if (a.spoils && !b.spoils && a.spoils.cards.length > 1) sfx.strike() // the last card burns
+  if (next.tally && !prev.tally && b.last && b.last.outcome !== 'tie' && b.last.outcome !== 'bye') sfx.pot(b.last.outcome === 'loss')
+}
+
+// where a card sits in your fan, for the pan
+function handX(hand: Card[], id: number): number {
+  const n = hand.length
+  const i = hand.findIndex(c => c.id === id)
+  const th = n > 1 ? ((i - (n - 1) / 2) * Math.min(5.4, 38 / (n - 1)) * Math.PI) / 180 : 0
+  return HAND_C.x + HAND_C.r * Math.sin(th)
+}
+
 export function showDuel(app: HTMLElement, next: DuelState): void {
   if (state?.view.hands?.hands.length !== next.view.hands?.hands.length) pipAt = performance.now()
-  if (next.tally && !state?.tally && next.view.round % 3 === 0) markerAt = performance.now()
+  if (next.tally && !state?.tally && next.view.round % 3 === 0) {
+    markerAt = performance.now()
+    sfx.stamp()
+  }
   if (state && next.view.round < state.view.round) {
     calledOut.clear()
     callout = null
@@ -234,6 +278,7 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
   if (pendingBust!==null && pendingBust===next.view.showdown?.opponent && next.settled && !next.counting) {
     pendingBust = null
     bustAt = performance.now()
+    sfx.bust()
   }
   if (next.counting && !state?.counting) { tallyAt=-Infinity; tallyLine=-1 }
   const sd = next.view.showdown
@@ -245,8 +290,11 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
     const current = [...next.view.me.hand,...next.view.me.discard,...next.view.me.pile]
     const result = plan ? current.find(c=>c.tier>0 && !known.has(c.id)) :
       current.find(c=>sd.myCards.some(old=>old.id===c.id && old.grind<c.grind))
-    forgeFx = {at:performance.now(),cards:sd.myCards,result,bulk:plan?plan.merged.length-1:0,landed:false}
+    forgeFx = {at:performance.now(),cards:sd.myCards,result,bulk:plan?plan.merged.length-1:0,landed:false,rang:false}
+    if (plan) sfx.flambe()
+    else sfx.grind()
   }
+  listen(state, next)
   state = next
   init()
   // the drawer is shared with the shop: point its hovers and the Sleeve's use at this scene
@@ -356,17 +404,38 @@ function toStage(e: MouseEvent): { x: number; y: number } {
   return { x: (e.clientX * dpr - ox) / k, y: (e.clientY * dpr - oy) / k }
 }
 
+// a click that lands on something always makes a sound: its own, or the press
 function click(p: { x: number; y: number }): void {
-  if (drawerPointer(p.x, p.y, true)) return
-  if (panelClick(p)) return
-  if (calling()) return endCallout()
+  const mark = sfx.played()
+  if (clicked(p)) sfx.quietSince(mark)
+}
+
+function clicked(p: { x: number; y: number }): boolean {
+  if (drawerPointer(p.x, p.y, true)) return drawerHoverAt() !== null
+  if (panelOpen()) {
+    const on = panelHoverAt(p) !== null
+    panelClick(p)
+    return on
+  }
+  if (calling()) {
+    endCallout()
+    return true
+  }
   // topmost first: rects are pushed in draw order, cards draw over the felt but under the hud
   for (let i = hits.length - 1; i >= 0; i--) {
     const h = hits[i]
-    if (p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h) return h.onClick()
+    if (p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h) {
+      h.onClick()
+      return true
+    }
   }
   const card = cardUnder(p)
-  if (card) return card.onClick()
+  if (card) {
+    card.onClick()
+    return true
+  }
+  if (deniedHits.some(h => p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h)) sfx.denied()
+  return false
 }
 
 function cardUnder(p: { x: number; y: number }, list = cardHits): CardHit | null {
@@ -391,6 +460,7 @@ function frame(t: number): void {
   stepSprings(dt)
   cuffHits = []
   hits = []
+  deniedHits = []
   looks = []
   lastCardHits = cardHits
   cardHits = []
@@ -418,6 +488,20 @@ function frame(t: number): void {
   drawTips(g, drawerOpen())
   drawFiche(g)
   cv.style.cursor = (covered ? overDrawer : panelOpen() ? panelHover(mouse) : hoverable()) ? 'pointer' : 'default'
+  const layer = covered ? drawerHoverAt() : panelOpen() ? panelHoverAt(mouse) : undefined
+  if (layer !== undefined) sfx.hover(layer?.key ?? null, layer?.card, layer?.x)
+  else sceneHover()
+}
+
+// the hover tick: a rect's index and size (stable while things sway), or a card's id
+function sceneHover(): void {
+  const p = mouse
+  for (let i = hits.length - 1; i >= 0; i--) {
+    const h = hits[i]
+    if (p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h) return sfx.hover(`duel${i}:${Math.round(h.w)}x${Math.round(h.h)}`)
+  }
+  const card = cardUnder(p)
+  sfx.hover(card ? `card${card.id}` : null, true, card?.x)
 }
 
 function hoverable(): boolean {
@@ -1052,10 +1136,9 @@ function feltBets(st: DuelState): void {
     if (!seenBets.has(key)) {
       seenBets.add(key)
       stamps.push({ name: `hud/stamp/${b.choice}`, x: target.x, y: target.y, t: now })
-      if (side === 'them') {
-        sfx.coin()
-        say(b.choice)
-      }
+      if (b.choice === 'max') sfx.push(side === 'them')
+      else sfx.chip(side === 'them')
+      if (side === 'them') say(b.choice)
     }
     const at = spring(key, target, { x: target.x, y: target.y - 30, r: tilt * 4, s: 2.2 })
     if (n === 0 && !showdown) text(side === 'me' ? 'Vous' : st.rival.name, at.x - FELT_TW / 2 + 4, at.y - 24, { font: 'sans', color: CREAM, outline: OUTLINE })
@@ -1097,11 +1180,15 @@ function forgeReturn(): boolean {
     })
   } else if (forgeFx.result) {
     const u = (age - 560) / 440
+    if (!forgeFx.rang) {
+      forgeFx.rang = true
+      if (forgeFx.result.tier > 0) sfx.stars(forgeFx.result.tier)
+    }
     if (forgeFx.bulk > 0) {
       const count = forgeFx.bulk
       if (age >= 780 && !forgeFx.landed) {
         forgeFx.landed = true
-        sfx.thunk()
+        sfx.bulk()
       }
       for (let i = 0; i < count; i++) {
         const drop = progress(age - 560 - i * 40, 220)
@@ -1289,6 +1376,18 @@ function shadow(x: number, y: number, w: number, h: number, r: number): void {
 }
 
 const THEIR_TAG_X = 448 // under their plate, left of their hand pips
+// your appraisal's reels: a clack and a note as each digit locks, then the heat catches on the last one
+let reelHeard = { at: -1, n: 0 }
+function reelSounds(digits: string, age: number, ratio: number): void {
+  if (reelHeard.at !== reelAt) reelHeard = { at: reelAt, n: 0 }
+  const locked = [...digits].filter((_, i) => age - 170 - i * 95 >= 0).length
+  for (; reelHeard.n < locked; reelHeard.n++) {
+    const last = reelHeard.n === digits.length - 1
+    sfx.digitLock(reelHeard.n, last)
+    if (last && ratio >= 1) sfx.heat(ratio >= 4 ? 3 : ratio >= 2 ? 2 : 1)
+  }
+}
+
 function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   const a = mine ? sd.mine : sd.theirs
   const w0 = 96
@@ -1344,6 +1443,7 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   const settled = Number.isFinite(reelAt) && !stillCards.matches
   const numberWidth = measure(digits,'didone')
   let dx=x+(w-numberWidth)/2
+  if (mine && settled) reelSounds(digits, age, ratio)
   if(settled && ratio>=2){
     for(let offset=0;offset<numberWidth;offset+=15) pin('fx/flame/'+(1+(Math.floor(now/85+offset)%4)),dx+offset,y+13,{sx:.7,sy:ratio>=4?.75:.45})
   }
@@ -1578,7 +1678,7 @@ function hud(st: DuelState, t: number): void {
   marker(st)
   premier(st)
   if (view.twist) twistSign(view)
-  if (bubble && now - bubble.t < 2600) speech(bubble.text, bubble.sub, now - bubble.t)
+  if (bubble && now - bubble.t < 2600) speech(bubble.text, bubble.sub, now - bubble.t, st.rival.mask)
   calmBand(bandTop)
   startCallout(st)
   slips(st)
@@ -1679,7 +1779,7 @@ function sleeveCards(st: DuelState, t: number): void {
     const at = spring(`insert${i}${card.id}`, target, { x: spot.x, y: 390, r: 0, s: 1 })
     const def = INSERTS[card.id]
     const canUse = usable && def.when !== 'shop'
-    hit(at.x - w / 2, at.y - h / 2, w, h, () => { if (usable) { sfx.flip(false); st.onInsert(i) } })
+    hit(at.x - w / 2, at.y - h / 2, w, h, () => { if (usable) { sfx.fwip(); st.onInsert(i) } })
     if (canUse) cuffHits.push({ slot: i, x: at.x, y: at.y, w, h })
     looks.push({ x: at.x, y: at.y, w, h, r: at.r, above: true, e: () => {
       const e = entry('insert', card.id, card)
@@ -1718,7 +1818,7 @@ function sortTabs(st: DuelState): void {
   for (const [i, by] of (['rank', 'suit'] as const).entries()) {
     const y = 262 + i * 18
     const on = st.sort === by
-    const over = hit(x, y, 34, 15, () => { if (!on) { sfx.flip(false); st.onSort(by) } })
+    const over = hit(x, y, 34, 15, () => { if (!on) { sfx.fan(); st.onSort(by) } })
     nine('hud/plate/paper', x, y - (over && !on ? 1 : 0), 34, 15, on ? GOLD : over ? undefined : '#b8a888')
     text(by === 'rank' ? 'Rank' : 'Suit', x + 17, y + 2 - (over && !on ? 1 : 0), { font: 'sans', color: INK, align: 'center', bold: on })
   }
@@ -1844,7 +1944,7 @@ function startCallout(st: DuelState): void {
   if (calledOut.has(key)) return
   calledOut.add(key)
   callout = { key, t: now }
-  sfx.bell()
+  sfx.knockout()
   const [big, small] = calloutLines(st)
   announce(big, small, sd.winner === st.view.me.seat ? 'good' : 'bad')
 }
@@ -1872,7 +1972,12 @@ function calloutBanner(st: DuelState): void {
 }
 
 // the french line big, the english bet word under it
-function speech(s: string, sub: string, age: number): void {
+// the rival's line types out in their mask's voice, a blip every few letters (docs/SOUND.md §6)
+let spoken = { t: -1, n: 0 }
+function speech(s: string, sub: string, age: number, mask: string): void {
+  if (spoken.t !== bubble!.t) spoken = { t: bubble!.t, n: 0 }
+  const shown = stillCards.matches ? s.length : Math.min(s.length, Math.floor(age / 33))
+  for (; spoken.n < shown; spoken.n++) sfx.blip(sfx.voiceOf(mask), spoken.n, s[spoken.n], true)
   const j = age < 300 ? 1 + 0.2 * Math.exp(-age / 60) : 1
   g.save()
   g.translate(RIVAL_X - 32, 82)
@@ -1880,7 +1985,7 @@ function speech(s: string, sub: string, age: number): void {
   const w = Math.max(56, measure(s, 'didone') + 18)
   nine('bubble/9slice', -w, -18, w, 36)
   pin('bubble/tail', -1, 0, { r: -Math.PI / 2 })
-  text(s, -w / 2, -16, { font: 'didone', align: 'center', color: INK })
+  text(s.slice(0, shown), -w / 2 - measure(s, 'didone') / 2, -16, { font: 'didone', color: INK })
   text(sub.toUpperCase(), -w / 2, 4, { font: 'sans', align: 'center', color: BURGUNDY, bold: true })
   g.restore()
 }
@@ -1939,11 +2044,12 @@ function slips(st: DuelState): void {
       pressed = { i, t: now }
       const stamp = s.stamp ?? ({ lock: 'play', forge: 'flamber', discard: 'discard', skip: 'skip' } as Partial<Record<Kind, string>>)[s.kind]
       if (stamp) stamps.push({ name: `hud/stamp/${stamp}`, x: at.x + TW / 2, y: at.y + 12, t: now })
-      sfx.coin()
+      sfx.stamp()
       s.onClick()
     }
-    presses.push(s.enabled ? act : () => {})
+    presses.push(s.enabled ? act : sfx.denied)
     const over = s.enabled && hit(at.x, at.y - 4, TW, PITCH, act)
+    if (!s.enabled) deniedHits.push({ x: at.x, y: at.y - 4, w: TW, h: PITCH, onClick: sfx.denied })
     const id = slipRule(s)
     if (id) look(at.x, at.y - 4, TW, PITCH, rule(id))
     const box = { x: at.x, y: at.y - 4, w: TW, h: PITCH }
@@ -2070,7 +2176,11 @@ function tally(st: DuelState): number {
   if(!Number.isFinite(tallyAt)) tallyAt=now
   const age=stillCards.matches?Infinity:now-tallyAt
   const lines=Math.min(rows.length,Math.floor(age/120))
-  if(lines>tallyLine) { tallyLine=lines; sfx.thunk() }
+  if(lines>tallyLine) {
+    tallyLine=lines
+    if (lines === rows.length) sfx.register()
+    else sfx.thunk()
+  }
   nine('fx/receipt',at.x,at.y,w,Math.min(h,32+lines*11+(lines===rows.length?22+noteLines.length*10:0)))
   const titleColor = r.outcome === 'win' ? '#a8260a' : INK
   if (measure(title, 'didone') <= w - 8) text(title, at.x + w / 2, at.y + 1, { font: 'didone', color: titleColor, align: 'center' })
@@ -2150,8 +2260,12 @@ export async function countUp(sd: ShowdownView): Promise<void> {
   const sides = [sd.mine, sd.theirs]
   const cards = [...sd.myCards, ...sd.theirCards]
   const steps = Math.max(sd.mine?.steps.length ?? 0, sd.theirs?.steps.length ?? 0)
+  sfx.duck(-4, steps * 0.3 + 1)
   for (let i = 0; i < steps; i++) {
-    let gradeHit = false
+    // one note per step for both sides: the loudest kind of step either side took, panned to its card
+    let loud: { value: number; hype: number; xhype: number; grade: number } = { value: 0, hype: 0, xhype: 1, grade: 0 }
+    let x: number | undefined
+    const rank = (s: typeof loud) => s.grade ? 3 : s.xhype !== 1 ? 2 : s.hype ? 1 : 0
     sides.forEach((a, n) => {
       if (!a) return
       const st = a.steps[i]
@@ -2160,7 +2274,7 @@ export async function countUp(sd: ShowdownView): Promise<void> {
       l.v += st.value
       l.h = (l.h + st.hype) * st.xhype
       l.g += st.grade
-      if (st.grade) gradeHit = true
+      if (rank(st) > rank(loud) || (n === 0 && rank(st) === rank(loud))) loud = st
       if (i <= a.bonus.length) l.label = [a.hand, ...a.bonus.slice(0, i)].map(h => HAND_NAMES[h]).join(' + ')
       const card = st.cardId !== null ? cards.find(c => c.id === st.cardId) : undefined
       l.step = i === 0 ? '' : st.label === 'card' && card ? '' : st.label
@@ -2168,10 +2282,12 @@ export async function countUp(sd: ShowdownView): Promise<void> {
       if (st.slot !== null && n === 0) {
         l.step = st.label
         caseFired(st.slot, st)
+        sfx.caseClink()
       }
       if (card) {
         pop(`card${card.id}`)
         const s = springs.get(`card${card.id}`)
+        if (s && n === 0) x = s.at.x
         if (s) {
           const bits: [string, string][] = []
           if (st.value) bits.push([`+${st.value} Value`, VALUE.felt])
@@ -2182,8 +2298,10 @@ export async function countUp(sd: ShowdownView): Promise<void> {
         }
       }
     })
-    if (gradeHit) sfx.gradeUp()
-    else sfx.tick(i)
+    sfx.countStep(i, loud, x)
+    // the music's hype layer climbs with your running appraisal
+    const mine = live![0]
+    if (sd.mine && state) music.heat(Math.floor(mine.v * Math.max(1, mine.h) * 2 ** mine.g) / REF_SCORE[Math.min(state.view.round, REF_SCORE.length) - 1])
     await sleep(Math.max(130, 340 - i * 14))
   }
   sides.forEach((a, n) => {
@@ -2191,11 +2309,13 @@ export async function countUp(sd: ShowdownView): Promise<void> {
     if (a && Math.floor(l.v * Math.max(1, l.h) * 2 ** l.g) !== a.total) throw new Error('count-up does not match appraisal')
   })
   reelAt = performance.now()
+  if (sd.mine) sfx.reelSpin()
   if(!stillCards.matches && sides.some(Boolean)) {
     const digits = Math.max(...sides.map(a=>fmt(a?.total ?? 0).length))
     await sleep(300+digits*95)
   }
   live = null
+  music.cool()
   pop(sd.winner === null ? 'tag0' : sd.winner === sd.opponent ? 'tag1' : 'tag0')
 }
 

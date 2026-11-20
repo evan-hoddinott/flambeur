@@ -26,6 +26,8 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 | `docs/CARDS.md` | Card art spec for the art agent: every segmented sprite, sizes, layout, layer order, export. §0.5 = special cards are Balatro-loud, one visual channel per modifier slot. |
 | `docs/UX.md` | **The UI frame (Nov 18)**: fixed zones on every screen, the corner carnet drawer (deck/binder/sleeve/vitrine/carnet), the Sleeve also as 2 cards beside the hand in a match, the rules paper, compare mode, the Fiche description box, teaching. Wins over ART/DUEL/SHOP on where UI lives. |
 | `docs/ONBOARDING.md` | **Onboarding build list (Nov 19)** from the playtest and `reports/Roguelike first run onboarding.md`: hand preview, first run seed, first-encounter tags, Fiche placement, vocabulary. Wins over UX.md §7 on teaching. |
+| `docs/SOUND.md` | **Sound design (Nov 19)**: every event's sound, sample sources and licenses, the mixer, the chord-aware accordion count-up. |
+| `docs/MUSIC.md` | **The music (Nov 19)**: "Gnossienne Flambée", Satie's Gnossienne No. 1 as a 7/4 lounge band, three synced mixes (La Table, Le Tabac, La Fée Verte) + an organ score layer, Balatro's method, made in Evan's music-lab. |
 | `docs/READABILITY.md` | How interactables read: color-coded ticket buttons, outlined text, prop hover cues. Amends ART.md §13. |
 | `pitch.html` | Visual pitch page for Evan's friend. It's published on It as `pull-rate-pitch` (its old name) and is older than DESIGN.md. |
 | `collectibles-draft.md` | An old 58-idea collectible brainstorm with a Codex review. It's superseded by DESIGN.md and `src/engine/collectibles.ts`. |
@@ -97,7 +99,8 @@ src/ui/rules.ts  the rules columns (hand chart, how a hand works) the carnet's R
 src/ui/placeholders.ts  flat stand-ins for v2 sprites not drawn yet (docs/V2-ART.md), registered under their real ids. delete each when its art lands
 src/ui/collectibles.ts  collectible art on the vitrine
 src/ui/font.ts   bitmap text from art/fonts (sans, tiny, didone, chalk). glyphs are text grids in art/fonts/*.txt, `python art/fonts/build.py` rebuilds (also the woff2s style.css uses for DOM text)
-src/ui/sound.ts  webaudio synth sfx
+src/ui/sound.ts  all the sound (docs/SOUND.md): mixer + limiter, the sample atlas from art/sfx (`python art/sfx/build.py` rebuilds it
+                 from sounds.txt), accordion count-up in key with the music, speaker blips, ambience, volume (carnet Rules page, M mutes)
 sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balance tool. prints decisions/hands/KO per round, round-12 reach,
                  shop share, marker misses and REF_SCORE
 ```

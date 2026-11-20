@@ -44,6 +44,17 @@
         "--strictPort"
       ],
       "port": 5179
+    },
+    {
+      "name": "flambeur-music",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev",
+        "--port",
+        "5181",
+        "--strictPort"
+      ],
+      "port": 5181
     }
   ]
 }

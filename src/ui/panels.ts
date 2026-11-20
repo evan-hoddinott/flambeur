@@ -4,6 +4,7 @@
 // in the action column, the safe or primary one in the corner. main.ts builds a Panel each render, a scene draws it
 import { backCanvas, cardCanvas, nineSlice, sprite } from './art.ts'
 import { fiche } from './fiche.ts'
+import * as sfx from './sound.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
 import type { Card } from '../engine/cards.ts'
 import { cardEntry, type Entry } from '../engine/glossary.ts'
@@ -158,6 +159,17 @@ export function panelHover(p: { x: number; y: number }): boolean {
   return hits.slice(1).some(h => p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h)
 }
 
+// what's under the mouse for the hover tick: the topmost hit past the sheet. card-shaped ones are cards
+export function panelHoverAt(p: { x: number; y: number }): { key: string; card: boolean; x: number } | null {
+  for (let i = hits.length - 1; i >= 1; i--) {
+    const h = hits[i]
+    if (p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h) {
+      return { key: `panel${i}:${Math.round(h.w)}x${Math.round(h.h)}`, card: h.w >= 30 && h.h > h.w * 1.2, x: h.x + h.w / 2 }
+    }
+  }
+  return null
+}
+
 export function panelKey(key: string): boolean {
   if (!panel) return false
   if (key === 'Escape' && panel.onEscape) {
@@ -205,7 +217,7 @@ function drawCard(g: CanvasRenderingContext2D, hit: Ui['hit'], c: Card, x: numbe
 
 // the raffle-ticket button, same look as the duel's
 function ticket(g: CanvasRenderingContext2D, hit: Ui['hit'], b: Btn, x: number, y: number, w: number): boolean {
-  const over = b.enabled && hit(x, y - 4, w, PITCH, b.onClick)
+  const over = b.enabled && hit(x, y - 4, w, PITCH, () => { sfx.stamp(); b.onClick() })
   if (!b.enabled) {
     nineSlice(g, 'hud/ticket/face', x, y + 3, w, 24, '#43342e')
     drawText(g, b.label, x + 11, y + 8, { font: 'chalk', color: '#8c7656', bold: true })

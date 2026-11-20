@@ -3,3 +3,6 @@ dist
 __pycache__/
 .scratch-*/
 .claude/worktrees/
+
+# music renders, wavs and stems (art/music/build.py)
+art/music/out/

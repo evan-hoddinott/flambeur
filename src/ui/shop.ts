@@ -17,8 +17,8 @@ import { cardEntry, entry, KEYWORDS, type Entry } from '../engine/glossary.ts'
 import type { SeatView, ShopOfferView } from '../engine/match.ts'
 import * as sfx from './sound.ts'
 import { drawBand, runStrip } from './frame.ts'
-import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
-import { drawDrawer, drawerKey, drawerOpen, drawerPointer, setDrawerHover, type DrawerThing } from './drawer.ts'
+import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } from './panels.ts'
+import { drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, setDrawerHover, type DrawerThing } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
 import { drawTips, tip as teach } from './tips.ts'
 
@@ -142,7 +142,8 @@ function gradingCounter(st: ShopState): void {
     text('OPEN', 179, 150, { font: 'tiny', align: 'center', color: INK })
     hit(155, 136, 48, 35, () => {
       item.at = performance.now()
-      sfx.rip(0.06)
+      sfx.paper(0.5)
+      sfx.play('box', { gain: 0.4 })
     })
   } else {
     const elapsed = Math.max(0, now - item.at)
@@ -216,6 +217,8 @@ export function showShop(app: HTMLElement, next: ShopState): void {
     spent = 0
     keeperSays('Bonjour.')
     sfx.doorBell()
+    sfx.play('whoosh', { gain: 0.25, rate: 1.3 })
+    sfx.ambience('shop')
   } else updateBeats(previous, next)
   if (next.scratch && next.scratch.key !== shownKey) openTicket(next.scratch)
   if (!running) {
@@ -227,18 +230,21 @@ export function showShop(app: HTMLElement, next: ShopState): void {
 // his speech bubble. flavor only, rules never go in here
 export function keeperSays(text: string): void {
   bubble = { text, t: now }
+  spoken = 0
 }
+let spoken = 0 // letters of his line typed out so far, one blip each
 
 // compare confirmed shelf views so remote buys and repeated renders behave like local ones
 function updateBeats(before: ShopState, after: ShopState): void {
   const prev = before.view.me.shop!
   const next = after.view.me.shop!
   if(!prev.rolledOver && next.rolledOver) { saltyAt=now; keeperSays('Ma marchandise vous plaît pas ?') }
-  if(!before.view.me.shipping && after.view.me.shipping) { shipAt=now; parcelShipper=after.view.me.shipping.shipper }
+  if(!before.view.me.shipping && after.view.me.shipping) { shipAt=now; parcelShipper=after.view.me.shipping.shipper; sfx.ship(after.view.me.shipping.shipper) }
   if(before.view.me.binder.length>after.view.me.binder.length && after.view.me.bankroll>before.view.me.bankroll && !reducedMotion.matches) {
     const sold=before.view.me.binder.filter(c=>!after.view.me.binder.some(other=>c.id===other.id))
     sale={cards:[...(sale?.cards ?? []),...sold],at:now}
   }
+  if (before.view.me.binder.length > after.view.me.binder.length && after.view.me.bankroll > before.view.me.bankroll) sfx.coin()
   const stockChanged = prev.offers.length !== next.offers.length || prev.offers.some((o, i) => {
     const n = next.offers[i]
     return (o.sold && !n.sold) || JSON.stringify({ ...o, sold: false }) !== JSON.stringify({ ...n, sold: false })
@@ -250,13 +256,13 @@ function updateBeats(before: ShopState, after: ShopState): void {
     if (!reducedMotion.matches) {
       restockBeat = { at: now, old: before, landed: false }
       stockAt = now + 120
-    } else sfx.thunk()
+    } else sfx.slamBox()
     return
   }
   const bought = next.offers.some((o, i) => o.sold && !prev.offers[i].sold)
   if (bought) {
     keeperSays('Bon.')
-    sfx.coin()
+    sfx.register()
     if (!reducedMotion.matches) {
       for (const { slot, x, w } of offerLayout(prev.offers)) {
         if (next.offers[slot].sold && !prev.offers[slot].sold) {
@@ -268,7 +274,7 @@ function updateBeats(before: ShopState, after: ShopState): void {
   }
   if (next.bulkInDeck < prev.bulkInDeck && prev.shipped === next.shipped) {
     bulkAt = reducedMotion.matches ? -Infinity : now
-    sfx.thunk()
+    sfx.bin()
   }
 }
 
@@ -311,7 +317,7 @@ function counterBeat(): void {
     else {
       if (age >= 130 && !restockBeat.landed) {
         restockBeat.landed = true
-        sfx.thunk()
+        sfx.slamBox()
       }
       const fall = Math.min(1, age / 130)
       const bounce = Math.sin(Math.PI * Math.min(1, Math.max(0, (age - 130) / 90)))
@@ -408,15 +414,29 @@ function toStage(e: MouseEvent): { x: number; y: number } {
   return { x: (e.clientX * dpr - ox) / k, y: (e.clientY * dpr - oy) / k }
 }
 
+// a click that lands on something always makes a sound: its own, or the press
 function click(p: { x: number; y: number }): void {
   lastInput = now
   if (lotto) return lottoClick()
-  if (drawerPointer(p.x, p.y, true)) return
-  if (panelClick(p)) return
+  const mark = sfx.played()
+  if (clicked(p)) sfx.quietSince(mark)
+}
+
+function clicked(p: { x: number; y: number }): boolean {
+  if (drawerPointer(p.x, p.y, true)) return drawerHoverAt() !== null
+  if (panelOpen()) {
+    const on = panelHoverAt(p) !== null
+    panelClick(p)
+    return on
+  }
   for (let i = hits.length - 1; i >= 0; i--) {
     const h = hits[i]
-    if (inside(h, p)) return h.onClick()
+    if (inside(h, p)) {
+      h.onClick()
+      return true
+    }
   }
+  return false
 }
 
 window.addEventListener('keydown', e => {
@@ -466,6 +486,14 @@ function frame(t: number): void {
   drawTips(g, drawerOpen())
   drawFiche(g)
   cv.style.cursor = jeton ? 'none' : lotto || drawer || (panelOpen() ? panelHover(mouse) : over()) ? 'pointer' : 'default'
+  // the hover tick, from whichever layer has the mouse. shop hits are by index and size, so a swaying box stays one hover
+  const layer = lotto ? null : drawer ? drawerHoverAt() : panelOpen() ? panelHoverAt(mouse) : undefined
+  if (layer !== undefined) sfx.hover(layer?.key ?? null, layer?.card, layer?.x)
+  else {
+    let i = hits.length - 1
+    while (i >= 0 && !inside(hits[i], mouse)) i--
+    sfx.hover(i < 0 ? null : `shop${i}:${Math.round(hits[i].w)}x${Math.round(hits[i].h)}`)
+  }
 }
 
 function over(): boolean {
@@ -1092,6 +1120,9 @@ function speech(): void {
   const age = now - bubble.t
   if (age > 2600) return
   const w = measure(bubble.text, 'sans') + 14
+  // his line types out, a gruff reed blip per few letters (docs/SOUND.md §6)
+  const shown = reducedMotion.matches ? bubble.text.length : Math.min(bubble.text.length, Math.floor(age / 33))
+  for (; spoken < shown; spoken++) sfx.blip('buraliste', spoken, bubble.text[spoken])
   const x = 330
   const y = 22 - Math.round(ease(age / 160) * 2)
   g.fillStyle = INK0
@@ -1104,7 +1135,7 @@ function speech(): void {
   g.lineTo(x + 3, y + 24)
   g.closePath()
   g.fill()
-  text(bubble.text, x + 7, y + 4, { color: INK })
+  text(bubble.text.slice(0, shown), x + 7, y + 4, { color: INK })
 }
 
 // the latest message sits in the action column above Sortir, where the duel puts it
@@ -1275,7 +1306,7 @@ function symbols(insert: Insert): Insert[] {
 }
 
 function openTicket(s: Scratch): void {
-  sfx.rip()
+  sfx.paper(0.6) // torn off the roll
   shownKey = s.key
   const wins = symbols(s.insert).map(symbol => {
     const foil = canvas(FOIL.w, FOIL.h)
@@ -1342,6 +1373,7 @@ function clearWindow(w: Win): void {
   if (t.wonAt < 0 && t.wins.filter(x => x.symbol === t.insert).every(x => x.clearedAt >= 0)) {
     t.wonAt = now
     t.autoAt = now + 600 // then the rest clears on its own, so you see what you almost had
+    sfx.insert(t.insert)
     sfx.flip(t.insert === 'grail')
     if (t.insert === 'grail') keeperSays('Hein ?!')
   }
@@ -1464,7 +1496,7 @@ function drawTicket(t: Lotto): void {
 function stamp(t: Lotto): void {
   const age = now - t.wonAt - 380
   if (age < 0) return
-  if (age < 16 && !t.rubbed) sfx.thunk()
+  if (age < 16 && !t.rubbed) sfx.stamp()
   const s = 1 + Math.max(0, 1 - age / 110)
   const st = sprite('scratch/stamp')
   g.save()
