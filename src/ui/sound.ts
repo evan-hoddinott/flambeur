@@ -134,10 +134,10 @@ const robin = new Map<Sample, number>()
 const voices = new Map<Sample, number>()
 let plays = 0 // every sound bumps it, so a click with no sound of its own can get the press sound
 
-type PlayOpts = { gain?: number; rate?: number; x?: number; far?: boolean; delay?: number; jitter?: number; cap?: number }
+type PlayOpts = { gain?: number; rate?: number; x?: number; far?: boolean; lp?: number; delay?: number; jitter?: number; cap?: number }
 
 // one take of a sample, round-robin, with a little random pitch and gain. x = stage x for the pan,
-// far = across the table (quieter, duller)
+// far = across the table (quieter, duller), lp = a lowpass in Hz
 export function play(name: Sample, o: PlayOpts = {}): void {
   plays++
   if (!ctx || !atlas || settings.muted) return
@@ -154,20 +154,20 @@ export function play(name: Sample, o: PlayOpts = {}): void {
   const g = ctx.createGain()
   g.gain.value = (o.gain ?? 1) * (o.far ? 0.5 : 1) * 10 ** ((Math.random() * 2 - 1) * 1.5 / 20)
   src.connect(g)
-  out(g, o.x, o.far).connect(sfxBus!)
+  out(g, o.x, o.lp ?? (o.far ? 3000 : undefined)).connect(sfxBus!)
   voices.set(name, live + 1)
   src.onended = () => voices.set(name, (voices.get(name) ?? 1) - 1)
   src.start(t, start, length)
 }
 
-// pan by stage x (small: ±0.35), and the far side's lowpass
-function out(node: AudioNode, x?: number, far?: boolean): AudioNode {
+// pan by stage x (small: ±0.35), and a lowpass (the far side's, or a softened sound)
+function out(node: AudioNode, x?: number, lp?: number): AudioNode {
   let last = node
-  if (far) {
-    const lp = ctx!.createBiquadFilter()
-    lp.type = 'lowpass'
-    lp.frequency.value = 3000
-    last = last.connect(lp)
+  if (lp !== undefined) {
+    const f = ctx!.createBiquadFilter()
+    f.type = 'lowpass'
+    f.frequency.value = lp
+    last = last.connect(f)
   }
   if (x !== undefined) {
     const pan = ctx!.createStereoPanner()
@@ -656,9 +656,12 @@ export function hover(key: string | null, card = false, x?: number): void {
   hoverKey = key
   if (key === null) return
   const t = performance.now()
-  if (t - hoverAt < 40) return
+  // the slide is a bright hiss, so a fast sweep across the hand sounded like static: lowpass it to a soft
+  // paper thup, space card ticks out, one voice at a time, quieter the faster you sweep
+  const gap = t - hoverAt
+  if (gap < (card ? 70 : 40)) return
   hoverAt = t
-  if (card) play('card-hover', { gain: 0.3, x, rate: 1 + ((x ?? 320) - 320) / 1600 })
+  if (card) play('card-hover', { gain: 0.25 * Math.min(1, gap / 200), x, lp: 1800, rate: 1 + ((x ?? 320) - 320) / 1600, cap: 1 })
   else play('tick', { gain: 0.2 })
 }
 
