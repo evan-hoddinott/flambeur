@@ -4,7 +4,7 @@ Context for any agent (Claude, Codex, subagents) working in this repo. Read this
 
 ## What this is
 
-Flambeur is Evan's entry for the **KSU AI Club Hackathon** (Nov 16–20 2026, KSU Marietta). It's entered in two tracks: **IEEE AI Game Sprint** and the **Nudox track** (most organized codebase, see Nudox below). Demo and judging are **Friday Nov 20**.
+Flambeur is Evan's entry for the **KSU AI Club Hackathon** (Nov 16–20 2026, KSU Marietta). It's entered in two tracks: **IEEE CS Game Sprint** and the **Nudox track** (most organized codebase, see Nudox below). Demo and judging are **Friday Nov 20**.
 
 It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 - **Packs:** you rip booster packs to build a small deck of playing cards. Each card can have finishes, stamps and flambéed traits.

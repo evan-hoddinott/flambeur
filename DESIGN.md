@@ -1,6 +1,6 @@
 # Flambeur design (v2)
 
-Booster-pack poker roguelike for the KSU AI Hackathon (IEEE AI Game Sprint + Nudox). Browser game.
+Booster-pack poker roguelike for the KSU AI Hackathon (IEEE CS Game Sprint + Nudox). Browser game.
 
 This is the rules source of truth, and it matches the engine (`src/engine/`) as of the v2 build (Nov 18). The spec it was built from is `docs/V2.md`; where a tuned number here differs from V2.md, the sim moved it and the reason is in **Tuning (Nov 18)**. Numbers are tuned with the sim (`sim/econ.ts`), not by guessing. The v1 rules and their sim tables (mulligans, fold, Tables holding a pile, the chip-lead win) are in git history at `a923189`.
 
