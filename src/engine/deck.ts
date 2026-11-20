@@ -80,16 +80,6 @@ export function shuffleIn(p: Piles, card: Card, rng: Rng): void {
   p.pile.splice(randInt(rng, 0, p.pile.length), 0, card)
 }
 
-// remove one card from the pile or discard for good (grading, binning bulk). only between rounds
-export function takeOut(p: Piles, id: number): Card {
-  if (p.hand.length > 0) throw new Error('taking a card out mid-round')
-  for (const from of [p.pile, p.discard]) {
-    const i = from.findIndex(c => c.id === id)
-    if (i >= 0) return from.splice(i, 1)[0]
-  }
-  throw new Error(`card ${id} is not in the deck`)
-}
-
 // what's left in a pile, for the deck viewer. sorted high to low, bulk last
 export function pileView(cards: Card[]): { cards: Card[]; byRank: Map<number, number>; bySuit: Map<Suit, number>; bulk: number } {
   const sorted = cards.slice().sort((a, b) => Number(a.bulk) - Number(b.bulk) || b.rank - a.rank || a.suit.localeCompare(b.suit) || a.id - b.id)

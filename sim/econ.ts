@@ -145,7 +145,7 @@ console.log(`runs reaching round 12: ${((100 * reached12) / RUNS).toFixed(1)}% �
 const handTotals: Record<string, number> = {}
 for (const st of stats) for (const [h, n] of Object.entries(st.hands)) handTotals[h] = (handTotals[h] ?? 0) + n
 console.log(`your played hands: ${HAND_TYPES.filter(h => handTotals[h]).map(h => `${h} ${handTotals[h]}`).join(' · ')}`)
-console.log(`per run: bulk made ${(bulkMade / RUNS).toFixed(2)} · pochettes ${(sleevesBought / RUNS).toFixed(2)}`)
+console.log(`per run: ash made ${(bulkMade / RUNS).toFixed(2)} · pochettes ${(sleevesBought / RUNS).toFixed(2)}`)
 console.log(`final deck p10/p50/p90 you ${pct(finalDeck, 0.1)}/${median(finalDeck)}/${pct(finalDeck, 0.9)} · rival ${pct(rivalDeck, 0.1)}/${median(rivalDeck)}/${pct(rivalDeck, 0.9)}`)
 // every hand the rival played, not just the ones that won
 // boss rounds have twists, so they're left out and filled from their neighbours (the last one from the one before)

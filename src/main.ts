@@ -71,13 +71,12 @@ let insertSlot: number | null = null // the Sleeve slot picked up during a deal
 let grindPick = false // flamber with no pair: waiting for the card that gets +1 Value
 let patronMissed = false
 let patronPaid: number | null = null // le patron just collected this at the big shop door
-let lastLocked: Card[] = [] // my locked cards, so a fold or forge result can still show them
+let lastLocked: Card[] = [] // my locked cards, so a flambé result can still show them
 let handSort: HandSort = pref('sort') // how your hand fans out. display only, the engine's order never changes
 let overflowOpened = false // the Sleeve already popped open for the insert waiting on room
 let docked: Compare | null = null // this render's compare dock, set by the screen that offers a choice
 let announced = new Set<string>() // band callouts already made this run, so a redraw doesn't repeat one
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const rule = (kind: Kind, id: string, line = 0, ctx?: unknown) => plainText(entry(kind, id, ctx).text[line])
 const fmt = (n: number) => n.toLocaleString('en-US')
 
@@ -294,9 +293,9 @@ function startNet(): void {
 }
 
 function resetPendingMotion(): void {
-  if (pack?.sent) { pack.sent=false; pack.doneAt=null }
-  if (pickedBox?.sent) pickedBox=null
-  sweepAt=null
+  if (pack?.sent) { pack.sent = false; pack.doneAt = null }
+  if (pickedBox?.sent) pickedBox = null
+  sweepAt = null
 }
 
 function onServer(msg: ServerMsg): void {
@@ -341,8 +340,8 @@ function onView(next: SeatView, deadlines: (number | null)[], events: Event[]): 
     // a fresh join: start clean. old events are already in the view, replaying them would rerun old count-ups
     match = null
     clearGradingReturn()
-    receiptAt=null
-    receiptLine=-1
+    receiptAt = null
+    receiptLine = -1
     best = { total: 0, hand: '' }
     log = []
     resultHold = false
@@ -576,7 +575,7 @@ function startRun(seed: string, autoplay: string | false = false): void {
   run++
   resetRunUi()
   best = { total: 0, hand: '' }
-  // dev only: ?quick&wild makes the rival bet at random, so folds and flambés come up fast for testing
+  // dev only: ?quick&wild makes the rival bet at random, so flambés come up fast for testing
   const wild = QUICK && new URLSearchParams(location.search).has('wild') ? { style: 'random' } : {}
   match = newMatch({ mode: 'solo', seed, seats: [{ kind: 'human', name: 'You', ...(autoplay ? { style: autoplay } : {}) }, { kind: 'bot', name: 'Rival', difficulty, ...wild }] })
   render()
@@ -795,7 +794,7 @@ let dealAt = 0
 let sweepAt: number | null = null
 let boxesShown = 0
 const tray = new Image()
-tray.src = new URL('../art/packaging/tray.png',import.meta.url).href
+tray.src = new URL('../art/packaging/tray.png', import.meta.url).href
 let tossedRow: number | null = null
 
 function drawTray(g: CanvasRenderingContext2D, x: number, y: number, w: number): void {
@@ -1305,7 +1304,7 @@ function renderShop(): void {
   const view_ = v()
   const me = view_.me
   const shop = me.shop!
-  if (!shop.open) pack=null
+  if (!shop.open) pack = null
   // only the newest line, so a table-side insert from last round doesn't show up here
   const last = log.at(-1) ?? ''
   const toast = SHOP_LINE.test(last) ? last : ''
@@ -1322,7 +1321,7 @@ function renderShop(): void {
     canBinBulk: can({ type: 'binBulk' }),
     canGrade: shop.services.grading && !shop.shipped && !me.shipping,
     onBuy: slot => {
-      packShelfX = shelfCenter(shop.offers,slot)
+      packShelfX = shelfCenter(shop.offers, slot)
       void dispatch({ type: 'buy', slot })
     },
     onRestock: () => void dispatch({ type: 'restock' }),
@@ -1336,7 +1335,7 @@ function renderShop(): void {
     onVitrine: () => openDrawer('vitrine'),
     onPile: () => openDrawer('etui'),
     onLeave: () => {
-      whipPan(app.querySelector('canvas.stage'),1)
+      whipPan(app.querySelector('canvas.stage'), 1)
       sfx.doorBell()
       sfx.play('whoosh', { gain: 0.25, rate: 1.3 })
       patronPaid = null

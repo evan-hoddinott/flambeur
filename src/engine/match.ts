@@ -1,6 +1,6 @@
 // the game as a phase state machine. a match is config + an action log: step() is the only way state changes,
 // view() is the only thing that leaves the server. see docs/architecture.md section 2 and docs/V2.md
-import { MAX_JOKERS, MAX_TIER, REAL_JOKERS, SUITS, newCard, playSlots, sellPrice, type Card, type JokerId, type Suit, type Trait } from './cards.ts'
+import { MAX_JOKERS, REAL_JOKERS, SUITS, newCard, playSlots, sellPrice, type Card, type JokerId, type Suit, type Trait } from './cards.ts'
 import { appraise, emptyLevels, type Appraisal } from './scoring.ts'
 import { act, firstToAct, legalActions, openStage, other, settle, startBetting, type BetAction, type BetStage, type Betting, type Pos } from './betting.ts'
 import { getDef, hasCollectible, type Owned } from './collectibles.ts'

@@ -56,14 +56,6 @@ function glyph(font: FontName, ch: string): { g: Glyph; from: Font } {
 
 const shown = (font: FontName, s: string) => (fonts[font].caps ? s.toUpperCase() : s)
 
-export function lineHeight(font: FontName): number {
-  return fonts[font].line
-}
-
-export function capHeight(font: FontName): number {
-  return fonts[font].cap
-}
-
 // faux bold: every glyph drawn twice, 1px apart, one px wider. measures the string as it'll show, in the current language
 export function measure(s: string, font: FontName, bold = false): number {
   return Math.max(0, advance(say(s), font, bold) - 1)

@@ -125,10 +125,6 @@ export function glide(to: number, seconds = 0.5): void {
   for (const s of sources) s.playbackRate.setTargetAtTime(to, now, seconds / 3)
 }
 
-export function setVolume(v: number): void {
-  if (out && ctx) out.gain.setTargetAtTime(v, ctx.currentTime, 0.05)
-}
-
 // file seconds playing at context time `t`, folded into the loop
 function position(t: number): number {
   if (!info) return 0

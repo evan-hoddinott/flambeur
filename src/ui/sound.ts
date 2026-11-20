@@ -530,11 +530,6 @@ export function coin(): void {
   play('coins', { gain: 0.55 })
 }
 
-// one $ counting up on the tally, rising
-export function coinTick(n: number): void {
-  tone(hz(84 + (Math.min(n, 12) % 13)), 60, 0.05, { type: 'square' })
-}
-
 // the vintage register: cha-ching
 export function register(): void {
   play('metal-click', { gain: 0.5, rate: 0.9 })
@@ -625,10 +620,6 @@ export function creak(): void {
 // a plastic sleeve: fwip
 export function fwip(): void {
   noise(110, 0.12, { type: 'highpass', freq: 2000, sweep: 8000, attack: 20 })
-}
-
-export function glassClink(): void {
-  play('glass', { gain: 0.4 })
 }
 
 export function typewriter(): void {

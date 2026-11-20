@@ -1,6 +1,6 @@
 import { autoKeep, buildForged, forgePlan } from '../engine/forge.ts'
 import { REF_SCORE } from '../engine/bot.ts'
-import { progress, land, mix, juiceAt, spring, springs, stepSprings } from './motion.ts'
+import { progress, mix, juiceAt, spring, springs, stepSprings } from './motion.ts'
 // the duel scene: you vs the rival across the table, drawn on one canvas from the atlases.
 // layout is the art proof's (art/duel/review.py), in 640x360 stage units. main.ts owns the game,
 // this file only draws a DuelState and reports clicks back through it
@@ -48,7 +48,7 @@ export type DuelState = {
   tally: boolean // and the round is over: its money tally shows too
   counting: boolean // the appraisal count-up is running
   selected: Set<number>
-  lastLocked: Card[] // what I played, so a fold or flambé result still shows it
+  lastLocked: Card[] // what I played, so a flambé result still shows it
   slips: Slip[]
   hint: string
   rival: { name: string; mask: string; stamp: string; back: StarterId }
@@ -307,14 +307,14 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
   }
   if (!next.settled) {
     bustAt = reelAt = tallyAt = -Infinity
-    if (next.bare || next.view.phase === 'deal') pendingBust=null
+    if (next.bare || next.view.phase === 'deal') pendingBust = null
   }
-  if (pendingBust!==null && pendingBust===next.view.showdown?.opponent && next.settled && !next.counting) {
+  if (pendingBust !== null && pendingBust === next.view.showdown?.opponent && next.settled && !next.counting) {
     pendingBust = null
     bustAt = performance.now()
     sfx.bust()
   }
-  if (next.counting && !state?.counting) { tallyAt=-Infinity; tallyLine=-1 }
+  if (next.counting && !state?.counting) { tallyAt = -Infinity; tallyLine = -1 }
   const sd = next.view.showdown
   const me = next.view.me
   const lockKey = `${next.view.round}:${next.view.hands?.hand ?? 0}`
@@ -571,7 +571,7 @@ function pop(key: string): void {
 
 // scale and wobble for a juiceUp, ~0.3s
 function juiced(key: string): { s: number; r: number } {
-  return juiceAt(juice,key,now)
+  return juiceAt(juice, key, now)
 }
 
 // ---------- draw helpers (stage units) ----------
@@ -936,8 +936,8 @@ function draw(st: DuelState): void {
   const forgeShake = forgeFx?.fx ? 4 * shakeAmount() * flambeShake(forgeFx.fx, now) : 0
   const impact = calling() ? shakeAmount() * Math.max(0, 1 - (now - callout!.t) / 200) : 0
   g.translate(320 + forgeShake*Math.sin(now*.08) + impact * Math.sin(now * 0.12) * 2, 180 - impact * 2)
-  const age = now-reelAt
-  const push = !stillCards.matches && age<1200 ? .03*Math.sin(Math.PI*progress(age,1200)) : 0
+  const age = now - reelAt
+  const push = !stillCards.matches && age < 1200 ? .03 * Math.sin(Math.PI * progress(age, 1200)) : 0
   const zoom = 1 + push + (forgeShake || impact ? 0.015 : 0) // a shake zooms in a hair so it never shows the stage edge
   g.scale(zoom, zoom)
   g.translate(-320, -180)
@@ -962,15 +962,15 @@ function draw(st: DuelState): void {
   g.drawImage(feltLayer!, 0, 0)
   tableTop(st)
   if (Number.isFinite(bustAt) && !stillCards.matches) {
-    const age=now-bustAt
-    for(let i=0;i<5;i++) {
-      const u=progress(age-i*35,340)
-      if(u<1) pin('scratch/jeton',mix(RIVAL_X,150,u),mix(134,245,u)-12*Math.sin(Math.PI*u),{s:.7})
+    const age = now - bustAt
+    for (let i = 0; i < 5; i++) {
+      const u = progress(age - i * 35, 340)
+      if (u < 1) pin('scratch/jeton', mix(RIVAL_X, 150, u), mix(134, 245, u) - 12 * Math.sin(Math.PI * u), { s: .7 })
     }
-    if(age>=540) {
-      const u=progress(age-540,430)
-      pin(`mask/${st.rival.mask}/front`,mix(RIVAL_X,327,u),mix(59,202,u)-75*Math.sin(Math.PI*u),{r:u*2.8,sy:1-u*.57})
-      if(age<1130) pin('fx/leak',-160+800*progress(age-540,600),0,{alpha:flash(.33*pref('post'))})
+    if (age >= 540) {
+      const u = progress(age - 540, 430)
+      pin(`mask/${st.rival.mask}/front`, mix(RIVAL_X, 327, u), mix(59, 202, u) - 75 * Math.sin(Math.PI * u), { r: u * 2.8, sy: 1 - u * .57 })
+      if (age < 1130) pin('fx/leak', -160 + 800 * progress(age - 540, 600), 0, { alpha: flash(.33 * pref('post')) })
     }
   }
   // bet tickets sit on top of face-down cards, but under the cards once they're face up and scoring
@@ -1109,9 +1109,9 @@ function rival(st: DuelState, t: number): void {
   // blink every few seconds
   const blink = (t % 4.3) < 0.09
   pin(`rival/eyes/${blink ? 'half' : b?.choices.some(c => c.seat === them.seat && c.choice === 'max') && (t % 1.2) < 0.3 ? 'glint1' : 'open'}`, 0, -21)
-  if (stillCards.matches || now-bustAt<540 || !Number.isFinite(bustAt)) {
+  if (stillCards.matches || now - bustAt < 540 || !Number.isFinite(bustAt)) {
     pin(`mask/${st.rival.mask}/front`, 0, -21)
-    if(Number.isFinite(bustAt) && now-bustAt>260) pin('mask/crack/'+(now-bustAt<415?1:2),0,-21)
+    if (Number.isFinite(bustAt) && now - bustAt > 260) pin('mask/crack/' + (now - bustAt < 415 ? 1 : 2), 0, -21)
   }
   g.restore()
   // their fan of backs, face-up for any card you're allowed to see
@@ -1478,26 +1478,26 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
     }
     px += widths[i]
   })
-  const ratio = total / REF_SCORE[Math.min(st.view.round,REF_SCORE.length)-1]
-  const heat = ratio>=4 ? '#fffbe8' : ratio>=2 ? '#ff7a24' : ratio>=1 ? GOLD : CREAM
+  const ratio = total / REF_SCORE[Math.min(st.view.round, REF_SCORE.length) - 1]
+  const heat = ratio >= 4 ? '#fffbe8' : ratio >= 2 ? '#ff7a24' : ratio >= 1 ? GOLD : CREAM
   const digits = fmt(total)
-  const age = Math.max(0,now-reelAt)
+  const age = Math.max(0, now - reelAt)
   const settled = Number.isFinite(reelAt) && !stillCards.matches
-  const numberWidth = measure(digits,'didone')
-  let dx=x+(w-numberWidth)/2
+  const numberWidth = measure(digits, 'didone')
+  let dx = x + (w - numberWidth) / 2
   if (mine && settled) reelSounds(digits, age, ratio)
-  if(settled && ratio>=2){
-    for(let offset=0;offset<numberWidth;offset+=15) pin('fx/flame/'+(1+(Math.floor(now/85+offset)%4)),dx+offset,y+13,{sx:.7,sy:ratio>=4?.75:.45})
+  if (settled && ratio >= 2) {
+    for (let offset = 0; offset < numberWidth; offset += 15) pin('fx/flame/' + (1 + (Math.floor(now / 85 + offset) % 4)), dx + offset, y + 13, { sx: .7, sy: ratio >= 4 ? .75 : .45 })
   }
-  for(let i=0;i<digits.length;i++){
-    const digit=digits[i]
-    const lock=age-170-i*95
-    const spin=settled && /[0-9]/.test(digit) && lock<0
-    const shown=spin?String((Math.floor(age/38)+i*3)%10):digit
-    if(settled && ratio>=2 && lock>=0 && lock<160) pin('fx/spark',dx+2,y+16-lock*.04)
-    const bounce=settled && lock>=0 && lock<125?2*Math.sin(Math.PI*lock/125):0
-    text(shown,dx,y+19-bounce,{font:'didone',color:settled?(lock>=0&&lock<90?'#fffbe8':heat):INK,outline:settled?INK:undefined})
-    dx+=measure(digit,'didone')+1
+  for (let i = 0; i < digits.length; i++) {
+    const digit = digits[i]
+    const lock = age - 170 - i * 95
+    const spin = settled && /[0-9]/.test(digit) && lock < 0
+    const shown = spin ? String((Math.floor(age / 38) + i * 3) % 10) : digit
+    if (settled && ratio >= 2 && lock >= 0 && lock < 160) pin('fx/spark', dx + 2, y + 16 - lock * .04)
+    const bounce = settled && lock >= 0 && lock < 125 ? 2 * Math.sin(Math.PI * lock / 125) : 0
+    text(shown, dx, y + 19 - bounce, { font: 'didone', color: settled ? (lock >= 0 && lock < 90 ? '#fffbe8' : heat) : INK, outline: settled ? INK : undefined })
+    dx += measure(digit, 'didone') + 1
   }
   g.restore()
   // the tag reads as its hand: your level shows, theirs you don't know
@@ -1789,10 +1789,6 @@ export function cardTags(card: Card) {
   return tags
 }
 
-export function cardInfo(card: Card): string {
-  return cardTags(card).map(t => t.label).join(' · ')
-}
-
 // ---------- hud ----------
 
 function hud(st: DuelState, t: number): void {
@@ -1870,7 +1866,7 @@ function handTrack(st: DuelState, hv: NonNullable<SeatView['hands']>, l: ReturnT
     const x = x0 + l.pips + i * 13
     const age = now - pipAt
     const flip = hand && i === hv.hands.length - 1 && age < 290 && !stillCards.matches ? Math.max(0.12, Math.abs(Math.cos(Math.PI * age / 290))) : 1
-    const pop = flip === 1 ? 1 : 1+.15*Math.sin(Math.PI*progress(age,290))
+    const pop = flip === 1 ? 1 : 1 + .15 * Math.sin(Math.PI * progress(age, 290))
     pin(`hud/hand/pip/${state}${smoke}`, x + 6 * (1 - flip*pop), y + 2, { sx: flip*pop, sy: pop })
   }
   text(l.score, x0 + l.scoreX, y + 3, { font: 'sans', color: BURGUNDY, bold: true })
@@ -2331,35 +2327,35 @@ function tally(st: DuelState): number {
   const x = COL.x + 4
   const y = colTop - 10 - h
   const at = spring('tally', { x, y, r: 0, s: 1 }, { x: W + 20, y, r: 0, s: 1 })
-  if(!Number.isFinite(tallyAt)) tallyAt=now
-  const age=stillCards.matches?Infinity:now-tallyAt
+  if (!Number.isFinite(tallyAt)) tallyAt = now
+  const age = stillCards.matches ? Infinity : now - tallyAt
   const beat = 120 / pace()
-  const lines=Math.min(rows.length,Math.floor(age/beat))
-  if(lines>tallyLine) {
-    tallyLine=lines
+  const lines = Math.min(rows.length, Math.floor(age / beat))
+  if (lines > tallyLine) {
+    tallyLine = lines
     if (lines === rows.length) sfx.register()
     else sfx.thunk()
   }
-  nine('fx/receipt',at.x,at.y,w,Math.min(h,32+lines*11+(lines===rows.length?22+noteLines.length*10:0)))
+  nine('fx/receipt', at.x, at.y, w, Math.min(h, 32 + lines * 11 + (lines === rows.length ? 22 + noteLines.length * 10 : 0)))
   const titleColor = r.outcome === 'win' ? '#a8260a' : INK
   if (measure(title, 'didone') <= w - 8) text(title, at.x + w / 2, at.y + 1, { font: 'didone', color: titleColor, align: 'center' })
   else if (measure(title, 'sans', true) <= w - 8) text(title, at.x + w / 2, at.y + 6, { font: 'sans', color: titleColor, align: 'center', bold: true })
   else text(title, at.x + w / 2, at.y + 6, { font: 'sans', color: titleColor, align: 'center' })
   const ROW_RULE: Record<string, () => Entry> = { Pot: () => entry('keyword', 'Pot'), House: rule('house'), 'K.O.': rule('ko', st.view.round), Momentum: rule('momentum'), Interest: rule('interest') }
   rows.forEach(([label, n], i) => {
-    if (i>=lines) return
+    if (i >= lines) return
     const ry = at.y + 24 + i * 11
     if (ROW_RULE[label]) look(at.x, ry - 1, w, 11, ROW_RULE[label])
     text(label, at.x + 8, ry, { font: 'sans' })
     text(`${n > 0 ? '+' : '−'}$${Math.abs(n)}`, at.x + w - 8, ry, { font: 'sans', color: n > 0 ? '#3a8040' : BURGUNDY, align: 'right', bold: true })
   })
-  if(lines<rows.length) return y-8
+  if (lines < rows.length) return y - 8
   tip('tally', ['The tally. Pot is what the winner takes, the House pays you both every round.', 'Interest: +$1 for every $10 you hold, up to $2. Saving pays!'], { x: at.x, y: at.y, w, h }, 'left')
   const ty = at.y + 26 + rows.length * 11
   g.fillStyle = '#bfa77e'
   g.fillRect(at.x + 6, ty - 2, w - 12, 1)
   text('This round', at.x + 8, ty + 1, { font: 'sans', bold: true })
-  text(`${total >= 0 ? '+' : '−'}$${Math.round(Math.abs(total)*progress(age-lines*beat,270/pace()))}`, at.x + w - 8, ty + 1, { font: 'sans', bold: true, align: 'right', color: total >= 0 ? '#3a8040' : BURGUNDY })
+  text(`${total >= 0 ? '+' : '−'}$${Math.round(Math.abs(total) * progress(age - lines * beat, 270 / pace()))}`, at.x + w - 8, ty + 1, { font: 'sans', bold: true, align: 'right', color: total >= 0 ? '#3a8040' : BURGUNDY })
   noteLines.forEach((line, i) => text(line, at.x + 6, ty + 12 + i * 10, { font: 'sans', color: '#5c4a36' }))
   return y - 8
 }
@@ -2472,9 +2468,9 @@ export async function countUp(sd: ShowdownView): Promise<void> {
   })
   reelAt = performance.now()
   if (sd.mine) sfx.reelSpin()
-  if(!stillCards.matches && !skip && sides.some(Boolean)) {
-    const digits = Math.max(...sides.map(a=>fmt(a?.total ?? 0).length))
-    await sleep((300+digits*95) / pace())
+  if (!stillCards.matches && !skip && sides.some(Boolean)) {
+    const digits = Math.max(...sides.map(a => fmt(a?.total ?? 0).length))
+    await sleep((300 + digits * 95) / pace())
   }
   live = null
   music.cool()

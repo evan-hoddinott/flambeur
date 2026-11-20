@@ -136,7 +136,7 @@ export function openDrawer(t: Tab, c?: Compare): void {
     return
   }
   if (tab === null && slide.at < 0.02) thunk() // the elastic snaps off
-  if (tab !== null && tab !== t) { pageTurnAt=performance.now(); pageTurn() }
+  if (tab !== null && tab !== t) { pageTurnAt = performance.now(); pageTurn() }
   tab = t
   lastTab = t
 }
@@ -629,16 +629,20 @@ function drawBook(g: CanvasRenderingContext2D, v: SeatView): void {
     page(g, v, shown)
     if (!settled) hits.length = keep
   }
-  const turn=(lastMs-pageTurnAt)/210
-  if (turn>=0 && turn<1 && !still.matches) {
+  const turn = (lastMs - pageTurnAt) / 210
+  if (turn >= 0 && turn < 1 && !still.matches) {
     g.save()
-    g.translate(SPINE,LEAF.top+6)
-    const fold=Math.cos(Math.PI*turn)
-    g.scale(fold,1)
-    g.fillStyle=fold>0?PAPER:TAN
-    g.fillRect(0,0,LEAF.w-9,LEAF.h-14)
-    g.fillStyle=CREAM
-    g.beginPath();g.moveTo(LEAF.w-32,0);g.lineTo(LEAF.w-9,turn<.5?18:32);g.lineTo(LEAF.w-9,0);g.fill()
+    g.translate(SPINE, LEAF.top + 6)
+    const fold = Math.cos(Math.PI * turn)
+    g.scale(fold, 1)
+    g.fillStyle = fold > 0 ? PAPER : TAN
+    g.fillRect(0, 0, LEAF.w - 9, LEAF.h - 14)
+    g.fillStyle = CREAM
+    g.beginPath()
+    g.moveTo(LEAF.w - 32, 0)
+    g.lineTo(LEAF.w - 9, turn < .5 ? 18 : 32)
+    g.lineTo(LEAF.w - 9, 0)
+    g.fill()
     g.restore()
   }
   // close tag, top right

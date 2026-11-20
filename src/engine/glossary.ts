@@ -3,7 +3,7 @@
 // markup (docs/UX.md §6): {v}Value{/} {h}Hype{/} {x}×Hype{/} {g}Grade{/} {$}+$3{/} {-}−$3{/}, [Keyword] links to KEYWORDS
 import {
   BULK_VALUE, JOKERS, MAX_JOKERS, MAX_TIER, SUIT_GLYPH, VARIANTS, cardValue, knockoffName, rankLabel, rankPlural, sellPrice,
-  traitLabel, traitName, type Card, type Finish, type JokerId, type Knockoff, type Stamp, type Suit, type Trait, type Variant,
+  traitLabel, traitName, type Card, type Finish, type JokerId, type Knockoff, type Stamp, type Trait, type Variant,
 } from './cards.ts'
 import { COLLECTIBLES, describe, getDef, type Owned } from './collectibles.ts'
 import {
@@ -31,7 +31,6 @@ export type Entry = { name: string; kind: Kind; tag?: string; text: string[]; fl
 
 const v = (s: string | number) => `{v}${s}{/}`
 const h = (s: string | number) => `{h}${s}{/}`
-const x = (s: string | number) => `{x}${s}{/}`
 const g = (s: string | number) => `{g}${s}{/}`
 const won = (n: number) => `{$}+$${n}{/}`
 const lost = (n: number) => `{-}−$${n}{/}`
@@ -223,20 +222,6 @@ const HAND_WHAT: Record<HandType, string> = {
   quads: 'Four cards of the same rank',
   straightflush: 'A Straight, all one suit',
   royalflush: '10 J Q K A, all one suit',
-}
-
-// a sample of each hand for the rules paper: [rank, suit]
-export const HAND_EXAMPLE: Record<HandType, [number, Suit][]> = {
-  high: [[14, 'S'], [9, 'H'], [6, 'D'], [4, 'C'], [2, 'S']],
-  pair: [[12, 'H'], [12, 'S']],
-  twopair: [[9, 'C'], [9, 'D'], [4, 'H'], [4, 'S']],
-  trips: [[7, 'S'], [7, 'H'], [7, 'D']],
-  straight: [[5, 'C'], [6, 'H'], [7, 'S'], [8, 'D'], [9, 'H']],
-  flush: [[2, 'H'], [6, 'H'], [9, 'H'], [11, 'H'], [13, 'H']],
-  fullhouse: [[10, 'S'], [10, 'H'], [10, 'C'], [3, 'D'], [3, 'S']],
-  quads: [[13, 'S'], [13, 'H'], [13, 'D'], [13, 'C']],
-  straightflush: [[5, 'S'], [6, 'S'], [7, 'S'], [8, 'S'], [9, 'S']],
-  royalflush: [[10, 'D'], [11, 'D'], [12, 'D'], [13, 'D'], [14, 'D']],
 }
 
 // ctx = the hand's level (0 = base), as in Player.levels

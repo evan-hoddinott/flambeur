@@ -55,7 +55,6 @@ export type Panel = {
 const W = 640
 const INK = '#2e2320'
 const CREAM = '#f6ecd2'
-const PAPER = '#e3d2a8'
 const OUTLINE = '#0e0b0a'
 const SHEET: Box = { x: 166, y: 20, w: 334, h: 332 }
 const DOCKED_SHEET: Box = { x: 212, y: 20, w: 288, h: 332 }

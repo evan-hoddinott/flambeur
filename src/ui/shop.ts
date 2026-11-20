@@ -61,7 +61,6 @@ const PAPER = '#e3d2a8'
 const TAN = '#8c7656'
 const MONEY = '#3a8040'
 const BRASS = '#c99a3a'
-const GREY = '#43342e'
 
 let cv: HTMLCanvasElement | null = null
 let g: CanvasRenderingContext2D
@@ -172,7 +171,7 @@ function gradingCounter(st: ShopState): void {
     const h = 38 + 36 * lift
     const grade = item.card.grade!
     const shown = reducedMotion.matches ? grade : Math.min(grade, 1 + Math.floor(elapsed / 65))
-    const stamp = reducedMotion.matches ? 0 : Math.sin(Math.PI * progress(elapsed-(grade-1)*65,150))
+    const stamp = reducedMotion.matches ? 0 : Math.sin(Math.PI * progress(elapsed - (grade - 1) * 65, 150))
     g.drawImage(cardCanvas({ ...item.card, grade: shown }), 154-stamp, 164-h+2*stamp, h*.72+2*stamp, h-2*stamp)
     if (shown === grade && !item.stamped) {
       item.stamped = true
@@ -188,7 +187,7 @@ export function showShop(app: HTMLElement, next: ShopState): void {
   now = performance.now()
   state = next
   if (!cv || !cv.isConnected) {
-    whipPan(app.querySelector('canvas.stage'),-1)
+    whipPan(app.querySelector('canvas.stage'), -1)
     app.innerHTML = ''
     cv = document.createElement('canvas')
     cv.className = 'stage'
@@ -267,11 +266,15 @@ let spoken = 0 // letters of his line typed out so far, one blip each
 function updateBeats(before: ShopState, after: ShopState): void {
   const prev = before.view.me.shop!
   const next = after.view.me.shop!
-  if(!prev.rolledOver && next.rolledOver) { saltyAt=now; keeperSays('Ma marchandise vous plaît pas ?') }
-  if(!before.view.me.shipping && after.view.me.shipping) { shipAt=now; parcelShipper=after.view.me.shipping.shipper; sfx.ship(after.view.me.shipping.shipper) }
-  if(before.view.me.binder.length>after.view.me.binder.length && after.view.me.bankroll>before.view.me.bankroll && !reducedMotion.matches) {
-    const sold=before.view.me.binder.filter(c=>!after.view.me.binder.some(other=>c.id===other.id))
-    sale={cards:[...(sale?.cards ?? []),...sold],at:now}
+  if (!prev.rolledOver && next.rolledOver) { saltyAt = now; keeperSays('Ma marchandise vous plaît pas ?') }
+  if (!before.view.me.shipping && after.view.me.shipping) {
+    shipAt = now
+    parcelShipper = after.view.me.shipping.shipper
+    sfx.ship(after.view.me.shipping.shipper)
+  }
+  if (before.view.me.binder.length > after.view.me.binder.length && after.view.me.bankroll > before.view.me.bankroll && !reducedMotion.matches) {
+    const sold = before.view.me.binder.filter(c => !after.view.me.binder.some(other => c.id === other.id))
+    sale = { cards: [...(sale?.cards ?? []), ...sold], at: now }
   }
   if (before.view.me.binder.length > after.view.me.binder.length && after.view.me.bankroll > before.view.me.bankroll) sfx.coin()
   const stockChanged = prev.offers.length !== next.offers.length || prev.offers.some((o, i) => {
@@ -416,8 +419,8 @@ function shelfBeat(): void {
     for (let i = 0; i < Math.min(4, Math.max(2, p.offer.price)); i++) {
       const u = (age - 35 * i) / 318
       if (u <= 0 || u >= 1) continue
-      const x = Math.round(mix(PLATE.x+32,p.center,ease(u)))
-      const y = Math.round(mix(PLATE.y+28,296,ease(u)) - (15 + 3 * i) * Math.sin(Math.PI * u))
+      const x = Math.round(mix(PLATE.x + 32, p.center, ease(u)))
+      const y = Math.round(mix(PLATE.y + 28, 296, ease(u)) - (15 + 3 * i) * Math.sin(Math.PI * u))
       g.fillStyle = '#6b4a1a'
       g.fillRect(x - 2, y, 5, 3)
       g.fillStyle = BRASS
@@ -526,7 +529,7 @@ function frame(t: number): void {
   drawPanel(g, now, drawer || paused ? away : mouse)
   sales()
   drawDrawer(g, state.view, now)
-  drawBand(g, now,state.view.me.shop?.open ? 76 : 195)
+  drawBand(g, now, state.view.me.shop?.open ? 76 : 195)
   drawTips(g, paused, drawerOpen())
   drawFiche(g)
   drawPause(g, mouse)
@@ -793,12 +796,12 @@ function sign(v: SeatView): void {
   text('LA MAISON', 0, -20, { font: 'tiny', color: '#7a1a2c', align: 'center' })
   v.keeper.forEach((id, i) => text(`· ${getKeeper(id).name}`, -42, -10 + i * 11, { color: INK }))
   g.restore()
-  if(v.me.shop?.rolledOver) {
-    const u=reducedMotion.matches?1:progress(now-saltyAt,220)
+  if (v.me.shop?.rolledOver) {
+    const u = reducedMotion.matches ? 1 : progress(now - saltyAt, 220)
     g.save()
-    g.translate(504,143-32*(1-u))
-    g.rotate(-.08+.22*(1-u))
-    pin('shop/note/salty',-21,-15)
+    g.translate(504, 143 - 32 * (1 - u))
+    g.rotate(-.08 + .22 * (1 - u))
+    pin('shop/note/salty', -21, -15)
     g.restore()
   }
   // each posted trait has its own Fiche (the sign is tilted ~1°, close enough for a hover row)
@@ -996,7 +999,7 @@ function offers(st: ShopState): { offer: ShopOfferView; box: { x: number; y: num
     shadow.addColorStop(0, 'rgba(14,11,10,.74)')
     shadow.addColorStop(1, 'rgba(14,11,10,0)')
     g.fillStyle = shadow
-    g.fillRect(-1,-1,2,2)
+    g.fillRect(-1, -1, 2, 2)
     g.restore()
     g.drawImage(reflection(art), center - art.width / 2, floor + 1 + Math.round(motion.lift))
     g.save()

@@ -1,4 +1,4 @@
-// end to end against a real postgres, with a toy engine standing in for the real one (still stubs).
+// end to end against a real postgres, with a toy engine standing in for the real one.
 // needs TEST_DATABASE_URL pointing at a postgres server; each run makes and drops its own database.
 //   docker run -d --name flambeur-pg -e POSTGRES_PASSWORD=dev -p 127.0.0.1:55432:5432 postgres:17
 //   TEST_DATABASE_URL=postgres://postgres:dev@127.0.0.1:55432/postgres pnpm test:server
