@@ -7,9 +7,11 @@ import { cardCanvas, sprite } from './art.ts'
 import { collectible, drawCollectible } from './collectibles.ts'
 import { drawText, measure, richSize, richText, wrapText, type TextStyle } from './font.ts'
 import { insertFace } from './placeholders.ts'
-import { handsColumn, howColumn } from './rules.ts'
-import { SUITS, SUIT_GLYPH, cardValue, rankLabel, type Card } from '../engine/cards.ts'
-import { deckDelta } from '../engine/compare.ts'
+import { handsColumn, howColumn, playColumn } from './rules.ts'
+import { boxShape, spotlight, tip, wasSeen, type Shape } from './tips.ts'
+import { drawPile, drawPin, lineName, type Box } from './pile.ts'
+import { type Card } from '../engine/cards.ts'
+import { GROUPINGS, lineTotal, type Grouping } from '../engine/pile.ts'
 import { getDef } from '../engine/collectibles.ts'
 import { SLEEVE_SLOTS } from '../engine/economy.ts'
 import { entry, type Entry, type Kind } from '../engine/glossary.ts'
@@ -45,7 +47,6 @@ const BURGUNDY = '#7a1a2c'
 const RED = '#a82a38'
 const GOLD = '#e8c260'
 const BRASS = '#c99a3a'
-const FLAME = '#a8260a'
 
 const TABS: { id: Tab; name: string; en: string; key: string; ink: string }[] = [
   { id: 'etui', name: 'Étui', en: 'Deck', key: 'D', ink: RED },
@@ -88,12 +89,13 @@ let actions: DrawerActions = {}
 let glossary: Entry[] | null = null
 let dockH = 0
 
-type Filter = 'all' | 'pile' | 'hand' | 'played' | 'grading'
-type Sort = 'rank' | 'suit' | 'value'
-let filter: Filter = 'all'
-let sort: Sort = 'suit'
+// la pile: how the étui and the dock group the deck, what's pinned, and (mid-round) pile or whole deck
+let grouping: Grouping = 'rank'
+let pins: string[] = []
+let showAll = false
+let pileHover: Card | null = null // last frame's, so the renderer can light the hovered card's other lines
 let pageTurnAt = -Infinity
-let carnetPage: 'hands' | 'glossary' = 'hands'
+let carnetPage: 'play' | 'hands' | 'glossary' = 'hands'
 let glossPage = 0
 
 let lastTab: Tab = 'etui' // a click on the cover opens where you left off
@@ -177,6 +179,10 @@ export function drawerKey(key: string): boolean {
   if (key === 'Escape') {
     if (tab === null) return false
     tab = null
+    return true
+  }
+  if (key.toUpperCase() === 'G' && (tab === 'etui' || (tab === null && compare))) {
+    regroup(GROUPINGS[(GROUPINGS.indexOf(grouping) + 1) % GROUPINGS.length])
     return true
   }
   const t = TABS.find(x => x.key === (key === '/' ? '?' : key.toUpperCase()))
@@ -272,8 +278,6 @@ export function drawerHoverAt(): { key: string; card: boolean; x: number } | nul
 export function deckCounts(v: SeatView): { pile: number; total: number } {
   return { pile: v.me.pile.length, total: deckCards(v).length }
 }
-
-const plain = (c: Card) => !c.bulk && !c.joker
 
 // ---------- helpers ----------
 
@@ -420,12 +424,62 @@ export function drawDrawer(g: CanvasRenderingContext2D, v: SeatView, ms: number)
   if (slide.at >= BIG_AT) drawBook(g, v)
   else if (!compare || flying) drawCarnet(g, v, dt, flying)
 
+  tour()
   const active = slide.at > 0.02 || !!compare
   if (hoverFn && (active || wasActive)) {
     const a = hovered as { thing: DrawerThing; anchor: Anchor } | null
     hoverFn(a?.thing ?? null, a?.anchor ?? { x: 0, y: 0, w: 0, h: 0 })
   }
   wasActive = active
+}
+
+// ---------- the tutorial's tour (docs/TUTORIAL.md) ----------
+// la fée has you open the carnet, then walks you through each tab in order. a scene asks for it every frame it
+// applies (the first shop of the tutorial); each tab's lesson is a tag, so it's done once it's been read
+
+let touring = false
+
+export function bookTour(): void {
+  touring = true
+}
+
+const TOUR: Record<Tab, string[]> = {
+  etui: ['Étui: your deck, every card you play with.', 'One line per rank. A dotted card also counts in that line. G regroups by suit or type. Now click the Binder tab.'],
+  classeur: ['Classeur: your binder, the cards you kept out of your deck.', 'Binder cards are for selling, here in the shop. Cards that match the chalkboard sell for more. Next, the Sleeve tab.'],
+  sleeve: ['Your Sleeve holds up to 2 inserts, won on scratchers.', 'Most are used on the cards in your hand during a round. A Wishlist works here in the shop. Next, the Display tab.'],
+  vitrine: ['Vitrine: your display case, with your collectibles.', 'They fire left to right on every hand. Sell one here if you need the room or the money. Last, the Rules tab.'],
+  carnet: ['Carnet: How to play, every poker hand with its Value and Hype, and a glossary of every word in the game.', 'Open it whenever something is unclear.'],
+}
+
+// the closed carnet in its corner as a spotlight shape: the cover, the papers on top and the tabs on the right
+function closedShape(): Shape {
+  const p = pose()
+  const half = (BOOK * p.s) / 2
+  const c = Math.cos(p.rot)
+  const n = Math.sin(p.rot)
+  const [ox, oy] = [13, 1] // the shape's middle, from the cover's
+  return { x: p.x + half + (ox * c - oy * n) * p.s, y: p.y + half + (ox * n + oy * c) * p.s, w: 118 * p.s, h: 102 * p.s, r: p.rot }
+}
+
+function tour(): void {
+  const on = touring
+  touring = false
+  if (!on) return
+  const next = TABS.find(t => !wasSeen(`book-${t.id}`))
+  if (tab === null) {
+    if (slide.at > 0.02 || !next) return
+    const s = closedShape()
+    tip('book-open', ['Before you shop, meet the little book down in the corner.', 'Your deck, binder, sleeve, display case and the rules all live in it. Click it to open it.'],
+      { x: Math.max(0, s.x - s.w / 2), y: s.y - s.h / 2, w: s.w, h: s.h }, 'above', { lead: true, book: true })
+    spotlight([s])
+    return
+  }
+  if (Math.abs(1 - slide.at) > 0.03 || swing.at < 0.97) return
+  const top = { x: SPINE - LEAF.w, y: LEAF.top, w: LEAF.w * 2, h: LEAF.h }
+  if (!next) return tip('book-done', ['That is your little book. Open it any time from the corner, or with D, B, S, V or ?.', 'Esc closes it. Now, go shopping!'], top, 'above', { lead: true, book: true })
+  if (tab !== next.id) return spotlight([boxShape(sideTab(TABS.indexOf(next)))])
+  if (next.id === 'carnet' && carnetPage === 'hands') carnetPage = 'play'
+  tip(`book-${next.id}`, TOUR[next.id], top, 'above', { lead: true, book: true })
 }
 
 // ---------- closed: the carnet ----------
@@ -599,132 +653,102 @@ function detail(g: CanvasRenderingContext2D, c: Card | null, y: number, note = '
 // the Fiche of what's hovered on the left leaf, pinned to the right leaf's top instead of over the page
 const leafAnchor = (y: number): Anchor => ({ x: R.x - 4, y, w: 0, h: 0 })
 
-// ---------- étui ----------
+// ---------- étui: la pile ----------
 
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All' }, { id: 'pile', label: 'Pile' }, { id: 'hand', label: 'In hand' },
-  { id: 'played', label: 'Played' }, { id: 'grading', label: 'Grading' },
-]
-const NOTES: Record<Filter, string> = {
-  all: 'Your whole deck. Dimmed: in your hand or played this round.',
-  pile: 'What you can still draw this round.',
-  hand: 'Your cards right now.',
-  played: 'Played or discarded this round. Back in at the next shuffle.',
-  grading: 'Away at the grading desk.',
-}
-
-function etuiCards(v: SeatView, f: Filter): Card[] {
-  if (f === 'pile') return v.me.pile
-  if (f === 'hand') return hand(v)
-  if (f === 'played') return v.me.discard
-  if (f === 'grading') return v.me.shipping ? [v.me.shipping.card] : []
-  return [...deckCards(v), ...(v.me.shipping ? [v.me.shipping.card] : [])]
-}
-
+const MAX_PINS = 3
 const byRank = (a: Card, b: Card) => b.rank - a.rank || b.tier - a.tier || a.id - b.id
-const SORTS: Record<Sort, (a: Card, b: Card) => number> = {
-  rank: byRank,
-  suit: (a, b) => SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit) || byRank(a, b),
-  value: (a, b) => cardValue(b) - cardValue(a) || byRank(a, b),
+
+function regroup(by: Grouping): void {
+  if (by !== grouping) pageTurn()
+  grouping = by
 }
 
-// rows of cards: one per suit when sorting by suit, else one flow wrapped into rows. bulk and jokers get their own row
-function cardRows(cards: Card[], by: Sort, maxRows: number): { label: string; red: boolean; cards: Card[] }[] {
-  const rows: { label: string; red: boolean; cards: Card[] }[] = []
-  const main = cards.filter(plain).sort(SORTS[by])
-  const other = cards.filter(c => !plain(c)).sort((a, b) => Number(a.bulk) - Number(b.bulk) || a.id - b.id)
-  if (by === 'suit') {
-    for (const s of SUITS) {
-      const row = main.filter(c => c.suit === s)
-      if (row.length) rows.push({ label: SUIT_GLYPH[s], red: s === 'H' || s === 'D', cards: row })
-    }
-  } else if (main.length) {
-    const n = Math.max(1, Math.min(maxRows - (other.length ? 1 : 0), Math.ceil(main.length / 7)))
-    const per = Math.ceil(main.length / n)
-    for (let i = 0; i < main.length; i += per) rows.push({ label: '', red: false, cards: main.slice(i, i + per) })
-  }
-  if (other.length) rows.push({ label: 'B/J', red: false, cards: other })
-  return rows
+// a 4th pin pushes out the oldest
+function togglePin(key: string): void {
+  pins = pins.includes(key) ? pins.filter(k => k !== key) : [...pins, key].slice(-MAX_PINS)
 }
+
+// mid-round some of the deck is in your hand or played, so the pile is what's left to draw
+const midRound = (v: SeatView) => hand(v).length > 0 || v.me.discard.length > 0
+const wholeDeck = (v: SeatView) => [...deckCards(v), ...(v.me.shipping ? [v.me.shipping.card] : [])]
+
+// draws la pile and wires it up: a card hovers its Fiche, a line's label pins it. ox = the dock's slide offset.
+// returns the hovered card
+function ledger(g: CanvasRenderingContext2D, v: SeatView, cards: Card[], at: Box, ghosts: Card[], ox = 0): Card | null {
+  const found = drawPile(g, cards, at, { by: grouping, ghosts, hover: pileHover, pins, lit: [], away: v.me.shipping?.card.id ?? null, ms: lastMs })
+  let card: Card | null = null
+  for (const h of found) {
+    const r = { x: h.x + ox, y: h.y, w: h.w, h: h.h }
+    if (!h.card) hit(r, () => togglePin(h.key))
+    else if (over(r)) {
+      card = h.card
+      setHover({ kind: 'card', card }, r)
+    }
+  }
+  pileHover = card
+  return card
+}
+
+// Rank · Suit · Type, right-aligned at x
+function groupChips(g: CanvasRenderingContext2D, right: number, y: number): void {
+  const widths = GROUPINGS.map(by => measure(by[0].toUpperCase() + by.slice(1), 'tiny') + 8)
+  let x = right - widths.reduce((s, w) => s + w + 2, -2)
+  GROUPINGS.forEach((by, i) => {
+    chip(g, by[0].toUpperCase() + by.slice(1), x, y, grouping === by, () => regroup(by))
+    x += widths[i] + 2
+  })
+}
+
+// the pinned lines and the deck size, before → after when you'd add cards. returns the y under the last row
+function pinRows(g: CanvasRenderingContext2D, base: Card[], adding: Card[], x: number, y: number, w: number): number {
+  const after = [...base, ...adding]
+  for (const key of pins) {
+    drawPin(g, x, y + 2)
+    text(g, lineName(key), x + 8, y)
+    const a = lineTotal(base, key)
+    const b = lineTotal(after, key)
+    delta(g, a, b, x + w - deltaW(a, b), y)
+    y += 11
+  }
+  if (!pins.length) {
+    text(g, "Click a line's label to pin it.", x, y + 1, { font: 'tiny', color: FADED })
+    y += 11
+  }
+  text(g, 'Deck size', x + 8, y, { color: FADED })
+  delta(g, base.length, after.length, x + w - deltaW(base.length, after.length), y)
+  return y + 11
+}
+
+const deltaW = (a: number, b: number) => (a === b ? measure(String(a), 'sans') : measure(String(a), 'sans') + 10 + measure(String(b), 'sans', true))
 
 function etui(g: CanvasRenderingContext2D, v: SeatView): void {
-  const all = etuiCards(v, filter)
-  let x = L.x
-  for (const f of FILTERS) x += chip(g, `${f.label} ${etuiCards(v, f.id).length}`, x, L.y, filter === f.id, () => { filter = f.id }) + 3
-  const outIds = new Set([...hand(v), ...v.me.discard].map(c => c.id))
-  const away = v.me.shipping?.card.id
-  const rows = cardRows(all, sort, 5)
-  const top = L.y + 16
-  const rowH = Math.min(46, Math.floor((L.h - 18) / Math.max(1, rows.length)))
-  const cw = Math.round((rowH - 2) * 64 / 88)
-  let hoverCard = null as Card | null
-  rows.forEach((row, i) => {
-    const y = top + i * rowH
-    text(g, row.label, L.x, y + rowH / 2 - 6, { color: row.red ? RED : INK, font: row.label.length > 1 ? 'tiny' : 'sans' })
-    const x0 = L.x + 14
-    const span = L.w - 14 - cw
-    const step = row.cards.length > 1 ? Math.min(cw + 2, span / (row.cards.length - 1)) : 0
-    let lift: { c: Card; x: number } | null = null
-    row.cards.forEach((c, j) => {
-      const cx = Math.round(x0 + j * step)
-      if (over({ x: cx, y, w: j === row.cards.length - 1 ? cw : step, h: rowH - 2 })) lift = { c, x: cx }
-    })
-    row.cards.forEach((c, j) => {
-      const cx = Math.round(x0 + j * step)
-      const up = lift?.c === c ? 3 : 0
-      const dim = filter === 'all' && outIds.has(c.id)
-      const gone = c.id === away
-      const a = cardAt(g, c, cx, y - up, cw, rowH - 2, dim || gone ? 0.4 : 1)
-      if (gone) blit(g, 'drawer/parcel', a.x + a.w - 12, a.y + a.h - 10)
-      if (up) {
-        outlineRect(g, a)
-        hoverCard = c
-      }
-    })
-  })
-  if (!rows.length) text(g, 'Nothing here.', L.x + L.w / 2, L.y + L.h / 2, { color: FADED, align: 'center' })
+  const mid = midRound(v)
+  const all = wholeDeck(v)
+  const pile = mid && !showAll
+  const cards = pile ? v.me.pile : all
+  text(g, pile ? `Left to draw · ${cards.length} of ${all.length}` : `Your deck · ${all.length} cards`, L.x, L.y, { font: 'tiny', color: FADED })
+  const hover = ledger(g, v, cards, { x: L.x + 4, y: L.y + 12, w: L.w - 4, h: L.h - 12 }, [])
 
-  // right leaf: sort, counts, the note, the hovered card
+  // right leaf: grouping, pile or whole deck, the pins, the hovered card
   let y = R.y
-  text(g, 'Sort', R.x, y + 2, { font: 'tiny', color: FADED })
-  x = R.x + 22
-  for (const s of ['rank', 'suit', 'value'] as const) x += chip(g, s[0].toUpperCase() + s.slice(1), x, y, sort === s, () => { sort = s }) + 3
-  const d = deckCounts(v)
-  text(g, `${d.pile}/${d.total}`, R.x + R.w, y, { align: 'right', bold: true, color: BURGUNDY })
+  text(g, 'Group by', R.x, y + 2, { font: 'tiny', color: FADED })
+  text(g, 'G', R.x + 40, y + 2, { font: 'tiny', color: TAN })
+  groupChips(g, R.x + R.w, y)
   y += 16
-  for (const l of wrapText(NOTES[filter], R.w, 'sans')) {
-    text(g, l, R.x, y, { color: FADED })
-    y += 10
+  if (mid) {
+    text(g, 'Show', R.x, y + 2, { font: 'tiny', color: FADED })
+    let x = R.x + R.w - (measure(`Left to draw ${v.me.pile.length}`, 'tiny') + measure(`Whole deck ${all.length}`, 'tiny') + 19)
+    x += chip(g, `Left to draw ${v.me.pile.length}`, x, y, !showAll, () => { showAll = false }) + 3
+    chip(g, `Whole deck ${all.length}`, x, y, showAll, () => { showAll = true })
+    y += 16
   }
-  y += 4
-  const p = all.filter(plain)
-  SUITS.forEach((s, i) => {
-    const cx = R.x + i * 34
-    text(g, SUIT_GLYPH[s], cx, y, { color: s === 'H' || s === 'D' ? RED : INK })
-    text(g, String(p.filter(c => c.suit === s).length), cx + 9, y, { bold: true })
-  })
-  const bulk = all.filter(c => c.bulk).length
-  const jokers = all.filter(c => c.joker).length
-  text(g, `${bulk} Bulk · ${jokers} Joker`, R.x + R.w, y, { align: 'right', font: 'tiny', color: FADED })
-  y += 14
-  rankGrid(g, R.x, y, R.w, r => p.filter(c => c.rank === r).length)
-  y += 24
+  y += 2
+  text(g, 'Pinned', R.x, y, { font: 'tiny', color: FADED })
+  y = pinRows(g, all, [], R.x, y + 10, R.w)
   g.fillStyle = TAN
-  g.fillRect(R.x, y, R.w, 1)
-  detail(g, hoverCard, y + 6, hoverCard && hoverCard.id === away ? `Away at grading, back round ${v.me.shipping!.back}` : '')
-}
-
-// 13 little columns, A down to 2, the count under each
-function rankGrid(g: CanvasRenderingContext2D, x: number, y: number, w: number, count: (r: number) => number, after?: (r: number) => number): void {
-  const col = w / 13
-  for (let i = 0; i < 13; i++) {
-    const r = 14 - i
-    const cx = Math.round(x + i * col + col / 2)
-    text(g, rankLabel(r), cx, y, { font: 'tiny', color: FADED, align: 'center' })
-    const a = count(r)
-    const b = after ? after(r) : a
-    text(g, String(b), cx, y + 9, { align: 'center', bold: b !== a || a > 0, color: b > a ? BURGUNDY : a ? INK : TAN })
-  }
+  g.fillRect(R.x, y + 2, R.w, 1)
+  const away = v.me.shipping
+  detail(g, hover, y + 8, hover && away && hover.id === away.card.id ? `Away at grading, back round ${away.back}` : '')
 }
 
 // ---------- classeur ----------
@@ -782,14 +806,13 @@ function insertName(card: SleeveCard): string {
   return card.hand ? `${INSERTS[card.id].name}: ${HAND_NAMES[card.hand]}` : INSERTS[card.id].name
 }
 
-// an insert face at 2×, lifted on hover. returns true when hovered
+// an insert face (48×68), lifted on hover. returns true when hovered
 function insertCard(g: CanvasRenderingContext2D, card: SleeveCard, x: number, y: number, rotate = 0): boolean {
   const r = { x, y, w: 48, h: 68 }
   const lit = over(r)
   g.save()
   g.translate(x, y - (lit ? 3 : 0))
   g.rotate(rotate)
-  g.scale(2, 2)
   const s = sprite(insertFace(card.id))
   g.drawImage(s.img, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h)
   g.restore()
@@ -929,11 +952,18 @@ const GLOSS_KIND: Record<Kind, string> = {
 function carnet(g: CanvasRenderingContext2D, v: SeatView): void {
   // the page switch sits on the right leaf's top
   let x = R.x + R.w
-  for (const [id, label] of [['glossary', 'Glossary'], ['hands', 'Hands']] as const) {
+  for (const [id, label] of [['glossary', 'Glossary'], ['hands', 'Hands'], ['play', 'How to play']] as const) {
     const w = measure(label, 'tiny') + 8
     x -= w
     chip(g, label, x, R.y - 2, carnetPage === id, () => { carnetPage = id })
     x -= 3
+  }
+  if (carnetPage === 'play') {
+    text(g, 'Comment ça marche', L.x, L.y - 2, { bold: true, color: BURGUNDY })
+    playColumn(g, 0, L.x, L.y + 16, L.w, lastMs)
+    playColumn(g, 1, R.x, R.y + 16, R.w, lastMs)
+    settings(g, LEAF.top + LEAF.h - 22)
+    return
   }
   if (carnetPage === 'hands') {
     text(g, 'Les mains', L.x, L.y - 2, { bold: true, color: BURGUNDY })
@@ -980,101 +1010,73 @@ function carnet(g: CanvasRenderingContext2D, v: SeatView): void {
 
 // ---------- compare dock ----------
 
-// a tiny card: its index corner
-function corner(g: CanvasRenderingContext2D, c: Card, x: number, y: number, alpha = 1): void {
-  const img = cardCanvas(c)
-  g.save()
-  g.globalAlpha *= alpha
-  g.drawImage(img, 0, 0, 14, 22, x, y, 14, 22)
-  g.fillStyle = INK
-  g.fillRect(x + 14, y, 1, 22)
-  g.restore()
-}
-
+// la pile docked beside a choice, on a scrap of carnet paper: the étui's tab on top, a tabac receipt clipped on with
+// your pins, then the ledger with the offer pulsing into its lines
 function drawDock(g: CanvasRenderingContext2D, v: SeatView): void {
   if (!compare && dock.at < 0.02) return
-  const c = compare ?? { offers: [], dest: 'deck' as const }
-  const x0 = DOCK.x - (DOCK.w + 10) * (1 - dock.at)
+  const c = compare ?? { offers: [] }
+  const ox = -(DOCK.w + 10) * (1 - dock.at)
   g.save()
-  g.translate(x0 - DOCK.x, 0)
-  const binder = (hoverDest ?? c.dest) === 'binder'
-  const base = binder ? v.me.binder : deckCards(v)
-  const adding = compareHover ? [compareHover] : c.offers
-  const d = deckDelta(base, adding)
-  // the dock is only as tall as what's in it
-  const other = base.filter(card => !plain(card))
-  const otherGhost = !!compareHover && !plain(compareHover)
-  const h = binder ? 24 + Math.ceil((base.length + 1) / 11) * 25 + 40
-    : 24 + 4 * 25 + (other.length || otherGhost ? 25 : 0) + 30 + Math.max(1, Math.min(4, d.lines.length)) * 11 + 12
-  const dockSprite = sprite('drawer/dock')
-  g.drawImage(dockSprite.img, dockSprite.x, dockSprite.y, DOCK.w, h - 8, DOCK.x, DOCK.y, DOCK.w, h - 8)
-  g.drawImage(dockSprite.img, dockSprite.x, dockSprite.y + DOCK.h - 8, DOCK.w, 8, DOCK.x, DOCK.y + h - 8, DOCK.w, 8)
-  dockH = h
+  g.translate(ox, 0)
+  const base = wholeDeck(v)
+  // the draft has no deck yet: the rows you'd keep are it. otherwise offers pulse in, unless headed for the binder
+  const draft = base.length === 0
+  const cards = draft ? c.offers : base
+  const binder = hoverDest === 'binder'
+  const ghosts = binder ? [] : compareHover ? [compareHover] : draft ? [] : c.offers
+
+  g.fillStyle = 'rgba(14,11,10,0.45)'
+  g.fillRect(DOCK.x + 3, DOCK.y + 3, DOCK.w, DOCK.h)
+  // the étui's index tab pokes out the top
+  const tabX = DOCK.x + DOCK.w - 62
+  box(g, tabX, DOCK.y - 10, 50, 14, RED)
+  text(g, 'Étui · D', tabX + 25, DOCK.y - 7, { font: 'tiny', color: CREAM, align: 'center' })
+  blit(g, 'drawer/dock', DOCK.x, DOCK.y)
+  dockH = DOCK.h
+
   const ix = DOCK.x + 12
   const iw = DOCK.w - 24
-  let y = DOCK.y + 11
-  text(g, binder ? 'Classeur' : 'Étui', ix, y, { bold: true, color: BURGUNDY })
-  text(g, compareHover ? 'if you take it' : c.offers.length ? `if you take all ${c.offers.length}` : '', ix + iw, y + 2, { font: 'tiny', color: FADED, align: 'right' })
-  y += 13
-  const pulse = 0.5 + 0.5 * Math.sin(lastMs / 140)
+  let y = DOCK.y + 9
+  text(g, 'La Pile', ix, y, { bold: true, color: BURGUNDY })
+  groupChips(g, ix + iw, y - 1)
+  y += 15
 
-  if (binder) {
-    // binder: a flow of corners, the newcomer ghosted at the end
-    const all = [...base].sort(byRank)
-    const per = 11
-    all.forEach((card, i) => corner(g, card, ix + (i % per) * 15, y + Math.floor(i / per) * 25))
-    const i = all.length
-    if (compareHover) ghost(g, compareHover, ix + (i % per) * 15, y + Math.floor(i / per) * 25, pulse)
-    y += Math.max(1, Math.ceil((all.length + 1) / per)) * 25 + 4
-    text(g, 'Cards', ix, y, { color: FADED })
-    delta(g, all.length, all.length + adding.length, ix + 40, y)
-    y += 14
-    if (compareHover && stonksOf(v, compareHover) > 1) text(g, `STONKS: sells ×${stonksOf(v, compareHover)} today`, ix, y, { color: '#3a8040', bold: true })
-    g.restore()
-    return
-  }
+  // the receipt: pins and deck size
+  const rows = Math.max(1, pins.length) + 1 + (binder ? 1 : 0)
+  const rh = 6 + rows * 11
+  receipt(g, ix - 3, y, iw + 6, rh)
+  let ry = pinRows(g, cards, ghosts, ix + 2, y + 4, iw - 4)
+  if (binder) text(g, 'To the binder: not in your deck', ix + 2, ry, { font: 'tiny', color: FADED })
+  if (binder && compareHover && stonksOf(v, compareHover) > 1) text(g, `STONKS ×${stonksOf(v, compareHover)}`, ix + iw - 2, ry, { font: 'tiny', color: '#3a8040', align: 'right' })
+  y += rh + 8
 
-  // deck: one row per suit, the hovered offer ghosted at its sort spot
-  for (const s of SUITS) {
-    const row = base.filter(card => plain(card) && card.suit === s).sort(byRank)
-    const ghostAt = compareHover && plain(compareHover) && compareHover.suit === s ? row.filter(card => card.rank > compareHover!.rank).length : -1
-    const n = row.length + (ghostAt >= 0 ? 1 : 0)
-    // the count sits at the row's right end, the corners squeeze to stay clear of it
-    const [a, b] = d.suit[s]
-    const w = measure(String(b), 'sans', true) + (b !== a ? measure(String(a), 'sans') + 9 : 0)
-    const step = n > 1 ? Math.min(15, (iw - 10 - 15 - 4 - w) / (n - 1)) : 15
-    text(g, SUIT_GLYPH[s], ix, y + 6, { color: s === 'H' || s === 'D' ? RED : INK })
-    let k = 0
-    let ghostX = -1
-    for (let j = 0; j <= row.length; j++) {
-      if (j === ghostAt) ghostX = Math.round(ix + 10 + k++ * step)
-      if (j < row.length) corner(g, row[j], Math.round(ix + 10 + k++ * step), y)
-    }
-    if (ghostX >= 0) ghost(g, compareHover!, ghostX, y, pulse) // on top, so squeezed rows don't hide it
-    delta(g, a, b, ix + iw - w, y + 6)
-    y += 25
-  }
-  if (other.length || otherGhost) {
-    text(g, 'B/J', ix, y + 7, { font: 'tiny', color: FADED })
-    other.forEach((card, j) => corner(g, card, ix + 14 + j * 12, y))
-    if (otherGhost) ghost(g, compareHover!, ix + 14 + other.length * 12, y, pulse)
-    y += 25
-  }
-  y += 2
-  rankGrid(g, ix, y, iw, r => d.rank[r][0], r => d.rank[r][1])
-  y += 24
-  g.fillStyle = TAN
-  g.fillRect(ix, y, iw, 1)
-  y += 4
-  for (const l of d.lines.slice(0, 4)) {
-    text(g, l, ix, y, { color: FLAME, bold: true })
-    y += 11
-  }
-  if (!d.lines.length) text(g, compareHover || c.offers.length ? 'no new lane' : 'hover an offer', ix, y, { color: FADED })
+  ledger(g, v, cards, { x: ix + 2, y, w: iw - 2, h: DOCK.y + DOCK.h - 10 - y }, ghosts, ox)
   g.restore()
 }
 
-function ghost(g: CanvasRenderingContext2D, c: Card, x: number, y: number, pulse: number): void {
-  corner(g, c, x, y, 0.55 + 0.35 * pulse)
-  outlineRect(g, { x, y, w: 15, h: 22 }, pulse > 0.5 ? GOLD : BRASS)
+// a cream tabac receipt with a torn bottom edge and a brass paper clip
+function receipt(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  g.fillStyle = 'rgba(14,11,10,0.25)'
+  g.fillRect(x + 2, y + 2, w, h)
+  g.fillStyle = CREAM
+  g.fillRect(x, y, w, h)
+  // torn: a zigzag of 1-3px teeth
+  for (let i = 0; i < w; i++) {
+    const tooth = [0, 1, 2, 1][i % 4]
+    g.fillRect(x + i, y + h, 1, tooth)
+  }
+  g.fillStyle = TAN
+  g.fillRect(x, y, w, 1)
+  g.fillRect(x, y, 1, h)
+  g.fillRect(x + w - 1, y, 1, h)
+  // the clip
+  const cx = x + w - 14
+  g.fillStyle = '#6b4a1a'
+  g.fillRect(cx, y - 4, 1, 10)
+  g.fillRect(cx + 4, y - 4, 1, 12)
+  g.fillRect(cx, y - 4, 5, 1)
+  g.fillRect(cx + 2, y - 2, 1, 7)
+  g.fillRect(cx + 2, y + 5, 3, 1)
+  g.fillStyle = BRASS
+  g.fillRect(cx + 1, y - 3, 3, 1)
 }
