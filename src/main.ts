@@ -911,6 +911,8 @@ function newRip(cards: Card[]) {
     discoveries: new Set<number>(),
     flipped: new Set<number>(),
     toDeck: new Set(cards.filter(defaultToDeck).map(c => c.id)),
+    pos: new Map<number, { x: number; y: number }>(), // where each card sits once sorted, chasing its group
+    tick: 0,
   }
 }
 
@@ -1010,6 +1012,18 @@ function packPanel(): Panel {
       }
       const peak = t - flipStart(last) - 125
       const pilesY = box.y + box.h - 38
+      // sorted: two groups on the zinc, Deck on the left and Binder on the right. click a card and it slides across
+      const inDeck = cards.filter(c => p.toDeck.has(c.id))
+      const inBinder = cards.filter(c => !p.toDeck.has(c.id))
+      const split = Math.max(8, Math.min(28, box.w - cards.length * (w + 4) - 4))
+      const left = cx - (cards.length * (w + 4) - 4 + split) / 2
+      const slot = (c: Card) => {
+        const d = inDeck.indexOf(c)
+        return d >= 0 ? left + d * (w + 4) + w / 2 : left + inDeck.length * (w + 4) + split + inBinder.indexOf(c) * (w + 4) + w / 2
+      }
+      const dt = Math.min(50, ui.now - (p.tick || ui.now))
+      p.tick = ui.now
+      const ease = still.matches ? 1 : 1 - Math.exp(-dt / 70)
       cards.forEach((c, i) => {
         const fan = land(progress(t - fanAt - i * 40, 300))
         const offset = i - last / 2
@@ -1027,6 +1041,14 @@ function packPanel(): Panel {
             dropCigarette()
             sfx.godPull()
           }
+        }
+        if (p.settled) {
+          const at = p.pos.get(c.id) ?? { x, y }
+          at.x += (slot(c) - at.x) * ease
+          at.y += (cy - at.y) * ease
+          p.pos.set(c.id, at)
+          x = at.x
+          y = at.y
         }
         const flight = p.doneAt === null ? 0 : progress(ui.now - p.doneAt - i * 50, 400)
         if (p.doneAt !== null) {
@@ -1046,8 +1068,7 @@ function packPanel(): Panel {
         if (p.settled && p.doneAt === null) {
           if (i === 0) tip('deckbinder', 'Click to switch. Deck cards get played, Binder cards get sold.', { x: x - w / 2, y: y - CARD_H(w) / 2, w, h: CARD_H(w) + 12 }, 'below')
           ui.card(c, x - w / 2, y - CARD_H(w) / 2, w, {
-            picked: deck,
-            tag: (p.discoveries.has(c.id) ? 'New · ' : '') + (deck ? 'Deck' : 'Binder'),
+            tag: p.discoveries.has(c.id) ? 'New' : undefined,
             onClick: () => {
               if (p.toDeck.has(c.id)) p.toDeck.delete(c.id)
               else p.toDeck.add(c.id)
@@ -1059,7 +1080,7 @@ function packPanel(): Panel {
         } else {
           g.save()
           g.translate(x, y)
-          g.rotate(offset * 0.052 * fan * (1-flight))
+          g.rotate((p.settled ? 0 : offset * 0.052 * fan) * (1 - flight))
           const scale = mix(1,22/w,flight)
           g.scale(scale,scale)
           const landing = progress(t - flipStart(i) - 250, 230)
@@ -1091,6 +1112,15 @@ function packPanel(): Panel {
       if (!p.settled && t >= flipStart(last) + (rare ? 725 : 250)) {
         p.settled = true
         render()
+      }
+      if (p.settled && p.doneAt === null) {
+        const top = cy - CARD_H(w) / 2 - 14
+        const deckMid = left + (inDeck.length * (w + 4) - 4) / 2
+        const binderMid = left + inDeck.length * (w + 4) + split + (inBinder.length * (w + 4) - 4) / 2
+        ui.text(inDeck.length ? `Deck · ${inDeck.length}` : 'Deck', inDeck.length ? deckMid : left, top, { align: inDeck.length ? 'center' : 'left', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
+        ui.text(inBinder.length ? `Binder · ${inBinder.length}` : 'Binder', inBinder.length ? binderMid : cx + (cards.length * (w + 4) + split) / 2, top, { align: inBinder.length ? 'center' : 'right', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
+        g.fillStyle = 'rgba(246,236,210,0.35)'
+        g.fillRect(Math.round(left + inDeck.length * (w + 4) + split / 2 - 2), Math.round(top), 1, CARD_H(w) + 18)
       }
       if (p.settled) {
         for (const [label, x] of [
