@@ -18,19 +18,20 @@ import type { Appraisal } from './engine/scoring.ts'
 import { INSERTS, type SleeveCard } from './engine/shop.ts'
 import { KEYWORDS, entry, glossaryIds, traitEntry, type Entry, type Kind } from './engine/glossary.ts'
 import { stonksMult } from './engine/sleeves.ts'
-import { progress, land, mix, still, whipPan } from './ui/motion.ts'
+import { progress, land, mix, juiceAt, still, whipPan } from './ui/motion.ts'
+import { heldCard } from './ui/held.ts'
 import * as sfx from './ui/sound.ts'
 import * as music from './ui/music.ts'
-import { loadArt, faceCanvas, backCanvas, cardCanvas, tinted } from './ui/art.ts'
+import { loadArt, faceCanvas, backCanvas, stockScale, tinted } from './ui/art.ts'
 import { cardInk } from './ui/ink.ts'
 import { loadFonts, measure, plainText, wrapText } from './ui/font.ts'
 import { loadLogo } from './ui/logo.ts'
 import { loadTitle, panTo, showTitle, type TitleOnline } from './ui/title.ts'
 import { albumSeen, ALBUM_SETS, recordPull } from './ui/album.ts'
 import { spoilPicked } from './ui/spoils.ts'
-import { CARD_LESSONS, flambeBusy, showBareTable, rivalBusted, showDuel, insertUsed, countUp as duelCountUp, type HandSort, type Slip } from './ui/duel.ts'
-import { lottoOpen, showShop, shelfCenter, gradingReturn, clearGradingReturn, dropCigarette, shopInsertUsed, keeperSays, type Scratch } from './ui/shop.ts'
-import { setPanel, grid, fit, CARD_H, type Panel, type Ui } from './ui/panels.ts'
+import { CARD_LESSONS, flambeBusy, showBareTable, rivalBusted, showDuel, insertUsed, countUp as duelCountUp, resetScene as resetDuel, type HandSort, type Slip } from './ui/duel.ts'
+import { lottoOpen, showShop, shelfCenter, gradingReturn, clearGradingReturn, dropCigarette, shopInsertUsed, keeperSays, resetScene as resetShop, type Scratch } from './ui/shop.ts'
+import { setPanel, grid, paged, fit, CARD_H, type Panel, type Ui } from './ui/panels.ts'
 import { closeCompare, closeDrawer, openDrawer, setCompareHover, setDrawerActions, setGlossary, type Compare } from './ui/drawer.ts'
 import { setKeywords } from './ui/fiche.ts'
 import { guiding, markSeen, resetTips, setGuide, tip } from './ui/tips.ts'
@@ -62,6 +63,7 @@ let packShelfX = 320
 let log: string[] = []
 let scratchShow: Scratch | null = null // a scratcher being rubbed in the shop scene, the card pick waits for it
 let scratchKey = 0
+let buySlot = -1 // the shelf slot of the last buy, so a scratcher grows out of where it sat
 let resultHold = false // keep showing the revealed hand until "continue"
 let tallyHold = false // and that reveal ended the round: its money tally shows too
 let toCount = false // a fresh reveal waiting for its count-up
@@ -70,8 +72,6 @@ let grindPick = false // flamber with no pair: waiting for the card that gets +1
 let patronMissed = false
 let patronPaid: number | null = null // le patron just collected this at the big shop door
 let lastLocked: Card[] = [] // my locked cards, so a fold or forge result can still show them
-let binderOpen = false // the shop's binder sheet, kept open across renders while you sell
-let binderPicked = new Set<number>()
 let handSort: HandSort = pref('sort') // how your hand fans out. display only, the engine's order never changes
 let overflowOpened = false // the Sleeve already popped open for the insert waiting on room
 let docked: Compare | null = null // this render's compare dock, set by the screen that offers a choice
@@ -113,11 +113,16 @@ function can(a: Action): boolean {
 
 // ---------- driving the match ----------
 
+// dev only: the trailer recorder (trailer/record.ts) sets window.__trail and reads my actions and events off it, timed
+const trail = import.meta.env.DEV ? (window as { __trail?: unknown[] }).__trail : undefined
+
 // my action, then the bots catch up. bets get a pause so you can watch the rival decide.
 // online it just goes to the server, and busy clears on its ok or reject
 async function dispatch(action: Action): Promise<void> {
   if (busy) return
+  trail?.push({ t: performance.now(), action })
   armed = null // any move disarms a waiting Sure?
+  if (action.type === 'buy') buySlot = action.slot
   if (online) {
     // false = socket not open. the click is dropped and the reconnect brings a fresh view
     if (net!.act(action)) busy = true
@@ -221,6 +226,7 @@ async function runBots(): Promise<void> {
 }
 
 function onEvents(events: Event[]): void {
+  trail?.push({ t: performance.now(), events })
   for (const e of events) {
     if (e.kind === 'packOpened') pack = newRip(e.contents.cards)
     if (e.kind === 'showdown') {
@@ -261,7 +267,7 @@ function onEvents(events: Event[]): void {
       const what = e.hand ? `: ${HAND_NAMES[e.hand]} +1 level` : e.collectible ? `: ${getDef(e.collectible.id).name}` : e.joker ? `: ${JOKERS[e.joker.joker!].name} (${cardName(e.joker)})` : ', into your Sleeve'
       log.push(`Scratched a ${INSERTS[e.insert].name}${what}.`)
       const prize = e.hand ? `${HAND_NAMES[e.hand]} +1 level` : e.collectible ? getDef(e.collectible.id).name : e.joker ? `${JOKERS[e.joker.joker!].name} (${cardName(e.joker)})` : 'into your Sleeve'
-      scratchShow = { key: ++scratchKey, insert: e.insert, prize }
+      scratchShow = { key: ++scratchKey, insert: e.insert, prize, slot: buySlot }
     }
     if (e.kind === 'graded') gradingReturn(e.card)
     if (e.kind === 'graded') log.push(`Back from grading: ${cardName(e.card)} came back a ${e.card.grade}.`)
@@ -420,6 +426,8 @@ function renderTitle(): void {
     dailyLabel: `Daily run · ${daily}`,
     daily: () => startRun(daily),
     random: () => (firstRunDone() ? startRun(randomSeed()) : firstRun()),
+    tutorial: firstRun,
+    tutorialFirst: !firstRunDone(),
     playSeed: s => startRun(s.toUpperCase()),
     board: {
       title: `Today's leaderboard · ${name} (this browser)`,
@@ -513,6 +521,52 @@ async function loadTitleBoard(): Promise<void> {
 // the first run of a visit goes fullscreen (a click started it, so the browser allows it). leave it and it stays left
 let wentFullscreen = false
 
+// every ui-only let back to how a fresh page has it, and the scenes' beats too. a pick, a sheet or a spotlight
+// left over from the last run would point at cards that aren't there anymore (the tutorial soft lock)
+function resetRunUi(): void {
+  selected = new Set()
+  pack = null
+  packShelfX = 320
+  log = []
+  scratchShow = null
+  resultHold = tallyHold = toCount = false
+  insertSlot = null
+  grindPick = false
+  patronMissed = false
+  patronPaid = null
+  lastLocked = []
+  buySlot = -1
+  overflowOpened = false
+  docked = null
+  announced = new Set()
+  boxesAt = null
+  pickedBox = null
+  dealAt = 0
+  sweepAt = null
+  boxesShown = 0
+  tossedRow = null
+  albumOpen = false
+  gradeOpen = false
+  gradeFrom = 'all'
+  gradePage = 0
+  shipper = 'poste'
+  wishSlot = null
+  wishPage = 0
+  armed = null
+  forgeKeepPicks = null
+  dailyBoard = null
+  boardAsked = false
+  receiptAt = null
+  receiptLine = -1
+  lostQuip = ''
+  lastPhase = null
+  setGuide(false)
+  setPanel(null)
+  closeDrawer()
+  resetShop()
+  resetDuel()
+}
+
 // autoplay: the bot style that plays your seat (dev skips), false = you play
 function startRun(seed: string, autoplay: string | false = false): void {
   if (!wentFullscreen && !QUICK && !autoplay && !document.fullscreenElement) {
@@ -520,27 +574,8 @@ function startRun(seed: string, autoplay: string | false = false): void {
     void document.documentElement.requestFullscreen?.().catch(() => {})
   }
   run++
-  setGuide(false)
-  armed = null
-  announced = new Set()
-  clearGradingReturn()
-  receiptAt=null
-  receiptLine=-1
+  resetRunUi()
   best = { total: 0, hand: '' }
-  log = []
-  resultHold = false
-  tallyHold = false
-  toCount = false
-  patronPaid = null
-  patronMissed = false
-  pack = null
-  boxesAt = null
-  pickedBox = null
-  sweepAt = null
-  boxesShown = 0
-  tossedRow = null
-  dailyBoard = null
-  boardAsked = false
   // dev only: ?quick&wild makes the rival bet at random, so folds and flambés come up fast for testing
   const wild = QUICK && new URLSearchParams(location.search).has('wild') ? { style: 'random' } : {}
   match = newMatch({ mode: 'solo', seed, seats: [{ kind: 'human', name: 'You', ...(autoplay ? { style: autoplay } : {}) }, { kind: 'bot', name: 'Rival', difficulty, ...wild }] })
@@ -568,14 +603,8 @@ function abandonRun(): void {
   run++
   match = null
   busy = counting = false
-  resultHold = tallyHold = toCount = false
   skipBeat = null
-  armed = null
-  dailyBoard = null
-  boardAsked = false
-  setPanel(null)
-  closeDrawer()
-  setGuide(false)
+  resetRunUi()
   if (online) leaveOnline()
   else renderTitle()
 }
@@ -640,7 +669,8 @@ function quickStart(): void {
   const big = q.has('big')
   const toShop = q.has('shop') || big
   const atShop = () => m.phase === 'shop' && m.round >= 2 && (!big || m.players[ME].shop?.kind === 'big')
-  const going = () => toShop ? m.phase !== 'over' && !atShop() : m.phase === 'draft' || m.phase === 'shop'
+  // &draft stops at the starter box instead, so ?quick&auto&draft plays the draft through the ui too
+  const going = () => q.has('draft') ? false : toShop ? m.phase !== 'over' && !atShop() : m.phase === 'draft' || m.phase === 'shop'
   while (going()) {
     const seat = pending(m)[0]
     const r = step(m, seat, botAction(m, seat))
@@ -863,8 +893,9 @@ function openBox(g: CanvasRenderingContext2D, id: StarterId, t: number, fromX: n
   g.restore()
 }
 
-// the rows on the felt, dealt out of the box. click the one row you don't want: it lifts off with a stamp, the
-// other three are your deck. click another and the toss moves. the compare dock adds up what you'd keep
+// the rows on the felt, dealt out of the box at ½x. click the one row you don't want: it slides off the felt as a
+// face-down stack and the other three close up, so what's left is your deck. click another and the toss moves.
+// the compare dock adds up what you'd keep
 function draftPanel(): Panel {
   const me = v().me
   const rows = me.draft!.rows!
@@ -884,35 +915,47 @@ function draftPanel(): Panel {
     felt: true,
     docked: true,
     body: (ui, box) => {
+      const g = ui.g
       const n = Math.max(...rows.map(r => r.cards.length))
-      const gap = 4
-      // the felt ends at the table's rail, ~20 above the sheet's bottom
-      const rowH = Math.floor((box.h - 20) / rows.length)
-      const w = Math.min(40, Math.floor((box.w - (n - 1) * gap) / n), Math.floor(((rowH - 13) * 64) / 88))
+      const w = 32
+      const gap = 6
+      const rowH = 58
+      // the tossed stack sits half off the felt, at the sheet's bottom edge
+      const stack = { x: Math.round(box.x + box.w / 2), y: box.y + box.h + 8 }
+      const swept = sweepAt === null ? 0 : progress(ui.now - sweepAt, 450)
       rows.forEach((row, i) => {
         const out = tossedRow === i
-        const y = box.y + i * rowH
+        const k = kept.indexOf(i)
         const left = Math.round(box.x + (box.w - (row.cards.length * w + (row.cards.length - 1) * gap)) / 2)
-        const over = sweepAt === null && ui.hit(box.x, y, box.w, rowH - 2, () => toss(i))
-        const lift = out ? -3 : over ? -1 : 0
-        ui.text(out ? `Tossed · ${row.label}` : row.label, left, y + lift, {
-          font: 'tiny',
-          color: out ? '#e07a6a' : over ? '#fff0b0' : FELT_TEXT.color,
-          outline: FELT_TEXT.outline,
-        })
+        const rowAt = ui.spring(`draftrow${i}`, { x: 0, y: out ? stack.y : box.y + k * rowH, r: 0, s: 1 })
+        const over = !out && sweepAt === null && ui.hit(box.x, Math.round(rowAt.y), box.w, rowH - 4, () => toss(i))
+        const lift = over ? 2 : 0
+        if (!out) ui.text(row.label, left, Math.round(rowAt.y) - lift, { font: 'tiny', color: over ? '#fff0b0' : FELT_TEXT.color, outline: FELT_TEXT.outline })
         row.cards.forEach((c, j) => {
+          const slot = out
+            ? { x: stack.x + (j - 2.5) * 1.5, y: stack.y - j, r: ((j % 3) - 1) * 0.05 + 0.04, s: 1 }
+            : { x: left + j * (w + gap) + w / 2, y: box.y + k * rowH + 11 + 22, r: 0, s: 1 }
+          const at = ui.spring(`draft${c.id}`, slot, slot)
           const arrive = still.matches ? 1 : land(progress(ui.now - dealAt - (i * n + j) * 30, 250))
+          let x = mix(pickedBox?.x ?? 320, at.x, arrive)
+          let y = mix(box.y + box.h / 2 - 40, at.y, arrive) - lift
+          // toss it: the kept rows sweep to your deck, the stack slides away under the rail
           const fly = sweepAt === null ? 0 : land(progress(ui.now - sweepAt - j * 12, 400))
-          const dx = mix(mix(pickedBox?.x ?? 320, left + j * (w + gap), arrive), out ? box.x + j * w : box.x, fly)
-          const dy = mix(mix(box.y + box.h / 2 - 40, y + 11 + lift, arrive), out ? -80 : box.y + box.h - 18, fly)
-          if (arrive !== 1 || sweepAt !== null) {
-            const size = out ? w : mix(w, 22, fly)
-            ui.g.drawImage(cardCanvas(c), dx, dy, size, CARD_H(size))
-          } else ui.card(c, dx, dy, w, { dim: out, onClick: () => toss(i) })
+          x = mix(x, out ? x : box.x + 16, fly)
+          y = mix(y, out ? y + 60 : box.y + box.h - 4, fly)
+          if (!out && arrive === 1 && sweepAt === null) {
+            ui.card(c, x - w / 2, y - 22, w, { onClick: () => toss(i) })
+            return
+          }
+          g.save()
+          g.imageSmoothingEnabled = true
+          g.globalAlpha = out ? 1 : 1 - swept
+          heldCard(g, c, Math.round(x), Math.round(y), 0.5, out ? at.r : 0, { img: out ? backCanvas(me.starter!) : undefined, shadow: out })
+          g.restore()
         })
         if (out && sweepAt === null) {
-          const mid = left + (row.cards.length * (w + gap) - gap) / 2
-          fit(ui.g, 'hud/stamp/discard', { x: mid - 36, y: y + 6, w: 72, h: rowH - 10 })
+          ui.hit(stack.x - 22, stack.y - 26, 44, 30, () => toss(i))
+          ui.text('Tossed', stack.x + 20, stack.y - 36, { font: 'tiny', color: '#a82a38', outline: FELT_TEXT.color })
         }
       })
     },
@@ -967,8 +1010,8 @@ function newRip(cards: Card[]) {
     discoveries: new Set<number>(),
     flipped: new Set<number>(),
     toDeck: new Set(cards.filter(defaultToDeck).map(c => c.id)),
-    pos: new Map<number, { x: number; y: number }>(), // where each card sits once sorted, chasing its group
-    tick: 0,
+    hovered: null as number | null, // the topmost card under the mouse, from last frame's fan
+    juice: new Map<string, number>(),
   }
 }
 
@@ -997,7 +1040,7 @@ function packPanel(): Panel {
   return {
     title: entry('hud', 'pack-' + open.kind).name,
     felt: true,
-    docked: p.settled,
+    docked: true, // from the start, so the fan never moves or shrinks when the compare dock opens
     scrim: now => 0.7 * progress(now - p.at, 300) * (p.doneAt === null ? 1 : 1 - progress(now - p.doneAt, 400 + last * 50)),
     body: (ui, box) => {
       const g = ui.g
@@ -1055,7 +1098,6 @@ function packPanel(): Panel {
         ui.hit(0, 0, 640, 360, skip)
         return
       }
-      const w = Math.min(64, (box.w - 12) / cards.length - 4)
       const rare = topPull(cards[last])
       if (!p.fanned) {
         p.fanned = true
@@ -1069,24 +1111,29 @@ function packPanel(): Panel {
       }
       const peak = t - flipStart(last) - 125
       const pilesY = box.y + box.h - 38
-      // sorted: two groups on the zinc, Deck on the left and Binder on the right. click a card and it slides across
-      const inDeck = cards.filter(c => p.toDeck.has(c.id))
-      const inBinder = cards.filter(c => !p.toDeck.has(c.id))
-      const split = Math.max(8, Math.min(28, box.w - cards.length * (w + 4) - 4))
-      const left = cx - (cards.length * (w + 4) - 4 + split) / 2
-      const slot = (c: Card) => {
-        const d = inDeck.indexOf(c)
-        return d >= 0 ? left + d * (w + 4) + w / 2 : left + inDeck.length * (w + 4) + split + inBinder.indexOf(c) * (w + 4) + w / 2
+      const sorting = p.settled && p.doneAt === null
+      // the fan stays a 1x fan the whole way, like the duel hand. once sorted, deck cards ride high and binder cards sit low
+      const step = last ? Math.min(60, Math.floor((box.w - 64) / last)) : 0
+      const toggle = (id: number) => {
+        if (p.toDeck.has(id)) p.toDeck.delete(id)
+        else p.toDeck.add(id)
+        p.juice.set(`pack${id}`, ui.now)
+        if (p.toDeck.has(id)) sfx.select(true)
+        else sfx.fwip() // into a binder sleeve
+        render()
       }
-      const dt = Math.min(50, ui.now - (p.tick || ui.now))
-      p.tick = ui.now
-      const ease = still.matches ? 1 : 1 - Math.exp(-dt / 70)
+      const placed: { c: Card; x: number; y: number; r: number; w: number; h: number }[] = []
       cards.forEach((c, i) => {
         const fan = land(progress(t - fanAt - i * 40, 300))
         const offset = i - last / 2
-        let x = mix(cx, cx + offset * (w + 4), fan)
+        let x = mix(cx, cx + offset * step, fan)
         let y = mix(cy + 20, cy + offset ** 2 * 2, fan)
+        let r = offset * 0.052 * fan
         const deck = p.toDeck.has(c.id)
+        const over = sorting && p.hovered === c.id
+        const raise = ui.spring(`pack${c.id}`, { x: 0, y: sorting ? (deck ? 18 : -4) + (over ? 7 : 0) : 0, r: 0, s: over ? 1.04 : 1 })
+        x += Math.sin(r) * raise.y
+        y -= Math.cos(r) * raise.y
         if (rare && peak >= 0 && peak < 250 && !still.matches) x += 3 * Math.sin(peak * 0.095) * (1 - peak / 250)
         const flip = progress(t - flipStart(i), p.fastAt === null || i === last ? 250 : 120)
         if (flip >= 0.5 && !p.flipped.has(c.id)) {
@@ -1099,19 +1146,13 @@ function packPanel(): Panel {
             sfx.godPull()
           }
         }
-        if (p.settled) {
-          const at = p.pos.get(c.id) ?? { x, y }
-          at.x += (slot(c) - at.x) * ease
-          at.y += (cy - at.y) * ease
-          p.pos.set(c.id, at)
-          x = at.x
-          y = at.y
-        }
+        // on Done they fly to the piles at 1x and fade as they land
         const flight = p.doneAt === null ? 0 : progress(ui.now - p.doneAt - i * 50, 400)
         if (p.doneAt !== null) {
           const fly = land(flight)
           x = mix(x, deck ? box.x + 30 : box.x + box.w - 30, fly)
           y = mix(y, pilesY, fly)
+          r *= 1 - flight
         }
         if (!p.settled && i === last && flip === 0 && t > first + (last - 1) * 250) x += Math.sin(t * 0.12) * 1.4
         if (!p.settled && i === last && rare && peak >= 0 && peak < 600 && !still.matches) {
@@ -1122,42 +1163,55 @@ function packPanel(): Panel {
           fit(g, 'fx/rays', { x: -84, y: -84, w: 168, h: 168 })
           g.restore()
         }
-        if (p.settled && p.doneAt === null) {
-          if (i === 0) tip('deckbinder', 'Click to switch. Deck cards get played, Binder cards get sold.', { x: x - w / 2, y: y - CARD_H(w) / 2, w, h: CARD_H(w) + 12 }, 'below')
+        const j = juiceAt(p.juice, `pack${c.id}`, ui.now)
+        const size = stockScale(c)
+        const w = 64 * size
+        const h = 88 * size
+        x = Math.round(x)
+        y = Math.round(y)
+        if (sorting && !deck) fit(g, 'shop/binder', { x: x - 15, y: Math.round(y + h / 2 - 2), w: 30, h: 22 })
+        g.save()
+        g.globalAlpha = 1 - progress(flight - 0.6, 0.4)
+        g.translate(x, y)
+        g.rotate(r + j.r)
+        const landing = progress(t - flipStart(i) - 250, 230)
+        const pop = (still.matches || pullRank(c) === 1 ? 1 : 1 + 0.1 * Math.sin(Math.PI * landing) * (1 - landing)) * raise.s * j.s
+        g.scale(pop * Math.max(0.02, Math.abs(Math.cos(Math.PI * flip))), pop * (1 + Math.sin(Math.PI * flip) * 0.07))
+        const ink = glowInk(c)
+        if (i === last && rare && flip === 0 && ink) {
+          g.globalAlpha = 0.5 + 0.4 * Math.sin(t * 0.012)
+          g.fillStyle = ink
+          g.fillRect(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4)
+          g.globalAlpha = 1
+        }
+        heldCard(g, c, 0, 0, size, 0, { img: flip < 0.5 ? backCanvas(back) : undefined, shadow: fan === 1 && flight === 0 })
+        if (flip === 1 && p.discoveries.has(c.id) && (sorting || t - flipStart(i) < 900)) fit(g, 'hud/album/new', { x: w / 2 - 16, y: -h / 2 - 4, w: 24, h: 14 })
+        g.restore()
+        placed.push({ c, x, y, r: r + j.r, w, h })
+        if (sorting) {
+          // a box around the card's middle: the topmost card under the mouse gets the click, as in the duel
+          ui.hit(x - w / 2, y - h / 2, w, h, () => toggle(p.hovered ?? c.id))
+          if (i === 0) tip('deckbinder', 'Click to switch. Deck cards get played, Binder cards get sold.', { x: x - w / 2, y: y - h / 2, w, h: h + 12 }, 'below')
           const lesson = CARD_LESSONS.find(l => l.test(c))
-          if (lesson) tip(lesson.id, lesson.lines, { x: x - w / 2, y: y - CARD_H(w) / 2, w, h: CARD_H(w) }, 'above')
-          ui.card(c, x - w / 2, y - CARD_H(w) / 2, w, {
-            tag: p.discoveries.has(c.id) ? 'New' : undefined,
-            onClick: () => {
-              if (p.toDeck.has(c.id)) p.toDeck.delete(c.id)
-              else p.toDeck.add(c.id)
-              if (p.toDeck.has(c.id)) sfx.select(true)
-              else sfx.fwip() // into a binder sleeve
-              render()
-            },
-          })
-        } else {
-          g.save()
-          g.translate(x, y)
-          g.rotate((p.settled ? 0 : offset * 0.052 * fan) * (1 - flight))
-          const scale = mix(1,22/w,flight)
-          g.scale(scale,scale)
-          const landing = progress(t - flipStart(i) - 250, 230)
-          const pop = still.matches || pullRank(c) === 1 ? 1 : 1 + 0.1 * Math.sin(Math.PI * landing) * (1 - landing)
-          g.scale(pop * Math.max(0.02, Math.abs(Math.cos(Math.PI * flip))), pop * (1 + Math.sin(Math.PI * flip) * 0.07))
-          const ink = glowInk(c)
-          if (i === last && rare && flip === 0 && ink) {
-            g.globalAlpha = 0.5 + 0.4 * Math.sin(t * 0.012)
-            g.fillStyle = ink
-            g.fillRect(-w / 2 - 2, -CARD_H(w) / 2 - 2, w + 4, CARD_H(w) + 4)
-            g.globalAlpha = 1
-          }
-          g.drawImage(flip < 0.5 ? backCanvas(back) : cardCanvas(c), -w / 2, -CARD_H(w) / 2, w, CARD_H(w))
-          if (flip === 1 && p.discoveries.has(c.id) && t - flipStart(i) < 900)
-            fit(g, 'hud/album/new', { x: w / 2 - 16, y: -CARD_H(w) / 2 - 4, w: 24, h: 14 })
-          g.restore()
+          if (lesson) tip(lesson.id, lesson.lines, { x: x - w / 2, y: y - h / 2, w, h }, 'above')
         }
       })
+      // the hover for next frame: the topmost card whose turned rect has the mouse
+      p.hovered = null
+      if (sorting) {
+        for (let i = placed.length - 1; i >= 0; i--) {
+          const q = placed[i]
+          const dx = ui.mouse.x - q.x
+          const dy = ui.mouse.y - q.y
+          const lx = dx * Math.cos(q.r) + dy * Math.sin(q.r)
+          const ly = -dx * Math.sin(q.r) + dy * Math.cos(q.r)
+          if (Math.abs(lx) <= q.w / 2 && Math.abs(ly) <= q.h / 2) {
+            p.hovered = q.c.id
+            ui.hover(q.c, { x: q.x - q.w / 2, y: q.y - q.h / 2, w: q.w, h: q.h })
+            break
+          }
+        }
+      }
       if (!p.settled && rare && peak >= 0 && peak < 600 && !still.matches) {
         g.save()
         g.globalCompositeOperation = 'lighter'
@@ -1172,33 +1226,40 @@ function packPanel(): Panel {
         p.settled = true
         render()
       }
-      if (p.settled && p.doneAt === null) {
-        const top = cy - CARD_H(w) / 2 - 14
-        const deckMid = left + (inDeck.length * (w + 4) - 4) / 2
-        const binderMid = left + inDeck.length * (w + 4) + split + (inBinder.length * (w + 4) - 4) / 2
-        ui.text(inDeck.length ? `Deck · ${inDeck.length}` : 'Deck', inDeck.length ? deckMid : left, top, { align: inDeck.length ? 'center' : 'left', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
-        ui.text(inBinder.length ? `Binder · ${inBinder.length}` : 'Binder', inBinder.length ? binderMid : cx + (cards.length * (w + 4) + split) / 2, top, { align: inBinder.length ? 'center' : 'right', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
-        g.fillStyle = 'rgba(246,236,210,0.35)'
-        g.fillRect(Math.round(left + inDeck.length * (w + 4) + split / 2 - 2), Math.round(top), 1, CARD_H(w) + 18)
+      // the labels ride with their cards: Deck over the raised ones, Binder under the low ones
+      const inDeck = placed.filter(q => p.toDeck.has(q.c.id))
+      const inBinder = placed.filter(q => !p.toDeck.has(q.c.id))
+      const midX = (qs: typeof placed) => Math.round(qs.reduce((sum, q) => sum + q.x, 0) / qs.length)
+      if (sorting && inDeck.length) {
+        const top = Math.min(...inDeck.map(q => q.y - q.h / 2))
+        ui.text(`Deck · ${inDeck.length}`, midX(inDeck), top - 14, { align: 'center', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
+      }
+      if (sorting && inBinder.length) {
+        const bottom = Math.max(...inBinder.map(q => q.y + q.h / 2))
+        ui.text(`Binder · ${inBinder.length}`, midX(inBinder), bottom + 22, { align: 'center', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
       }
       if (p.settled) {
         for (const [label, x] of [
           ['Deck', box.x + 30],
           ['Binder', box.x + box.w - 30],
         ] as const) {
-          if (label === 'Binder') fit(g, 'shop/binder', { x: x - 18, y: pilesY - 14, w: 36, h: 30 })
-          else
-            for (let layer = 2; layer >= 0; layer--) g.drawImage(backCanvas(back), x - 11 + layer, pilesY - 14 + layer * 2, 22, 30)
-          ui.text(label, x, pilesY + 16, { align: 'center', ...FELT_TEXT })
+          if (label === 'Binder') fit(g, 'shop/binder', { x: x - 15, y: pilesY - 10, w: 30, h: 22 })
+          else {
+            g.save()
+            g.imageSmoothingEnabled = true // the pile's backs at ½x
+            for (let layer = 2; layer >= 0; layer--) g.drawImage(backCanvas(back), x - 16 + layer, pilesY - 22 + layer * 2, 32, 44)
+            g.restore()
+          }
+          ui.text(label, x, pilesY + 24, { align: 'center', ...FELT_TEXT })
         }
-        let y = cy + CARD_H(w) / 2 + 24
+        let y = cy + 44 + 52
         if (open.codeCard) {
           ui.text(`Code: ${HAND_NAMES[open.codeCard]} +1 level`, cx, y, { align: 'center', ...FELT_TEXT })
           y += 12
         }
         if (open.collectible) {
           const def = getDef(open.collectible.id)
-          y += ui.lines(`${def.name}: ${describe(open.collectible)}`, cx, y, box.w, { align: 'center', ...FELT_TEXT })
+          y += ui.lines(`${def.name}: ${describe(open.collectible)}`, cx, y, box.w - 100, { align: 'center', ...FELT_TEXT })
           ui.text(
             v().me.display.length < v().me.displaySlots
               ? 'Goes in your case.'
@@ -1268,6 +1329,7 @@ function renderShop(): void {
     onBinBulk: () => void dispatch({ type: 'binBulk' }),
     onGrading: () => {
       gradeOpen = true
+      gradePage = 0
       render()
     },
     onBinder: () => openDrawer('classeur'),
@@ -1300,15 +1362,15 @@ function renderShop(): void {
       closeDrawer()
       void dispatch({ type: 'tossInsert', slot })
     },
-    sellBinder: () => {
-      closeDrawer()
-      binderOpen = true
-      binderPicked = new Set()
-      render()
+    sell: async ids => {
+      sfx.coin()
+      keeperSays('Mouais.')
+      for (const id of ids) await dispatch({ type: 'sell', cardId: id })
     },
+    sellPrice,
+    canSell: id => can({ type: 'sell', cardId: id }),
     openAlbum: () => {
       closeDrawer()
-      binderOpen = true
       albumOpen = true
       render()
     },
@@ -1327,7 +1389,7 @@ function renderShop(): void {
   setPanel(shop.open ? packPanel()
     : wishSlot !== null ? wishPanel()
     : gradeOpen ? gradingPanel()
-    : binderOpen ? binderPanel()
+    : albumOpen ? albumPanel()
     : null)
 }
 
@@ -1344,6 +1406,7 @@ function shopInsert(slot: number): void {
   closeDrawer()
   if (c.id === 'wishlist') {
     wishSlot = slot
+    wishPage = 0
     return render()
   }
   void dispatch({ type: 'useInsert', slot, cardIds: [], suit: null })
@@ -1356,53 +1419,18 @@ function collectibleSell(view_: SeatView, slot: number): number {
   return Math.floor(Math.max(1, COLLECTIBLE_PRICE[rarity] + adj) / 2)
 }
 
-// the binder over the counter: pick cards, then sell them all. stonks-hot cards say so
+// the album: every card ever pulled. the binder sells on the carnet's Classeur page
 let albumOpen = false
-function binderPanel(): Panel {
-  const view_ = v()
-  const me = view_.me
-  for (const id of binderPicked) if (!me.binder.some(c => c.id === id)) binderPicked.delete(id)
+function albumPanel(): Panel {
   const close = () => {
-    binderOpen = false
     albumOpen = false
     render()
   }
-  if (albumOpen) return {
+  return {
     title: 'Album',
     help: 'Every card and modifier you have ever pulled, across all your runs.',
     body: (ui, box) => drawAlbum(ui, box),
-    buttons: [{ label: 'Binder', kind: 'back', enabled: true, onClick: () => { albumOpen = false; render() } }],
-    onEscape: close,
-  }
-  const n = binderPicked.size
-  const total = [...binderPicked].reduce((sum, id) => sum + sellPrice(me.binder.find(c => c.id === id)!), 0)
-  return {
-    title: `Binder · ${me.binder.length}`,
-    help: me.binder.length ? 'Pick cards, then sell them.' : 'Empty. Pulls you send to the binder land here.', // STONKS is on its board
-    body: (ui, box) => {
-      if (me.binder.length) tip('binder', ['Your binder: the cards you kept out of your deck.', 'This is the only place you can sell from. Cards that match the chalkboard in the shop sell for more.'], box, 'above')
-      const w = 40
-      grid(me.binder.length, { ...box, y: box.y + 6 }, w, 6, 14).forEach((at, i) => {
-        const c = me.binder[i]
-        const ok = can({ type: 'sell', cardId: c.id })
-        ui.card(c, at.x, at.y, w, { picked: binderPicked.has(c.id), dim: !ok, tag: `$${sellPrice(c)}`, onClick: ok ? () => {
-          if (binderPicked.has(c.id)) binderPicked.delete(c.id)
-          else binderPicked.add(c.id)
-          render()
-        } : undefined })
-      })
-    },
-    buttons: [
-      { label: 'Album', kind: 'back', enabled: true, onClick: () => { albumOpen = true; render() } },
-      { label: 'Close', kind: 'back', enabled: true, onClick: close },
-      { label: n ? `Sell ${n}` : 'Sell', price: n ? `+$${total}` : undefined, kind: 'buy', enabled: n > 0, onClick: async () => {
-        const ids = [...binderPicked]
-        binderPicked = new Set()
-        sfx.coin()
-        keeperSays('Mouais.')
-        for (const id of ids) await dispatch({ type: 'sell', cardId: id })
-      } },
-    ],
+    buttons: [{ label: 'Binder', kind: 'back', enabled: true, onClick: () => { close(); openDrawer('classeur') } }],
     onEscape: close,
   }
 }
@@ -1463,18 +1491,40 @@ function drawAlbum(ui: Ui, box: { x: number; y: number; w: number; h: number }):
 // grading: pick a shipper, then the card. away for a round, back graded at the next shop
 let gradeOpen = false
 let shipper: Shipper = 'poste'
+let gradeFrom: 'all' | 'deck' | 'binder' = 'all'
+let gradePage = 0
+// special cards first (a finish, stamp, ★, type, joker or knockoff), then rank high to low
+const special = (c: Card) => !!(c.finish || c.stamp || c.tier || c.variant || c.joker || c.knockoff)
+const byShelf = (a: Card, b: Card) => Number(special(b)) - Number(special(a)) || b.rank - a.rank || a.id - b.id
 function gradingPanel(): Panel {
   const me = v().me
-  const cards = [...me.pile, ...me.discard, ...me.binder].filter(c => can({ type: 'ship', cardId: c.id, shipper }))
+  const shippable = (c: Card) => can({ type: 'ship', cardId: c.id, shipper })
+  const deck = [...me.pile, ...me.discard].filter(shippable)
+  const binder = me.binder.filter(shippable)
+  const inBinder = new Set(binder.map(c => c.id))
+  const cards = (gradeFrom === 'deck' ? deck : gradeFrom === 'binder' ? binder : [...deck, ...binder]).sort(byShelf)
   const close = () => {
     gradeOpen = false
     render()
   }
+  const from = (f: typeof gradeFrom) => {
+    gradeFrom = f
+    gradePage = 0
+    render()
+  }
   return {
     title: entry('hud', 'grading').name,
-    help: 'Pick a card to ship. One per shop.', // how grading works is on the window's Fiche
     body: (ui, box) => {
-      tip('shippers', ['Pick a shipper. La Poste is cheap but your card can come back damaged.', 'Chronopost is safe. The Fourgon blindé grades twice and keeps the better grade.'], { x: box.x, y: box.y, w: box.w, h: 54 }, 'below')
+      // the help line, with the All · Deck · Binder filter on its right
+      ui.text('Pick a card to ship. One per shop.', box.x, box.y + 1, { color: '#5c4a36' }) // how grading works is on the window's Fiche
+      let x = box.x + box.w
+      for (const [f, label] of [['binder', `Binder ${binder.length}`], ['deck', `Deck ${deck.length}`], ['all', `All ${deck.length + binder.length}`]] as const) {
+        x -= measure(label, 'tiny') + 8
+        chip(ui, label, x, box.y, gradeFrom === f, () => from(f))
+        x -= 3
+      }
+      const top = box.y + 16
+      tip('shippers', ['Pick a shipper. La Poste is cheap but your card can come back damaged.', 'Chronopost is safe. The Fourgon blindé grades twice and keeps the better grade.'], { x: box.x, y: top, w: box.w, h: 54 }, 'below')
       const ids = Object.keys(SHIPPERS) as Shipper[]
       const bw = Math.floor((box.w - 8) / 3)
       ids.forEach((id, i) => {
@@ -1482,31 +1532,51 @@ function gradingPanel(): Panel {
         const x = box.x + i * (bw + 4)
         const on = id === shipper
         const ok = sh.price < me.bankroll
-        const over = ui.hit(x, box.y, bw, 54, () => { if (ok) { shipper = id; render() } })
-        ui.fiche(entry('hud', `ship-${id}`), x, box.y, bw, 54)
-        ui.nine('hud/plate/paper', x, box.y, bw, 54, on ? '#e8c260' : over && ok ? '#fff6dc' : undefined)
-        fit(ui.g, 'shop/parcel/' + id, { x: x + 4, y: box.y + 4, w: 30, h: 20 })
+        const over = ui.hit(x, top, bw, 54, () => { if (ok) { shipper = id; render() } })
+        ui.fiche(entry('hud', `ship-${id}`), x, top, bw, 54)
+        ui.nine('hud/plate/paper', x, top, bw, 54, on ? '#e8c260' : over && ok ? '#fff6dc' : undefined)
+        fit(ui.g, 'shop/parcel/' + id, { x: x + 4, y: top + 4, w: 30, h: 20 })
         const big = measure(sh.name, 'sans', true) <= bw - 42
-        ui.text(sh.name, x + 38, box.y + (big ? 4 : 6), { font: big ? 'sans' : 'tiny', bold: big, color: ok ? '#2e2320' : '#8c7656' })
-        ui.text(`$${sh.price}`, x + 38, box.y + 15, { color: '#3a8040' })
-        ui.lines(sh.text, x + 4, box.y + 27, bw - 8, { font: 'tiny', color: '#5c4a36' })
+        ui.text(sh.name, x + 38, top + (big ? 4 : 6), { font: big ? 'sans' : 'tiny', bold: big, color: ok ? '#2e2320' : '#8c7656' })
+        ui.text(`$${sh.price}`, x + 38, top + 15, { color: '#3a8040' })
+        ui.lines(sh.text, x + 4, top + 27, bw - 8, { font: 'tiny', color: '#5c4a36' })
       })
-      const w = 34
-      grid(cards.length, { ...box, y: box.y + 64, h: box.h - 64 }, w, 5, 8).forEach((at, i) => {
+      if (!cards.length) ui.text('Nothing here to ship.', box.x + box.w / 2, top + 80, { color: '#8c7656', align: 'center' })
+      // ½× cards, 8 a row, 4 rows a page. with All, each wears a deck or binder tag
+      const w = 32
+      const gridBox = { x: box.x, y: top + 60, w: box.w, h: box.y + box.h - top - 60 }
+      const tags: { c: Card; x: number; y: number }[] = []
+      for (const { at, i } of paged(ui, cards.length, gridBox, w, gradePage, p => { gradePage = p; render() }, 6, 8)) {
         const c = cards[i]
-        ui.card(c, at.x, at.y, w, { onClick: () => {
+        const over = ui.card(c, at.x, at.y, w, { onClick: () => {
           gradeOpen = false
           void dispatch({ type: 'ship', cardId: c.id, shipper }) // the shipper's sound plays in the shop
         } })
-      })
+        if (gradeFrom === 'all' && !over) tags.push({ c, ...at })
+      }
+      for (const t of tags) {
+        const label = inBinder.has(t.c.id) ? 'binder' : 'deck'
+        const tw = measure(label, 'tiny') + 6
+        ui.nine('hud/plate/paper', t.x + w / 2 - tw / 2, t.y + CARD_H(w) - 3, tw, 9, inBinder.has(t.c.id) ? '#a9bedf' : undefined)
+        ui.text(label, t.x + w / 2, t.y + CARD_H(w) - 2, { font: 'tiny', color: '#2e2320', align: 'center' })
+      }
     },
     buttons: [{ label: 'Cancel', kind: 'back', enabled: true, onClick: close }],
     onEscape: close,
   }
 }
 
+// a small filter chip on a panel's paper: gold when on
+function chip(ui: Ui, label: string, x: number, y: number, on: boolean, onClick: () => void): void {
+  const w = measure(label, 'tiny') + 8
+  const over = ui.hit(x, y, w, 11, onClick)
+  ui.nine('hud/plate/paper', x, y - (over && !on ? 1 : 0), w, 11, on ? '#e8c260' : over ? '#fff6dc' : '#bfa77e')
+  ui.text(label, x + 4, y + 2 - (over && !on ? 1 : 0), { font: 'tiny', color: '#2e2320' })
+}
+
 // a wishlist from the Sleeve: pick the binder card it shuffles back into your deck
 let wishSlot: number | null = null
+let wishPage = 0
 function wishPanel(): Panel {
   const me = v().me
   const back = () => {
@@ -1517,15 +1587,15 @@ function wishPanel(): Panel {
     title: entry('insert', 'wishlist').name,
     help: 'Pick a binder card to shuffle into your deck.',
     body: (ui, box) => {
-      const w = 40
-      grid(me.binder.length, box, w, 6, 10).forEach((at, i) => {
+      const w = 32
+      for (const { at, i } of paged(ui, me.binder.length, box, w, wishPage, p => { wishPage = p; render() }, 6, 10)) {
         const c = me.binder[i]
         ui.card(c, at.x, at.y, w, { onClick: () => {
           const slot = wishSlot!
           wishSlot = null
           void dispatch({ type: 'useInsert', slot, cardIds: [c.id], suit: null })
         } })
-      })
+      }
     },
     buttons: [{ label: 'Back', kind: 'back', enabled: true, onClick: back }],
     onEscape: back,
@@ -1585,6 +1655,8 @@ function lessonNow(view_: SeatView): Lesson | null {
   if (!guiding() || !match || view_.round !== 1 || view_.hands?.hand !== 1) return null
   const me = view_.me
   if (view_.phase === 'deal' && !me.locked && !me.forge) {
+    // a pick that isn't in the hand can never Play, and the spotlight would leave no way out
+    for (const id of selected) if (!me.hand.some(c => c.id === id)) throw new Error(`lesson: picked card ${id} isn't in the hand`)
     const best = bestPlay(match, match.players[ME])
     const want = best.played.map(c => c.id)
     if (!want.every(id => selected.has(id))) {
@@ -1825,7 +1897,7 @@ function forgePanel(plan: ForgePlan): Panel {
     help: `Pick ${plan.tier} to keep. The rest burn off.`,
     body: (ui, box) => {
       tip('traits', ['Each hand type gives its own trait when you flamber it.', 'A ★ card holds one trait per star. Pick the ones that fit your deck.'], box, 'above')
-      const w = 34
+      const w = 32
       const spots = grid(plan.merged.length, box, w, 4)
       plan.merged.forEach((c, i) => ui.card(c, spots[i].x, spots[i].y, w))
       let y = box.y + CARD_H(w) + 14
@@ -2089,9 +2161,11 @@ else if (new URLSearchParams(location.search).has('first')) firstRun() // also t
 else renderTitle()
 
 // dev only: ?quick&auto plays your seat with the bot through the real ui, a full run with every screen drawn.
-// &burn flambés every pair it would have played, to watch the flambé beat in a real run
+// &burn flambés every pair it would have played, to watch the flambé beat in a real run. &pace=ms waits that long
+// between its moves (a person's speed, for the trailer), 120 by default
 if (QUICK && new URLSearchParams(location.search).has('auto')) {
   const burn = new URLSearchParams(location.search).has('burn')
+  const pace = Number(new URLSearchParams(location.search).get('pace') ?? 120)
   setInterval(() => {
     if (busy || counting || !match || flambeBusy()) return
     if (match.phase === 'over') {
@@ -2110,5 +2184,5 @@ if (QUICK && new URLSearchParams(location.search).has('auto')) {
       if (forgePlan(a.cardIds.map(id => hand.find(c => c.id === id)!))) a = { type: 'flamber', cardIds: a.cardIds, grind: null }
     }
     void dispatch(a)
-  }, 120)
+  }, pace)
 }

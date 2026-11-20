@@ -44,35 +44,44 @@ export function juiceAt(starts: Map<string, number>, key: string, now: number): 
   return { s: 1 + 0.18 * decay, r: 0.1 * Math.sin(t * 34) * decay }
 }
 
-type T = { x: number; y: number; r: number; s: number }
-export const springs = new Map<string, { at: T; vel: T }>()
-const seen = new Set<string>()
+export type T = { x: number; y: number; r: number; s: number }
+type Spring = { at: T; vel: T }
 
-// the visible transform chases the target, critically damped with a touch of overshoot
-export function spring(key: string, target: T, from?: T): T {
-  seen.add(key)
-  let s = springs.get(key)
-  if (!s) {
-    s = { at: { ...(from ?? target) }, vel: { x: 0, y: 0, r: 0, s: 0 } }
-    springs.set(key, s)
-  }
-  pending.push([s, target])
-  return s.at
-}
-let pending: [{ at: T; vel: T }, T][] = []
-
-export function stepSprings(dt: number): void {
-  const stiff = 170
-  const damp = 2 * Math.sqrt(stiff) * 0.75
-  for (const [s, target] of pending) {
-    for (const f of ['x', 'y', 'r', 's'] as const) {
-      const a = stiff * (target[f] - s.at[f]) - damp * s.vel[f]
-      s.vel[f] += a * dt
-      s.at[f] += s.vel[f] * dt
+// a set of springs stepped by whoever draws them. the duel has one, the panels have their own
+export function springSet() {
+  const all = new Map<string, Spring>()
+  const seen = new Set<string>()
+  let pending: [Spring, T][] = []
+  // the visible transform chases the target, critically damped with a touch of overshoot
+  const spring = (key: string, target: T, from?: T): T => {
+    seen.add(key)
+    let s = all.get(key)
+    if (!s) {
+      s = { at: { ...(from ?? target) }, vel: { x: 0, y: 0, r: 0, s: 0 } }
+      all.set(key, s)
     }
+    pending.push([s, target])
+    return s.at
   }
-  pending = []
-  // forget springs nobody drew last frame, so a card coming back flies in again
-  for (const key of springs.keys()) if (!seen.has(key)) springs.delete(key)
-  seen.clear()
+  const step = (dt: number): void => {
+    const stiff = 170
+    const damp = 2 * Math.sqrt(stiff) * 0.75
+    for (const [s, target] of pending) {
+      for (const f of ['x', 'y', 'r', 's'] as const) {
+        const a = stiff * (target[f] - s.at[f]) - damp * s.vel[f]
+        s.vel[f] += a * dt
+        s.at[f] += s.vel[f] * dt
+      }
+    }
+    pending = []
+    // forget springs nobody drew last frame, so a card coming back flies in again
+    for (const key of all.keys()) if (!seen.has(key)) all.delete(key)
+    seen.clear()
+  }
+  return { all, spring, step }
 }
+
+const duel = springSet()
+export const springs = duel.all
+export const spring = duel.spring
+export const stepSprings = duel.step

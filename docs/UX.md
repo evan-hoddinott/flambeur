@@ -110,6 +110,7 @@ One prop, a brown leather **carnet** (a gambler's notebook), pokes out of the bo
   - **Show** (mid-round only): Left to draw · Whole deck. It defaults to Left to draw, so nothing is greyed out. A card away at grading sits in its line, faded, with its parcel.
   - **Pinned:** click a line's label to pin it (max 3, a 4th replaces the oldest). The right leaf lists pins with their counts, plus deck size. Pins carry across groupings.
   - **Hover a card:** it's outlined, every line it counts in lights, and the right leaf shows it big with its Fiche.
+- **Classeur tab: the binder, and where you sell.** In the shop, click cards to pick them (gold outline, a price tag under each), then the right leaf's `Sell 3 · +$14` sells them, with Select all / Clear beside the count. The carnet stays open. In the duel it's read-only. Past 15 cards they drop to ½×, past 28 they page (‹ › or ← / →, the wheel in the shop).
 - **Vitrine tab:** collectibles in scoring order. The top-left VITRINE tab stays as a shortcut (it gets one pip per filled slot), and the shop uses the duel's canvas case instead of the DOM modal.
 - **"Show labels" toggle:** pins every caption. On by default for the demo.
 - The current pile prop on the duel table can stay as a passive count. The carnet is the button. The shop's bottom-bar deck stack and binder book go away.
@@ -207,6 +208,8 @@ Each rebuilt screen keeps the scene as its backdrop and the frame zones live. Or
 3. **Binder and grading** as carnet pages, with Sell and Ship in the action stack.
 4. **Forge pick:** trait chips on the new card.
 5. **Results** on the duel table, with Le Patron's note in band F.
+
+**Card sizes (Nov 20).** A card is drawn at **1×** (64×88, smoothing off, turned or not) or **½×** (32×44, smoothing on), at whole pixels, nothing in between: any other ratio smears the pixel art. `drawCard()` in `src/ui/panels.ts` rounds the position, picks the smoothing and throws on any other width. A hovered ½× card pops to 1× over its spot with a shadow, so grids still feel like cards. The duel hand, the pack rip and that pop share one renderer, `heldCard()` in `src/ui/held.ts` (finish sheen, drop shadow). The pack rip stays a 1× fan (deck cards ride high, binder cards sit low), and the starter box deals its rows at ½× (the tossed row slides off the felt as a face-down stack).
 
 ## 9. Quick fixes (do first)
 

@@ -29,6 +29,8 @@ export type TitleState = {
   dailyLabel: string
   daily: () => void
   random: () => void
+  tutorial: () => void
+  tutorialFirst: boolean // never finished the tutorial: it's the primary ticket, so a new player sees it first
   playSeed: (seed: string) => void
   board: TitleBoard
   online: TitleOnline | null // null = no game server, online is off
@@ -853,8 +855,9 @@ function cellar(t: number, st: TitleState): void {
   if (picked) outlined(picked.text, W / 2, 537, { align: 'center' })
 
   row(556, [
-    tk('daily', st.dailyLabel, 'progress', st.daily, { primary: true }),
+    tk('daily', st.dailyLabel, st.tutorialFirst ? 'secondary' : 'progress', st.daily, { primary: !st.tutorialFirst }),
     tk('random', 'Random seed', 'secondary', st.random),
+    tk('tutorial', 'Tutoriel', st.tutorialFirst ? 'progress' : 'secondary', st.tutorial, { primary: st.tutorialFirst }),
   ])
   const play = () => {
     const s = fields.seed.value.trim()

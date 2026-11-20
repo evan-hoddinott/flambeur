@@ -84,12 +84,12 @@ Change these here if they're wrong.
 | STONKS board | top-right (520,20) → (630,95) | Chalkboard "Cote du jour", chalk font |
 | Wall clock | (420,40) | Multiplayer only |
 | Lottery machine | (420,120) | Back-wall prop |
-| Register + sign | register (540,140), sign taped to its front | The sign is hand-lettered, 3 trait lines |
+| Register + sign | register (540,140), sign taped to its front | The sign is hand-lettered, 3 trait lines. The ticket roll beside it is set dressing: scratchers are sold from the shelf |
 | Salty note | beside the sign (590,150) | Only after the collectible pool rolls over |
 | Bell | (90,158) on the counter | A brass desk bell |
 | Zinc counter edge | y 158–170, full width | Worn zinc, a highlight line |
 | Offer shelf | y 172 → 312, full width | Glass-fronted case under the counter, dark wood inside. The row sits on it |
-| Offers | row centered at x 320, tops at y 184, each 72×104 | Grouped with gaps: packs · collectibles · scratchers · sleeve. Up to 8 slots fit (8×72 + gaps ≈ 620) |
+| Offers | row centered at x 320, tops at y 184, each 72×104 | Grouped with gaps: packs · collectibles · scratchers · sleeve. Up to 8 slots fit (8×72 + gaps ≈ 620). The scratchers share one slot, fanned like a tear-off pair with one tag (`$3 ×2`): the next one to sell in front, a spent one behind |
 | Price tags | under each offer, y 296–308 | Money-green ink on paper (READABILITY money color) |
 | Shelf lip | y 312–318 | Brass strip |
 | Your plate | bottom-left (8,322) | Your bankroll in blue, same plate as the duel |
@@ -177,7 +177,7 @@ Paper cream ground, a burgundy inner frame and a brass hairline frame, and a har
 
 ### 7.3 Up close (200×280)
 
-Click it and it lifts off the shelf, flips flat and grows to the center, over a darkened counter (same spring as a pack lifting). Same layout as the shelf ticket, bigger:
+Click it and it grows out of its shelf slot to the center, over a darkened counter (same spring as a pack lifting). Same layout as the shelf ticket, bigger:
 - The header and illustration take the top 100 px.
 - **The foil: six windows, find 3 matching symbols.** A 3×2 grid of foil squares, each about 48×46, under a small printed line "3 SYMBOLES IDENTIQUES". This is what makes it feel like a real ticket instead of a loot box with a skin.
 - Under the windows sit three of the prize's emblem plus three decoys. The decoys never make a second triple.
@@ -227,7 +227,7 @@ The Grail is the only result that breaks the counter's calm. It's the second-big
 
 ### 7.7 Afterward
 
-The spent ticket shrinks back onto the counter, scratched, and stays there next to the register for the rest of the shop: a little pile of losing-looking tickets, the way a real tabac counter looks. It's cleared when you leave. Flakes fade on their own.
+The spent ticket shrinks back into its shelf slot and stays there for the rest of the shop, foil scraped off with what it won showing in the window, under VENDU. A restock or leaving clears it. Flakes fade on their own.
 
 ### 7.8 Bots and the rival
 

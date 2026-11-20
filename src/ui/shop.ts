@@ -18,8 +18,8 @@ import { cardEntry, entry, KEYWORDS, type Entry } from '../engine/glossary.ts'
 import type { SeatView, ShopOfferView } from '../engine/match.ts'
 import * as sfx from './sound.ts'
 import { drawBand, runStrip } from './frame.ts'
-import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } from './panels.ts'
-import { bookTour, drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, setDrawerHover, type DrawerThing } from './drawer.ts'
+import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen, panelWheel, wheelStep } from './panels.ts'
+import { bookTour, drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, drawerWheel, setDrawerHover, type DrawerThing } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
 import { drawTips, guiding, tip as teach, tipClick, wasSeen } from './tips.ts'
 import { still as reducedMotion, frameGate, stageScale, flash as calm } from './prefs.ts'
@@ -48,7 +48,7 @@ export type ShopState = {
   patronPaid: number | null // le patron just collected this at the door (big shop)
 }
 
-export type Scratch = { key: number; insert: Insert; prize: string }
+export type Scratch = { key: number; insert: Insert; prize: string; slot: number } // slot: the shelf slot it came off
 
 const W = 640
 const H = 360
@@ -100,6 +100,24 @@ export function gradingReturn(card: Card): void {
 export function clearGradingReturn(): void {
   parcel = null
   parcelShipper = 'poste'
+}
+
+// a new run: forget the last one's shop beats, so none of them replay in the next shop
+export function resetScene(): void {
+  state = null
+  enteredRound = -1
+  restockBeat = countdown = null
+  purchases = []
+  sale = null
+  bubble = null
+  shopInsert = null
+  spentTickets.clear()
+  dossierOpen = false
+  lotto = null
+  shownKey = -1
+  dragging = false
+  flakes = []
+  clearGradingReturn()
 }
 
 function sales(): void {
@@ -196,6 +214,14 @@ export function showShop(app: HTMLElement, next: ShopState): void {
       overDrawer = drawerPointer(-1, -1, false)
     }
     cv.onclick = e => click(toStage(e))
+    // the wheel turns pages: the open carnet's, else the panel's
+    cv.addEventListener('wheel', e => {
+      if (lotto || pauseOpen()) return
+      e.preventDefault()
+      const dy = wheelStep(e)
+      if (dy && drawerOpen()) drawerWheel(dy)
+      else if (dy) panelWheel(dy)
+    }, { passive: false })
     detachFiche?.()
     detachFiche = ficheInput(cv, toStage)
     setKeywords(KEYWORDS)
@@ -217,7 +243,7 @@ export function showShop(app: HTMLElement, next: ShopState): void {
     restockBeat = countdown = null
     purchases = []
     bulkAt = sighAt = -Infinity
-    spent = 0
+    spentTickets.clear()
     keeperSays('Bonjour.')
     sfx.doorBell()
     sfx.play('whoosh', { gain: 0.25, rate: 1.3 })
@@ -378,7 +404,7 @@ function shelfBeat(): void {
   for (const p of purchases) {
     const age = now - p.at
     const t = Math.min(1, age / 250)
-    if (t < 1 && p.offer.type !== 'pack') {
+    if (t < 1 && p.offer.type !== 'pack' && p.offer.type !== 'scratcher') { // those two lift into their own close-up
       g.save()
       g.globalAlpha = 1 - t * t
       g.translate(p.center, SLOT.top + SLOT.h - 8 * Math.sin(Math.PI * t))
@@ -627,8 +653,7 @@ function draw(st: ShopState): void {
     tip(() => entry('hud', 'bulk-bin'), 223, 125, 50, 40)
   }
   counterBeat()
-  registerTickets(st)
-  spentPile()
+  pin('shop/scratch/roll', 402, 104) // set dressing: the tickets are on the shelf
   gradingCounter(st)
   pin('shop/case', 0, 172)
   caseLight()
@@ -787,21 +812,6 @@ function slotOrder(offers: ShopOfferView[]): number[] {
   return offers.map((_, i) => i).sort((a, b) => rank(offers[a]) - rank(offers[b]) || a - b)
 }
 
-function registerTickets(st: ShopState): void {
-  const tickets = st.view.me.shop!.offers.flatMap((offer, slot) => offer.type === 'scratcher' && !offer.sold ? [{ offer, slot }] : [])
-  const age = lotto ? Math.max(0, now - lotto.at) : 1000
-  const tear = age < 180 ? Math.min(3, 1 + Math.floor(age / 60)) : 0
-  pin('shop/scratch/roll' + (tear > 0 ? '/' + tear : ''), 402, 104)
-  tickets.forEach(({ offer, slot }, i) => {
-    const x = 410 + i * 41
-    const over = hit(x, 151, 40, 19, () => { if (st.canBuy(slot)) st.onBuy(slot) })
-    tip(() => offerEntry(offer), x, 151, 40, 19, true)
-    const y = over ? 149 : 151
-    g.drawImage(imageOf('scratch/shelf-paper'), x, y, 40, 19)
-    text(`$${offer.price}`, x + 20, y + 5, { font: 'sans', color: CREAM, outline: INK, align: 'center', bold: true })
-  })
-}
-
 // the offers stay right of the plate and the bifold (zones B and E), centered ~40 px right of the middle
 const SHELF = { left: 166, right: 632, center: 360 }
 
@@ -813,10 +823,16 @@ export function shelfCenter(list: ShopOfferView[], slot: number): number {
 let cigAt = Infinity
 export function dropCigarette(): void { cigAt = performance.now() }
 
+// the scratchers share one slot, fanned like a tear-off pair: each one behind the front peeks out FAN px to the right
+const FAN = 10
+
 function offerLayout(list: ShopOfferView[]): { slot: number; x: number; w: number }[] {
-  const ordered = slotOrder(list).filter(slot => list[slot].type !== 'scratcher')
+  const all = slotOrder(list)
+  const scratchers = all.filter(slot => list[slot].type === 'scratcher')
+  const ordered = all.filter(slot => list[slot].type !== 'scratcher' || slot === scratchers[0])
   const widths = ordered.map(slot => {
     const o = list[slot]
+    if (o.type === 'scratcher') return SLOT.w + FAN * (scratchers.length - 1)
     return o.type === 'collectible' ? Math.max(40, sprite(o.owned.id).w) : SLOT.w
   })
   const gaps: number[] = ordered.map((slot, i) => i === 0 ? 0 : ordered.length === 3 ? 46 : list[ordered[i-1]].type === list[slot].type ? 4 : 13)
@@ -829,13 +845,14 @@ function offerLayout(list: ShopOfferView[]): { slot: number; x: number; w: numbe
   const scale = Math.max(0, Math.min(1, (room - width) / Math.max(1, gapWidth)))
   const total = width + gapWidth * scale
   let x = Math.round(Math.max(SHELF.left, Math.min(SHELF.right - total, SHELF.center - total / 2)))
-  return ordered.map((slot, i) => {
+  const place = new Map(ordered.map((slot, i) => {
     x += Math.round(gaps[i] * scale)
     const w = Math.round(widths[i] * squeeze)
-    const pos = { slot, x, w }
+    const pos = { x, w }
     x += w
-    return pos
-  })
+    return [slot, pos]
+  }))
+  return all.map(slot => ({ slot, ...place.get(list[slot].type === 'scratcher' ? scratchers[0] : slot)! }))
 }
 
 const sleeveOffers = new Map<string, HTMLCanvasElement>()
@@ -909,14 +926,28 @@ const hoverMotion = new Map<number, { lift: number; tilt: number; vel: number; s
 function offers(st: ShopState): { offer: ShopOfferView; box: { x: number; y: number; w: number; h: number } } | null {
   const list = st.view.me.shop!.offers
   let hovered = null
-  for (const [i, pos] of offerLayout(list).entries()) {
+  const layout = offerLayout(list)
+  // the next scratcher to sell is the front of the stack, the rest fan out behind it. one up close isn't on the shelf
+  const stack = layout.filter(p => list[p.slot].type === 'scratcher' && lotto?.slot !== p.slot)
+  const front = stack.find(p => !list[p.slot].sold) ?? stack.at(-1)
+  const left = stack.filter(p => !list[p.slot].sold).length
+  // behind first, so the front one draws over them
+  const order = layout.map((pos, i) => ({ pos, i })).sort((a, b) => a.pos.x - b.pos.x || Number(a.pos === front) - Number(b.pos === front))
+  for (const { pos, i } of order) {
     const { slot, w } = pos
     const o = list[slot]
+    if (o.type === 'scratcher' && lotto?.slot === slot) continue // up close, comes back when it's spent
     const deal = ease((now - stockAt - i * 45) / 260)
     const x = pos.x + (1 - deal) * 700
-    const center = Math.round(x + w / 2)
+    const fan = o.type !== 'scratcher' || stack.length < 2 ? 0 : pos === front ? -FAN / 2 : FAN / 2
+    const center = Math.round(x + w / 2 + fan)
     const floor = SLOT.top + SLOT.h
+    if (o.type === 'scratcher' && pos !== front) {
+      backTicket(o, slot, center, floor)
+      continue
+    }
     if (o.sold) {
+      if (o.type === 'scratcher') spentTicket(slot, center, floor)
       if (o.type === 'sleeve') g.drawImage(imageOf('shop/sleeve/stand'), center - 36, floor - 24)
       g.fillStyle = 'rgba(14,11,10,.30)'
       g.fillRect(x + 2, SLOT.top + 5, w - 4, SLOT.h - 5)
@@ -974,13 +1005,26 @@ function offers(st: ShopState): { offer: ShopOfferView; box: { x: number; y: num
     paintOffer(o, slot, 0, art.height / 2, over)
     g.restore()
     if (over) hovered = { offer: o, box: { x: center - art.width / 2, y: floor - art.height - motion.lift, w: art.width, h: art.height } }
-    priceTag(o.price, center - 20, 295, ok)
+    priceTag(o.price, center - 20, 295, ok, o.type === 'scratcher' ? left : 1)
   }
   return hovered
 }
 
-function priceTag(price: number, x: number, y: number, ok: boolean): void {
-  const s = price ? `$${price}` : 'Free'
+// a scratcher fanned behind the front one: tilted a little, no hover of its own
+function backTicket(o: ShopOfferView, slot: number, center: number, floor: number): void {
+  g.save()
+  g.translate(center, floor - SLOT.h / 2 - 5)
+  g.rotate(.09)
+  if (o.sold) {
+    spentTicket(slot, 0, SLOT.h / 2)
+    g.fillStyle = 'rgba(14,11,10,.30)'
+    g.fillRect(-SLOT.w / 2, -SLOT.h / 2, SLOT.w, SLOT.h)
+  } else g.drawImage(offerArt(o, slot), -SLOT.w / 2, -SLOT.h / 2)
+  g.restore()
+}
+
+function priceTag(price: number, x: number, y: number, ok: boolean, count = 1): void {
+  const s = (price ? `$${price}` : 'Free') + (count > 1 ? ` ×${count}` : '')
   const w = Math.max(40, measure(s, 'sans') + 16)
   g.save()
   g.translate(x+4, y+4)
@@ -1081,10 +1125,9 @@ function lessons(st: ShopState): void {
     const box = { x: x - 5, y: SLOT.top - 8, w: w + 10, h: SLOT.h + 16 }
     if (o.type === 'pack') teach('packs', ['Packs! Buy one and rip it open for new cards.', 'Each pack leans to a lane, like pairs or flushes. Every card you pull is yours to keep.'], box, 'above')
     if (o.type === 'collectible') teach('collectible', ['A collectible. It sits in your display case and fires on every hand.', 'They fire left to right, in the order you buy them, so the order matters.'], box, 'above')
+    if (o.type === 'scratcher') teach('scratcher', ['Scratchers! Scratch one to win an insert.', 'Inserts wait up your sleeve and change your cards during a hand.'], box, 'above')
     if (o.type === 'sleeve') teach('pochette', ['This one is an upgrade that lasts the whole run.', 'Only big shops sell one, so think it over.'], box, 'above')
   }
-  const scratch = shop.offers.findIndex(o => o.type === 'scratcher' && !o.sold)
-  if (scratch >= 0) teach('scratcher', ['Scratchers! Scratch one to win an insert.', 'Inserts wait up your sleeve and change your cards during a hand.'], { x: 410, y: 151, w: 40, h: 19 }, 'below')
   teach('stonks', ['This chalkboard names a hot rank, suit or finish for today.', 'Binder cards that match it sell for more. You sell from your binder.'], { x: 508, y: 12, w: 124, h: 92 }, 'below')
   teach('sign', ["The buraliste's sign: three quirks for this shop.", 'They bend his prices and what he likes. Hover each line to read it.'], { x: 530, y: 118, w: 98, h: 48 }, 'left')
   // the service tickets, laid out like bottomBar
@@ -1126,7 +1169,7 @@ function marker(v: SeatView): void {
   const round = due.table >= 4 ? (v.lastRound ?? 12) : due.table * ROUNDS_PER_TABLE + 1
   text(`M${round}`, x + 54, y + 14, { font: 'tiny', color: '#5c4a36', align: 'right' })
   tip(() => entry('hud', 'marker', due.due), x, y, 58, 26)
-  teach('patron', [`You owe Le Patron $${due.due}. He collects at the door of the next big shop.`, "Can't pay him and the run is over. Keep some money back!"], { x, y, w: 58, h: 26 }, 'right')
+  if (!lotto) teach('patron', [`You owe Le Patron $${due.due}. He collects at the door of the next big shop.`, "Can't pay him and the run is over. Keep some money back!"], { x, y, w: 58, h: 26 }, 'right')
 }
 
 const breath = () => 0.5 - 0.5 * Math.cos((now / 1200) * Math.PI * 2)
@@ -1317,7 +1360,6 @@ function tip(e: () => Entry, x: number, y: number, w: number, h: number, above =
 const TICKET = { x: 220, y: 40, w: 200, h: 280 }
 const WINDOWS = [0, 1, 2, 3, 4, 5].map(i => ({ x: 20 + 56 * (i % 3), y: 126 + 52 * Math.floor(i / 3) }))
 const FOIL = { w: 48, h: 46 }
-const PILE = { x: 474, y: 148 } // spent tickets lie on the zinc by the register
 const FOIL_FLAKES = ['#5c5c6e', '#9a9aae', '#dcdce8']
 type Win = { symbol: Insert; foil: HTMLCanvasElement; mask: Uint8Array; left: number; clearedAt: number }
 type Lotto = Scratch & { wins: Win[]; at: number; wonAt: number; autoAt: number; closeAt: number; rubbed: boolean; noiseAt: number }
@@ -1325,7 +1367,7 @@ let lotto: Lotto | null = null
 // the scratch ticket is up: Esc is its (it closes the ticket), not the pause menu's
 export const lottoOpen = () => lotto !== null
 let shownKey = -1
-let spent = 0
+const spentTickets = new Map<number, Insert>() // shelf slot -> what its ticket won, cleared when you come in
 let dragging = false
 let jeton = false
 let flakes: { x: number; y: number; vx: number; vy: number; at: number; color: string }[] = []
@@ -1345,7 +1387,7 @@ function symbols(insert: Insert): Insert[] {
 }
 
 function openTicket(s: Scratch): void {
-  sfx.paper(0.6) // torn off the roll
+  sfx.paper(0.6) // lifted off the shelf
   shownKey = s.key
   const wins = symbols(s.insert).map(symbol => {
     const foil = canvas(FOIL.w, FOIL.h)
@@ -1429,17 +1471,12 @@ function lottoClick(): void {
   if (!t.rubbed && t.autoAt < 0) t.autoAt = now
 }
 
-function spentPile(): void {
-  for (let i = 0; i < Math.min(spent, 6); i++) {
-    const s = sprite('scratch/shelf-paper')
-    g.save()
-    g.translate(PILE.x + 11 + ((i * 7) % 5) - 2, PILE.y + 7 - i)
-    g.rotate(((i * 37) % 9 - 4) * 0.04)
-    g.fillStyle = 'rgba(14,11,10,.45)'
-    g.fillRect(-10, -5, 22, 13)
-    g.drawImage(s.img, s.x, s.y, s.w, s.h, -11, -7, 22, 13) // lying flat on the zinc
-    g.restore()
-  }
+// a spent ticket back in its slot: the bare paper, what it won showing in the scraped window
+function spentTicket(slot: number, center: number, floor: number): void {
+  const x = center - SLOT.w / 2, y = floor - SLOT.h
+  g.drawImage(imageOf('scratch/shelf-paper'), x, y)
+  const won = spentTickets.get(slot)
+  if (won) g.drawImage(imageOf(insertMark(won)), x + 27, y + 63, 16, 16)
 }
 
 function scratcher(): void {
@@ -1460,8 +1497,8 @@ function drawTicket(t: Lotto): void {
   const grow = reducedMotion.matches ? 1 : ease((now - t.at) / 260)
   const shrink = t.closeAt < 0 ? 0 : reducedMotion.matches ? 1 : ease((now - t.closeAt) / 300)
   if (t.closeAt >= 0 && now - t.closeAt > 300) {
+    spentTickets.set(t.slot, t.insert)
     lotto = null
-    spent++
     queueMicrotask(() => state?.onScratchDone())
     return
   }
@@ -1474,10 +1511,13 @@ function drawTicket(t: Lotto): void {
   g.fillRect(0, 0, W, H)
   if (grail && !shrink) rays(cx, cy, now - t.wonAt)
 
-  // grows out of the shelf, shrinks onto the pile by the register
-  const scale = (0.36 + 0.64 * grow) * (1 - 0.88 * shrink)
+  // grows out of its shelf slot and shrinks back into it. at 0.36 it's the shelf ticket's size
+  const open = grow * (1 - shrink)
+  const sx = state ? shelfCenter(state.view.me.shop!.offers, t.slot) : cx
+  const sy = SLOT.top + SLOT.h / 2
+  const scale = 0.36 + 0.64 * open
   g.save()
-  g.translate(cx + (PILE.x + 11 - cx) * shrink, cy + 40 * (1 - grow) + (PILE.y + 6 - cy) * shrink)
+  g.translate(sx + (cx - sx) * open, sy + (cy - sy) * open)
   g.scale(scale, scale)
   g.translate(-cx, -cy)
   g.fillStyle = 'rgba(14,11,10,.5)'

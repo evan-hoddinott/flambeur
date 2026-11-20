@@ -52,8 +52,9 @@ let want: { id: string; pages: string[]; anchor: Rect; side: Side; o: TipOpts } 
 let wantSpot: Shape[] | null = null
 let showing: string | null = null // what was on screen last frame
 let shownAt = 0
-// the fée's bubble last frame: which page, when it started, and where it and its skip chip were
-let talk: { id: string; page: number; pages: string[]; at: number; box: Rect; skip: Rect | null; again: boolean; keep: boolean } | null = null
+// the fée's bubble last frame: which page, when it started, and where it was
+let talk: { id: string; page: number; pages: string[]; at: number; box: Rect; again: boolean; keep: boolean } | null = null
+let skipAt: Rect | null = null // this frame's Skip tutorial link, drawn over the dark so it always takes a click
 let spot: Shape[] | null = null // last frame's spotlight
 let veil: HTMLCanvasElement | null = null // the dark around it, drawn at stage size
 let blipped = { at: 0, n: 0 } // letters of the current page that already blipped
@@ -68,6 +69,9 @@ export function resetTips(): void {
 // the tutorial run turns the fée on, skipping it or any other run turns her off
 export function setGuide(on: boolean): void {
   guide = on
+  spot = wantSpot = skipAt = null
+  talk = null
+  showing = null
 }
 
 export function guiding(): boolean {
@@ -152,6 +156,7 @@ export function drawTips(g: CanvasRenderingContext2D, paused = false, book = fal
   const hidden = paused || (book && !t?.o.book)
   spot = paused ? null : wantSpot
   wantSpot = null
+  skipAt = null
   if (spot) dim(g, spot)
   if (!t || hidden) {
     showing = null
@@ -159,13 +164,23 @@ export function drawTips(g: CanvasRenderingContext2D, paused = false, book = fal
       talk = null
       feeAway()
     }
-    return
+  } else {
+    if (showing !== t.id) shownAt = performance.now()
+    showing = t.id
+    if (guide || t.o.fee) fee(g, t)
+    else {
+      talk = null
+      paperTag(g, t.pages.join(' '), t.anchor, t.side)
+    }
   }
-  if (showing !== t.id) shownAt = performance.now()
-  showing = t.id
-  if (guide || t.o.fee) return fee(g, t)
-  talk = null
-  paperTag(g, t.pages.join(' '), t.anchor, t.side)
+  // a forced step with her bubble read and gone still gets the way out, top left under the pause tab
+  if (guide && spot && !skipAt && !book) skipLink(g, 4, 14)
+}
+
+function skipLink(g: CanvasRenderingContext2D, x: number, y: number): void {
+  const label = 'Skip tutorial'
+  skipAt = { x, y, w: measure(label, 'tiny') + 6, h: 9 }
+  drawText(g, label, x + 3, y + 1, { font: 'tiny', color: '#c8f27a', outline: '#0e0b0a' })
 }
 
 // the table goes dark except the spotlit shapes, with a breathing absinthe ring hugging their outline
@@ -219,7 +234,7 @@ function paperTag(g: CanvasRenderingContext2D, text: string, anchor: Rect, side:
 // the fée beside the anchor and her bubble beside her, typing out the current page
 function fee(g: CanvasRenderingContext2D, t: NonNullable<typeof want>): void {
   const now = performance.now()
-  if (talk?.id !== t.id) talk = { id: t.id, page: 0, pages: t.pages, at: now, box: { x: 0, y: 0, w: 0, h: 0 }, skip: null, again: !!t.o.again, keep: !!(t.o.lead || t.o.book) }
+  if (talk?.id !== t.id) talk = { id: t.id, page: 0, pages: t.pages, at: now, box: { x: 0, y: 0, w: 0, h: 0 }, again: !!t.o.again, keep: !!(t.o.lead || t.o.book) }
   const text = t.pages[talk.page]
   // size the bubble for the whole page so it doesn't grow while typing
   const rows = wrapText(text, FEE_WRAP, 'sans')
@@ -255,29 +270,22 @@ function fee(g: CanvasRenderingContext2D, t: NonNullable<typeof want>): void {
     g.fillStyle = ABSINTHE
     for (let i = 0; i < 3; i++) g.fillRect(box.x + w - PAD - 4 + i, foot + 2 + i, 1, 5 - i * 2)
   }
-  // the way out of the tutorial, under her bubble
-  talk.skip = null
+  // the way out of the tutorial, under her bubble, or over it when she sits on the bottom edge
   if (guide && !t.o.again) {
-    const label = 'Skip tutorial'
-    const sw = measure(label, 'tiny') + 6
-    const skip = { x: box.x + w - sw, y: box.y + h + 2, w: sw, h: 9 }
-    if (skip.y + skip.h < H) {
-      drawText(g, label, skip.x + 3, skip.y + 1, { font: 'tiny', color: '#c8f27a', outline: '#0e0b0a' })
-      talk.skip = skip
-    }
+    const sw = measure('Skip tutorial', 'tiny') + 6
+    skipLink(g, box.x + w - sw, box.y + h + 11 < H ? box.y + h + 2 : box.y - 11)
   }
 }
 
 // a click while the fée talks: finish the line, then the next page, then she's done. the scenes call this before
 // their own hits and stop when it's true. the spotlight eats every click outside it
 export function tipClick(p: { x: number; y: number }): boolean {
+  if (skipAt && inside(skipAt, p)) {
+    setGuide(false)
+    sfx.page()
+    return true
+  }
   if (talk && showing === talk.id) {
-    if (talk.skip && inside(talk.skip, p)) {
-      guide = false
-      spot = null
-      sfx.page()
-      return true
-    }
     const text = talk.pages[talk.page]
     const typedAll = performance.now() - talk.at >= text.length * TYPE_MS
     if (!typedAll) {

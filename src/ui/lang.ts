@@ -27,7 +27,7 @@ const WORDS: [string, string][] = [
   ['Ma marchandise vous plaît pas ?', "Don't like my stock?"], ['LE GRAAL !', 'THE GRAIL!'],
   ['se vend', 'sells'], ['Sortir', 'Leave'], ['Cote du jour', "Today's prices"], ['Demain', 'Tomorrow'],
   // the title
-  ['JOUER', 'PLAY'], ['EN SOLO', 'SOLO'], ['EN LIGNE', 'ONLINE'], ['LA RUE', 'THE STREET'],
+  ['JOUER', 'PLAY'], ['EN SOLO', 'SOLO'], ['EN LIGNE', 'ONLINE'], ['LA RUE', 'THE STREET'], ['Tutoriel', 'Tutorial'],
 ]
 
 // a whole label that's french only on its own: the Fiche's MAIN pill is a hand, "Main menu" isn't

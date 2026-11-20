@@ -484,7 +484,7 @@ export function drawPause(g: CanvasRenderingContext2D, mouse: P): void {
     y -= PITCH
   }
   const first = inRun ? twice('first', () => { closePause(); hooks?.firstRun() }) : () => { closePause(); hooks?.firstRun() }
-  navTicket(g, isArmed('first') ? 'Sure? Again' : 'First run', y, OFF, mouse, first, `Play the guided first run again${inRun ? ', instead of this one' : ''}.`)
+  navTicket(g, isArmed('first') ? 'Sure? Again' : 'Tutoriel', y, OFF, mouse, first, `La fée verte walks you through a run, start to finish.${inRun ? ' This run is lost.' : ''}`)
 
   // the page eases in a few pixels each time the tab changes
   g.save()

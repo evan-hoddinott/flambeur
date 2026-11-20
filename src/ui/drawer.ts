@@ -1,5 +1,5 @@
 import { mix, still } from './motion.ts'
-import { bookClose, creak, page as pageTurn, thunk } from './sound.ts'
+import { bookClose, creak, page as pageTurn, select, thunk } from './sound.ts'
 // the drawer (UX.md §3): a worn leather carnet poking out of the bottom-left corner, the same in every scene. its
 // index tabs stick out with live counts, hover pulls it into view, a click or D/B/S/V/? flies it to the middle and
 // swings it open as one tabbed viewer, and compare mode docks it small beside an offer. stage units (640×360)
@@ -30,7 +30,9 @@ export type DrawerActions = {
   useInsert?: (slot: number) => void // slot 2 is the overflow
   canUse?: (slot: number) => boolean
   tossInsert?: (slot: number) => void
-  sellBinder?: () => void // the classeur's Sell: opens the shop's sell sheet
+  sell?: (cardIds: number[]) => void // the classeur picks and sells right on its page (the shop only)
+  sellPrice?: (card: Card) => number
+  canSell?: (cardId: number) => boolean
   openAlbum?: () => void
   sellCollectible?: (slot: number) => void
   collectiblePrice?: (slot: number) => number
@@ -100,6 +102,9 @@ let glossPage = 0
 
 let lastTab: Tab = 'etui' // a click on the cover opens where you left off
 let creaked = false
+let picked = new Set<number>() // binder cards picked to sell on the classeur page
+let binderPage = 0
+let binderPages = 1
 
 // one-number springs: out pulls the carnet from the corner on hover, slide flies it to the middle,
 // swing turns the cover on the spine (-1 shut, 1 open), band slips the elastic off, slips are the tabs
@@ -185,11 +190,28 @@ export function drawerKey(key: string): boolean {
     regroup(GROUPINGS[(GROUPINGS.indexOf(grouping) + 1) % GROUPINGS.length])
     return true
   }
+  if ((key === 'ArrowLeft' || key === 'ArrowRight') && tab === 'classeur') {
+    turnBinder(key === 'ArrowLeft' ? -1 : 1)
+    return true
+  }
   const t = TABS.find(x => x.key === (key === '/' ? '?' : key.toUpperCase()))
   if (!t) return false
   if (tab === t.id) tab = null
   else openDrawer(t.id)
   return true
+}
+
+// a wheel turn (±1) while the book is open: the classeur turns its page. true = the drawer took it
+export function drawerWheel(dy: number): boolean {
+  if (tab === 'classeur') turnBinder(dy)
+  return tab !== null
+}
+
+function turnBinder(by: number): void {
+  const next = binderPage + by
+  if (next < 0 || next >= binderPages) return
+  binderPage = next
+  pageTurn()
 }
 
 // where the carnet is: the corner pose (rest, or pulled out by hover) on its way to the middle as it opens.
@@ -331,7 +353,7 @@ function cardAt(g: CanvasRenderingContext2D, c: Card, x: number, y: number, w: n
   const dy = Math.round(y + h - dh)
   g.save()
   g.globalAlpha *= alpha
-  g.imageSmoothingEnabled = false
+  g.imageSmoothingEnabled = dw * 2 === img.width // ½× averages clean 2×2 blocks (docs/SHOP-FIXES.md §0)
   g.drawImage(img, dx, dy, dw, dh)
   g.restore()
   return { x: dx, y: dy, w: dw, h: dh }
@@ -415,6 +437,7 @@ export function drawDrawer(g: CanvasRenderingContext2D, v: SeatView, ms: number)
     creaked = true
   }
   if (!opening) creaked = false
+  if (tab !== 'classeur') picked.clear()
 
   if (dock.at > 0.02) drawDock(g, v)
   if (flying) {
@@ -445,7 +468,7 @@ export function bookTour(): void {
 
 const TOUR: Record<Tab, string[]> = {
   etui: ['Étui: your deck, every card you play with.', 'One line per rank. A dotted card also counts in that line. G regroups by suit or type. Now click the Binder tab.'],
-  classeur: ['Classeur: your binder, the cards you kept out of your deck.', 'Binder cards are for selling, here in the shop. Cards that match the chalkboard sell for more. Next, the Sleeve tab.'],
+  classeur: ['Classeur: your binder, the cards you kept out of your deck.', 'Pick cards on this page and sell them, here in the shop. Cards that match the chalkboard sell for more. Next, the Sleeve tab.'],
   sleeve: ['Your Sleeve holds up to 2 inserts, won on scratchers.', 'Most are used on the cards in your hand during a round. A Wishlist works here in the shop. Next, the Display tab.'],
   vitrine: ['Vitrine: your display case, with your collectibles.', 'They fire left to right on every hand. Sell one here if you need the room or the money. Last, the Rules tab.'],
   carnet: ['Carnet: How to play, every poker hand with its Value and Hype, and a glossary of every word in the game.', 'Open it whenever something is unclear.'],
@@ -753,40 +776,67 @@ function etui(g: CanvasRenderingContext2D, v: SeatView): void {
 
 // ---------- classeur ----------
 
+const BINDER_PAGE = 28 // 4 rows of 7 at ½×
+
+// in the shop (actions.sell), click cards to pick them and sell them from the right leaf. elsewhere it's read-only
 function classeur(g: CanvasRenderingContext2D, v: SeatView): void {
+  const sell = actions.sell
+  const price = actions.sellPrice
+  if (sell && !price) throw new Error('the classeur sells without a price')
   const cards = [...v.me.binder].sort((a, b) => stonksOf(v, b) - stonksOf(v, a) || byRank(a, b))
-  text(g, 'Never drawn. Sell from it at the shop.', L.x, L.y, { color: FADED })
-  if (actions.sellBinder) button(g, 'Sell', L.x + L.w - 44, L.y + L.h - 16, 44, '#3a8040', cards.length > 0, actions.sellBinder)
-  if (actions.openAlbum) button(g, 'Album', L.x + L.w - 44 - 4 - 54, L.y + L.h - 16, 54, '#8c7656', true, actions.openAlbum)
-  // big cards while they fit in 3 rows, then smaller and overlapped
+  for (const id of picked) if (!cards.some(c => c.id === id)) picked.delete(id)
+  const sellable = sell ? cards.filter(c => actions.canSell?.(c.id) ?? true) : []
+  text(g, sell ? 'Never drawn. Pick cards to sell them.' : 'Never drawn. Sell from it at the shop.', L.x, L.y, { color: FADED })
+  if (actions.openAlbum) button(g, 'Album', L.x + L.w - 54, L.y + L.h - 16, 54, '#8c7656', true, actions.openAlbum)
+  // big cards while they fit in 3 rows, then ½× in pages of 4 rows of 7
   const big = cards.length <= 15
   const cols = big ? 5 : 7
   const cw = big ? 46 : 32
   const ch = big ? 64 : 44
-  const per = Math.max(cols, Math.ceil(cards.length / (big ? 3 : 4)))
-  const step = per > cols ? (L.w - cw) / (per - 1) : (L.w - cw) / (cols - 1)
+  const pitch = big ? 72 : 52
+  binderPages = big ? 1 : Math.ceil(cards.length / BINDER_PAGE)
+  binderPage = Math.min(binderPage, binderPages - 1)
+  const shown = big ? cards : cards.slice(binderPage * BINDER_PAGE, (binderPage + 1) * BINDER_PAGE)
+  const step = (L.w - cw) / (cols - 1)
   let hoverCard = null as Card | null
   const glint = Math.floor(lastMs / 400) % 2
-  cards.forEach((c, i) => {
-    const x = Math.round(L.x + (i % per) * step)
-    const y = L.y + 16 + Math.floor(i / per) * (ch + 10)
-    const lit = over({ x, y, w: Math.min(cw, step), h: ch })
-    const a = cardAt(g, c, x, y - (lit ? 3 : 0), cw, ch)
+  shown.forEach((c, i) => {
+    const r = { x: Math.round(L.x + (i % cols) * step), y: L.y + 14 + Math.floor(i / cols) * pitch, w: cw, h: ch }
+    const ok = sellable.includes(c)
+    const on = picked.has(c.id)
+    const lit = ok ? hit(r, () => {
+      if (on) picked.delete(c.id)
+      else picked.add(c.id)
+      select(!on, r.x)
+    }) : over(r)
+    const a = cardAt(g, c, r.x, r.y - (lit || on ? 3 : 0), cw, ch, sell && !ok ? 0.45 : 1)
     const mult = stonksOf(v, c)
+    if (mult > 1) outlineRect(g, a, glint ? GOLD : BRASS)
+    if (on) outlineRect(g, a, GOLD)
+    else if (lit) outlineRect(g, a)
     if (mult > 1) {
-      outlineRect(g, a, glint ? GOLD : BRASS)
       box(g, a.x + a.w - 14, a.y - 4, 16, 10, GOLD)
       text(g, `×${mult}`, a.x + a.w - 6, a.y - 3, { font: 'tiny', align: 'center' })
     }
-    if (lit) {
-      outlineRect(g, a)
-      hoverCard = c
+    if (sell) {
+      const label = `$${price!(c)}`
+      const tw = measure(label, 'tiny') + 6
+      box(g, Math.round(a.x + a.w / 2 - tw / 2), a.y + a.h - 4, tw, 9, on ? GOLD : CREAM)
+      text(g, label, a.x + a.w / 2, a.y + a.h - 3, { font: 'tiny', align: 'center' })
     }
+    if (lit) hoverCard = c
   })
   if (!cards.length) text(g, 'Empty. Pulls you send to the binder land here.', L.x + L.w / 2, L.y + L.h / 2, { color: FADED, align: 'center' })
+  if (binderPages > 1) pager(g, L.x + L.w / 2 - 30, L.y + L.h - 14)
 
   let y = R.y
   text(g, `${cards.length} card${cards.length === 1 ? '' : 's'}`, R.x, y, { bold: true, color: BURGUNDY })
+  if (sell && sellable.length) {
+    const all = picked.size === sellable.length
+    let x = R.x + R.w - (measure('Select all', 'tiny') + measure('Clear', 'tiny') + 19)
+    x += chip(g, 'Select all', x, y - 1, all, () => { for (const c of sellable) picked.add(c.id) }) + 3
+    chip(g, 'Clear', x, y - 1, false, () => picked.clear())
+  }
   y += 14
   const stonks = entry('hud', 'stonks', { stonks: v.stonks, hotMarket: v.me.sleeves.includes('hot_market') })
   const lines = stonks.text.slice(0, 1)
@@ -797,7 +847,31 @@ function classeur(g: CanvasRenderingContext2D, v: SeatView): void {
   text(g, hot ? `${hot} hot` : '', R.x + R.w - 5, y + 3, { font: 'tiny', align: 'right', color: BURGUNDY })
   rich(g, lines, R.x + 5, y + 11, R.w - 10)
   y += bh + 8
+  if (sell) {
+    const ids = sellable.filter(c => picked.has(c.id))
+    const total = ids.reduce((sum, c) => sum + price!(c), 0)
+    const at = { x: R.x, y, w: R.w, h: 14 }
+    button(g, ids.length ? `Sell ${ids.length} · +$${total}` : 'Sell', at.x, at.y, at.w, '#3a8040', ids.length > 0, () => {
+      picked.clear()
+      sell(ids.map(c => c.id))
+    })
+    if (cards.length) tip('binder', ['Your binder: the cards you kept out of your deck.', 'Click cards to pick them, then sell them here. Cards that match the chalkboard in the shop sell for more.'], at, 'below', { book: true })
+    y += 22
+  }
   detail(g, hoverCard, y, hoverCard && stonksOf(v, hoverCard) > 1 ? `STONKS: sells ×${stonksOf(v, hoverCard)}` : '')
+}
+
+// < 2 / 3 > under the binder's grid
+function pager(g: CanvasRenderingContext2D, x: number, y: number): void {
+  const arrow = (s: string, at: number, by: number) => {
+    const ok = binderPage + by >= 0 && binderPage + by < binderPages
+    const lit = ok && hit({ x: at - 2, y: y - 2, w: 12, h: 14 }, () => turnBinder(by))
+    text(g, s, at + 2, y - (lit ? 1 : 0), { color: !ok ? TAN : lit ? BURGUNDY : INK, bold: lit })
+  }
+  const label = `${binderPage + 1} / ${binderPages}`
+  arrow('<', x, -1)
+  text(g, label, x + 14, y)
+  arrow('>', x + 18 + measure(label, 'sans'), 1)
 }
 
 // ---------- sleeve ----------
@@ -962,6 +1036,7 @@ function carnet(g: CanvasRenderingContext2D, v: SeatView): void {
     text(g, 'Comment ça marche', L.x, L.y - 2, { bold: true, color: BURGUNDY })
     playColumn(g, 0, L.x, L.y + 16, L.w, lastMs)
     playColumn(g, 1, R.x, R.y + 16, R.w, lastMs)
+    text(g, 'Want the guided run? Settings → Tutoriel.', L.x + L.w, LEAF.top + LEAF.h - 20, { font: 'tiny', color: FADED, align: 'right' })
     settings(g, LEAF.top + LEAF.h - 22)
     return
   }

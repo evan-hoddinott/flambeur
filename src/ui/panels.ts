@@ -2,7 +2,9 @@
 // forge pick, results, starter box), drawn over the live scene so the frame stays put (docs/UX.md §8).
 // a paper sheet in the middle with a title and a help line, the screen's own content, and its buttons
 // in the action column, the safe or primary one in the corner. main.ts builds a Panel each render, a scene draws it
-import { backCanvas, cardCanvas, nineSlice, sprite } from './art.ts'
+import { backCanvas, nineSlice, sprite } from './art.ts'
+import { cardShadow, heldCard } from './held.ts'
+import { springSet, type T } from './motion.ts'
 import { fiche } from './fiche.ts'
 import * as sfx from './sound.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
@@ -34,6 +36,8 @@ export type Ui = {
   card: (c: Card, x: number, y: number, w: number, o?: CardOpts) => boolean // top-left, returns hover
   button: (b: Btn, x: number, y: number, w: number) => boolean // a small ticket inside the sheet
   fiche: (e: Entry, x: number, y: number, w: number, h: number) => boolean // this box shows e's Fiche on hover
+  spring: (key: string, target: T, from?: T) => T // the panels' own springs, stepped every frame in either scene
+  hover: (c: Card, at: Box) => void // a card drawn by hand (the pack fan) is under the mouse: its Fiche shows
 }
 export type Panel = {
   title: string
@@ -45,6 +49,7 @@ export type Panel = {
   buttons: Btn[] // top to bottom. the last one sits in the corner: make it the safe or primary one
   onCardHover?: (c: Card | null, at: Box) => void // every frame, the face-up card under the mouse (its Fiche shows by itself)
   onEscape?: () => void
+  onWheel?: (dy: number) => void // the mouse wheel over the scene. without it, the wheel turns the paged() grid
 }
 
 const W = 640
@@ -72,6 +77,11 @@ let panel: Panel | null = null
 let hits: { x: number; y: number; w: number; h: number; onClick: () => void }[] = []
 let hoverCard: { card: Card; at: Box } | null = null
 let openedAt = 0
+let pager: { page: number; pages: number; turn: (page: number) => void } | null = null // this frame's paged() grid
+let lastDraw = 0
+const springs = springSet()
+// the ½× card under the mouse, drawn at 1× over everything once the body is done
+let popped: { c: Card; x: number; y: number; key: string; picked: boolean } | null = null
 
 export function setPanel(next: Panel | null): void {
   if (next && !panel) openedAt = performance.now()
@@ -86,6 +96,9 @@ export const panelEscapes = () => !!panel?.onEscape
 // draw over the scene: scrim, sheet, content, buttons. call after the scene, before the frame pieces and the Fiche
 export function drawPanel(g: CanvasRenderingContext2D, now: number, mouse: { x: number; y: number }): void {
   hits = []
+  pager = null
+  springs.step(Math.min(0.05, (now - lastDraw) / 1000 || 0))
+  lastDraw = now
   if (!panel) return
   const p = panel
   const u = Math.min(1, (now - openedAt) / 180)
@@ -118,6 +131,7 @@ export function drawPanel(g: CanvasRenderingContext2D, now: number, mouse: { x: 
     top += 4
   }
   hoverCard = null
+  popped = null
   const ui: Ui = {
     g, now, mouse, hit,
     text: (s, x, y, o) => drawText(g, s, x, y, o),
@@ -134,8 +148,11 @@ export function drawPanel(g: CanvasRenderingContext2D, now: number, mouse: { x: 
       if (on) fiche(e, { x, y: y + slide, w, h })
       return on
     },
+    spring: springs.spring,
+    hover: (card, at) => (hoverCard = { card, at }),
   }
   p.body(ui, { x: box.x + 8, y: top, w: box.w - 16, h: box.y + box.h - top - 8 })
+  if (popped) popCard(g, popped)
   g.restore()
   // the action column, bottom up: the last button sits in the corner
   const list = p.buttons
@@ -179,6 +196,10 @@ export function panelKey(key: string): boolean {
     panel.onEscape()
     return true
   }
+  if ((key === 'ArrowLeft' || key === 'ArrowRight') && pager) {
+    flip(key === 'ArrowLeft' ? -1 : 1)
+    return true
+  }
   if (key === 'Enter' || key === ' ') {
     const last = panel.buttons.at(-1)
     if (last?.enabled) last.onClick()
@@ -187,10 +208,76 @@ export function panelKey(key: string): boolean {
   return false
 }
 
+// a wheel turn from the scene (see wheelStep). true = the panel took it
+export function panelWheel(dy: number): boolean {
+  if (!panel) return false
+  if (panel.onWheel) panel.onWheel(dy)
+  else if (pager) flip(Math.sign(dy))
+  return true
+}
+
+function flip(by: number): void {
+  if (!pager) return
+  const next = pager.page + by
+  if (next < 0 || next >= pager.pages) return
+  sfx.page()
+  pager.turn(next)
+}
+
+// the scene's wheel listener feeds this: one page per notch, and a trackpad swipe turns one page, not ten.
+// returns -1, 0 or 1
+let wheelSum = 0
+let wheelAt = 0
+let wheelSpent = false
+export function wheelStep(e: WheelEvent): number {
+  if (e.timeStamp - wheelAt > 160) {
+    wheelSum = 0
+    wheelSpent = false
+  }
+  wheelAt = e.timeStamp
+  wheelSum += e.deltaY || e.deltaX
+  if (wheelSpent || Math.abs(wheelSum) < 30) return 0
+  wheelSpent = true
+  return Math.sign(wheelSum)
+}
+
+// a page of a grid: which items show, and the < 1 / 3 > control under them. returns the visible slice's indices.
+// per page = the whole rows of w that fit in box, minus 14px for the control. the page clamps when the list shrinks
+export function paged(ui: Ui, n: number, box: Box, w: number, page: number, turn: (page: number) => void, gap = 6, rowGap = 16): { at: { x: number; y: number }; i: number }[] {
+  const perRow = Math.max(1, Math.floor((box.w + gap) / (w + gap)))
+  const rows = Math.max(1, Math.floor((box.h - 14 + rowGap) / (CARD_H(w) + rowGap)))
+  const per = perRow * rows
+  const pages = Math.max(1, Math.ceil(n / per))
+  const at = Math.max(0, Math.min(page, pages - 1))
+  const first = at * per
+  const shown = grid(Math.min(per, n - first), box, w, gap, rowGap).map((xy, k) => ({ at: xy, i: first + k }))
+  if (pages === 1) return shown
+  pager = { page: at, pages, turn }
+  const label = `${at + 1} / ${pages}`
+  const mid = box.x + box.w / 2
+  const y = box.y + box.h - 11
+  ui.text(label, mid, y, { color: INK, align: 'center' })
+  const half = measure(label, 'sans') / 2
+  const arrow = (s: string, x: number, by: number) => {
+    const ok = at + by >= 0 && at + by < pages
+    const lit = ok && ui.hit(x - 6, y - 2, 16, 14, () => flip(by))
+    ui.text(s, x + 2, y - (lit ? 1 : 0), { color: !ok ? '#bfa77e' : lit ? '#7a1a2c' : INK, align: 'center', bold: lit })
+  }
+  arrow('<', mid - half - 14, -1)
+  arrow('>', mid + half + 10, 1)
+  return shown
+}
+
+// the card size rule (docs/UX.md): 1× (64 wide) with smoothing off, or ½× (32) with smoothing on, at whole pixels.
+// any other width smears the pixel art, so it throws. a hovered ½× card pops to 1× over its spot
 function drawCard(g: CanvasRenderingContext2D, hit: Ui['hit'], c: Card, x: number, y: number, w: number, o: CardOpts): boolean {
+  if (w !== 64 && w !== 32) throw new Error(`a card ${w}px wide: cards are drawn 64 (1x) or 32 (half) wide`)
+  x = Math.round(x)
+  y = Math.round(y)
   const h = CARD_H(w)
   const over = hit(x, y, w, h, o.onClick ?? (() => {}))
-  const lift = (o.picked ? 4 : 0) + (over && o.onClick ? 2 : 0)
+  const pops = over && w === 32 && o.back === undefined
+  const lift = (o.picked ? 4 : 0) + (over && o.onClick && !pops ? 2 : 0)
   const top = y - lift
   if (o.glow) {
     g.save()
@@ -199,23 +286,44 @@ function drawCard(g: CanvasRenderingContext2D, hit: Ui['hit'], c: Card, x: numbe
     g.fillRect(x - 2, top - 2, w + 4, h + 4)
     g.restore()
   }
-  if (o.picked || (over && o.onClick)) {
+  if (o.picked || (over && o.onClick && !pops)) {
     g.fillStyle = o.picked ? '#e8c260' : CREAM
     g.fillRect(x - 1, top - 1, w + 2, h + 2)
   }
-  const img = o.back !== undefined ? backCanvas(o.back) : cardCanvas(c)
   g.save()
-  g.imageSmoothingEnabled = true
+  g.imageSmoothingEnabled = w === 32
   if (o.dim) g.globalAlpha = 0.45
-  g.drawImage(img, x, top, w, h)
+  const img = o.back !== undefined ? backCanvas(o.back) : undefined
+  // a sticker or a jumbo's canvas is a bit bigger than 64x88: same scale, centered on the slot
+  heldCard(g, c, x + w / 2, top + h / 2, w / 64, 0, { img })
   g.restore()
   if (o.tag) {
     const tw = measure(o.tag, 'tiny') + 6
     nineSlice(g, 'hud/plate/paper', x + w / 2 - tw / 2, top + h + 2, tw, 10, o.tagInk)
     drawText(g, o.tag, x + w / 2, top + h + 3, { font: 'tiny', color: INK, align: 'center' })
   }
-  if (over && o.back === undefined) hoverCard = { card: c, at: { x, y: top, w, h } }
+  if (pops) popped = { c, x: x + w / 2, y: top + h / 2, key: o.key ?? String(c.id), picked: !!o.picked }
+  else if (over && o.back === undefined) hoverCard = { card: c, at: { x, y: top, w, h } }
   return over
+}
+
+// the 1× pop: springs up off its ½× spot with a shadow under it, kept on the stage
+function popCard(g: CanvasRenderingContext2D, p: NonNullable<typeof popped>): void {
+  const x = Math.min(W - 34, Math.max(34, p.x))
+  const y = Math.min(360 - 46, Math.max(46, p.y - 12))
+  const at = springs.spring('pop' + p.key, { x, y, r: 0, s: 1 }, { x: p.x, y: p.y, r: 0, s: 1 })
+  const cx = Math.round(at.x)
+  const cy = Math.round(at.y)
+  g.save()
+  g.imageSmoothingEnabled = false
+  cardShadow(g, cx, cy + 2, 64, 88, 0)
+  if (p.picked) {
+    g.fillStyle = '#e8c260'
+    g.fillRect(cx - 33, cy - 45, 66, 90)
+  }
+  heldCard(g, p.c, cx, cy, 1, 0)
+  g.restore()
+  hoverCard = { card: p.c, at: { x: cx - 32, y: cy - 44, w: 64, h: 88 } }
 }
 
 // the raffle-ticket button, same look as the duel's (src/ui/ticket.ts)

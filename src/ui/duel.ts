@@ -35,6 +35,7 @@ import { still as stillCards, frameGate, shake as shakeAmount, flash, stageScale
 import { PAUSE_TAB, drawPause, openPause, pauseClick, pauseHoverAt, pauseOpen, pauseTab } from './pause.ts'
 import { cursorFor } from './cursor.ts'
 import { FIRE, STEP_MS, drawFire, feed, makeFire, stepFire, type Fire } from './fire.ts'
+import { cardShadow, centered as centerDraw, heldCard } from './held.ts'
 import { drawFlambe, firelight, flambeFocus, flambeShake, skipFlambe, startFlambe, type Flambe, type FlambeSpec } from './flambe.ts'
 
 export type Kind = 'lock' | 'max' | 'min' | 'forge' | 'discard' | 'insert' | 'skip' | 'continue'
@@ -233,6 +234,27 @@ let tallyLine = -1
 export function rivalBusted(seat: number): void { pendingBust = seat }
 let markerAt = -Infinity
 let pipAt = -Infinity
+
+// a new run: forget the last one's beats. every match counts card ids from the same start, so a spring or a flip
+// kept from the old run would fly a new card in from an old card's spot
+export function resetScene(): void {
+  state = null
+  springs.clear()
+  flips.clear()
+  seenBets.clear()
+  calledOut.clear()
+  caseHits.clear()
+  juice.clear()
+  stamps.length = floats.length = 0
+  bubble = callout = myTurn = rivalBurn = null
+  insertFx = forgeFx = waiting = live = lastHands = null
+  dragInsert = null
+  pendingBust = null
+  spoilHover = null
+  burnKey = ''
+  reelAt = bustAt = tallyAt = markerAt = pipAt = -Infinity
+  tallyLine = -1
+}
 
 // what changed since the last view, as sound. driven by the view, so it works online too (docs/SOUND.md §4.3)
 function listen(prev: DuelState | null, next: DuelState): void {
@@ -570,12 +592,7 @@ function pin(name: string, x: number, y: number, o: Pin = {}): void {
 }
 
 function centered(img: CanvasImageSource, x: number, y: number, w: number, h: number, r = 0, alpha = 1): void {
-  g.save()
-  g.translate(x, y)
-  if (r) g.rotate(r)
-  g.globalAlpha = alpha
-  g.drawImage(img, -w / 2, -h / 2, w, h)
-  g.restore()
+  centerDraw(g, img, x, y, w, h, r, alpha)
 }
 
 function tile(name: string, x: number, y: number, w: number, h: number, c = g): void {
@@ -1385,65 +1402,11 @@ function rowOf(cards: Card[], row: typeof NEAR_ROW, a: Appraisal, side: string, 
 }
 
 function drawCard(c: Card, x: number, y: number, scale: number, angle: number, dim = false, castsShadow = false) {
-  const img = cardCanvas(c)
-  scale *= stockScale(c)
-  const w = img.width * scale
-  const h = img.height * scale
-  if (castsShadow) shadow(x, y, w, h, angle)
-  centered(dim ? darkened(img) : img, x, y, w, h, angle)
-  if (!dim && !stillCards.matches && (c.finish === 'foil' || c.finish === 'holo' || c.finish === 'prism' || c.variant === 'chase')) {
-    const phase = (performance.now() / 3000 + c.id * 0.13) % 1
-    g.save()
-    g.translate(x, y)
-    g.rotate(angle)
-    g.scale(scale, scale)
-    const top = -img.height / 2 + (img.height - 88 - (c.traits.length ? 9 : 0)) / 2
-    g.translate(-32, top)
-    g.beginPath()
-    if (!c.finish) g.roundRect(18, 0, 28, 9, 2)
-    else g.roundRect(0, 0, 64, 88, 4)
-    g.clip()
-    if (c.finish === 'prism') {
-      g.strokeStyle = `rgba(255,134,47,${0.17 + 0.12 * Math.sin(phase * Math.PI * 2)})`
-      g.lineWidth = 5
-      g.strokeRect(2, 2, 60, 84)
-    } else {
-      const start = phase * 150 - 65
-      const sheen = g.createLinearGradient(start, 0, start+28, 12)
-      sheen.addColorStop(0, 'transparent')
-      sheen.addColorStop(0.5, c.finish === 'holo' ? `hsla(${phase*360},90%,70%,.38)` : 'rgba(255,233,151,.35)')
-      sheen.addColorStop(1, 'transparent')
-      g.fillStyle = sheen
-      g.fillRect(0, 0, 64, 88)
-    }
-    g.restore()
-  }
-  return { w, h }
-}
-
-// a card with a dark wash over it, for the ones that aren't in play
-const darks = new Map<HTMLCanvasElement, HTMLCanvasElement>()
-function darkened(c: HTMLCanvasElement): HTMLCanvasElement {
-  let d = darks.get(c)
-  if (!d) {
-    d = canvas(c.width, c.height)
-    const dg = ctx2d(d)
-    dg.drawImage(c, 0, 0)
-    dg.globalCompositeOperation = 'source-atop'
-    dg.fillStyle = 'rgba(14,11,10,0.5)'
-    dg.fillRect(0, 0, c.width, c.height)
-    darks.set(c, d)
-  }
-  return d
+  return heldCard(g, c, x, y, scale * stockScale(c), angle, { dim, shadow: castsShadow })
 }
 
 function shadow(x: number, y: number, w: number, h: number, r: number): void {
-  g.save()
-  g.translate(x + 1, y + 3)
-  g.rotate(r)
-  g.fillStyle = 'rgba(18,14,8,0.35)'
-  g.fillRect(-w / 2, -h / 2, w, h)
-  g.restore()
+  cardShadow(g, x, y, w, h, r)
 }
 
 const THEIR_TAG_X = 448 // under their plate, left of their hand pips
