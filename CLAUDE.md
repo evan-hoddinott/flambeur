@@ -26,6 +26,7 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 | `docs/CARDS.md` | Card art spec for the art agent: every segmented sprite, sizes, layout, layer order, export. §0.5 = special cards are Balatro-loud, one visual channel per modifier slot. |
 | `docs/UX.md` | **The UI frame (Nov 18)**: fixed zones on every screen, the corner carnet drawer (deck/binder/sleeve/vitrine/carnet), the Sleeve also as 2 cards beside the hand in a match, the rules paper, compare mode, the Fiche description box, teaching. Wins over ART/DUEL/SHOP on where UI lives. |
 | `docs/ONBOARDING.md` | **Onboarding build list (Nov 19)** from the playtest and `reports/Roguelike first run onboarding.md`: hand preview, first run seed, first-encounter tags, Fiche placement, vocabulary. Wins over UX.md §7 on teaching. |
+| `docs/TUTORIAL.md` | **The tutorial (Nov 20)**: La Fée Verte guides the seeded first run (forced hand 1, then a lesson for every mechanic), comes back on lost runs, the deciding-factor box, the How to play page. Wins over ONBOARDING.md. |
 | `docs/SOUND.md` | **Sound design (Nov 19)**: every event's sound, sample sources and licenses, the mixer, the chord-aware accordion count-up. |
 | `docs/MUSIC.md` | **The music (Nov 19)**: "Gnossienne Flambée", Satie's Gnossienne No. 1 as a 7/4 lounge band, three synced mixes (La Table, Le Tabac, La Fée Verte) + an organ score layer, Balatro's method, made in Evan's music-lab. |
 | `docs/READABILITY.md` | How interactables read: color-coded ticket buttons, outlined text, prop hover cues. Amends ART.md §13. |
@@ -39,6 +40,9 @@ pnpm dev                     # vite dev server (or the "flambeur" config in .cla
                              # dev only: open /?quick to auto-draft straight to the first deal, /?quick&shop for the round 2 shop,
                              # /?quick&wild for a rival that bets at random (folds and flambés come up fast)
                              # /?first plays the seeded first run (also the golden-path demo, works in prod too)
+                             # /?first&shop, /?first&big, /?first&boss (dev) play the tutorial seed up to its first shop / big shop / round 3 boss, keeping tips seen
+                             # /?first&lose (dev) busts the tutorial seed on purpose, for the lost-run screen
+                             # /flambe.html (dev) loops the flambé beat on a felt: 1-5 = hand, space = replay, [ ] = slow-mo
 pnpm test                    # node:test, src/engine/*.test.ts
 pnpm exec tsc --noEmit -p .  # typecheck
 pnpm build                   # typecheck + vite build
@@ -68,7 +72,7 @@ src/engine/      pure, deterministic game logic. no DOM. this is the part that l
   hands.ts         evaluateHand: primary hand + bonus hands from flambéed traits
   scoring.ts       appraise(): Value × Hype × 2^Grade, plus a Step list the UI animates
   forge.ts         forgePlan / autoKeep / buildForged, grindCard (flamber with no pair)
-  betting.ts       min/max self-bets: the opening bet and the last push, settle (no fold)
+  betting.ts       min/max self-bets: the opening bet and the last push (a seat that flambéd sits it out on min), settle (no fold)
   deck.ts          hand / pile / discard: shuffle every round, draw, refill, cleanup, takeOut
   sleeves.ts       pochettes (run-wide upgrades, ids say sleeve) + STONKS (seeded hot rank/suit/finish)
   match.ts         THE GAME: phase state machine. newMatch / step / legal / view / pending / defaultAction / replay / check.
@@ -86,7 +90,7 @@ src/engine/      pure, deterministic game logic. no DOM. this is the part that l
                    (greedy/cautious/random/nobuy) and REF_SCORE (rival p50 per hand)
   *.test.ts        focused tests with hand-computed expected values
 src/main.ts      the UI driver. the table is the duel scene, the shop is the tabac scene. draft, starter box, results, packs, binder,
-                 grading, Sleeve, Vitrine and forge pick are canvas panels (src/ui/panels.ts). no DOM screens left. dev: /?quick&big = first big shop, /?quick&auto = your seat plays itself to the end
+                 grading, Sleeve, Vitrine and forge pick are canvas panels (src/ui/panels.ts). no DOM screens left. dev: /?quick&big = first big shop, /?quick&auto = your seat plays itself to the end (&burn: it flambés every pair)
 src/ui/art.ts    loads art/duel + art/cards atlases (aseprite slices), composites cards at runtime like art/cards/build.py
 src/ui/duel.ts   the duel scene on one canvas: layout from art/duel/review.py, springs, idle motion, count-up, slips
 src/ui/shop.ts   the tabac on one canvas: the buraliste, the offer shelf, sign, STONKS board, tickets, le patron + the scouting dossier
@@ -94,7 +98,12 @@ src/ui/shop.ts   the tabac on one canvas: the buraliste, the offer shelf, sign, 
 src/ui/frame.ts  the run strip and the announcement band, shared by both scenes
 src/ui/drawer.ts the corner carnet drawer (deck/binder/sleeve/vitrine/carnet) and compare mode (UX.md)
 src/ui/fiche.ts  the description box on every hover, text from src/engine/glossary.ts
-src/ui/tips.ts   first-encounter tags (docs/ONBOARDING.md): one pinned line the first time a thing is usable, the TIPS chip
+src/ui/tips.ts   first-encounter tags (docs/ONBOARDING.md): one pinned line the first time a thing is usable. in the tutorial
+                 la fée says them (docs/TUTORIAL.md): pages, her voice, the spotlight of the forced first hand
+src/ui/fee.ts    la fée verte's placeholder sprite (a text grid) and her flight
+src/ui/fire.ts   the title logo's fire, live: heat field, ramp paint, a card's burn front, embers (docs/FLAMBER.md §3)
+src/ui/flambe.ts the flambé beat: cards burn down to the ★ card and Ash, the grind's heat and quench (FLAMBER.md §2)
+src/dev/flambe-lab.ts  dev page /flambe.html: the beat looping on a felt with fixed hands (space, 1-5, [ ], click)
 src/ui/rules.ts  the rules columns (hand chart, how a hand works) the carnet's Rules tab draws
 src/ui/placeholders.ts  flat stand-ins for v2 sprites not drawn yet (docs/V2-ART.md), registered under their real ids. delete each when its art lands
 src/ui/collectibles.ts  collectible art on the vitrine
@@ -145,7 +154,7 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
   - Cross-flambéing keeps traits.
   - Each hand type has a unique trait.
   - Bonus hands stack, but only when a flambéed trait is involved. Plain cards never combo.
-  - **Bulk** fixes flambé thinning: every card a flambé eats beyond the first leaves a Bulk card (a weak stone card, +5 Value, no rank/suit), so flambéing never shrinks the deck. **No deck floor**, never a minimum deck size.
+  - **Ash** fixes flambé thinning: every card a flambé eats beyond the first leaves an Ash card (a burnt card, +5 Value, no rank/suit), so flambéing never shrinks the deck. **No deck floor**, never a minimum deck size.
 - **Starter boxes:** Balatro-style decks with rule twists. You draft 4 rows of 8 and keep 3, for **24-card decks**. Classic's twist: first mulligan each Table is free.
 - **Tables** (DESIGN.md, Deck):
   - The rounds are **4 Tables, 12 rounds** (1–3, 4–6, 7–9, 10–12). The deck shuffles only at the start of a Table, and each Table ends in its tournament round. (Code still has 9 rounds.)
@@ -185,7 +194,7 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
 
 ## Status (end of Wed Nov 18)
 
-**v2 is built** (`docs/V2.md` slices 1–10, rules in DESIGN.md): best of 3 hands with refill and discards, knockout, Max as a self-bet plus the last push, no fold, Flamber as a hand, a reshuffle every round, Le Patron's marker, the 10-rival roster with stacks and lane builds, spoils, small/big shops with rotating services, the Sleeve with 13 inserts, 2–A starter boxes (rows of 6, keep 3 = 18), ordered ×Hype scoring with the 10 payoffs and Bulk Bin, the §15 rewrites, bots for all of it (`nobuy` added), the new sim metrics, and the UI for every new piece (art missing for some: `src/ui/placeholders.ts`).
+**v2 is built** (`docs/V2.md` slices 1–10, rules in DESIGN.md): best of 3 hands with refill and discards, knockout, Max as a self-bet plus the last push, no fold, Flamber as a hand, a reshuffle every round, Le Patron's marker, the 10-rival roster with stacks and lane builds, spoils, small/big shops with rotating services, the Sleeve with 13 inserts, 2–A starter boxes (rows of 6, keep 3 = 18), ordered ×Hype scoring with the 10 payoffs and Ash Bucket, the §15 rewrites, bots for all of it (`nobuy` added), the new sim metrics, and the UI for every new piece (art missing for some: `src/ui/placeholders.ts`).
 
 **Sim, greedy vs Medium, Classic, 1000 runs:** see DESIGN.md, Tuning. Every §0 target hits except shop share (~47% vs ≤ 40%, explained there). Tuned: knockout K 6/8/10/12, rival upgrades 3 per Table, `REF_SCORE` per hand.
 
