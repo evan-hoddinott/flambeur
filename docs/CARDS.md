@@ -33,14 +33,14 @@ Evan's call (Nov 17): special cards should look **as different from each other a
 
 | Slot | Owns | Reads from | Examples |
 |---|---|---|---|
-| **Card type** (variant, Joker, Bulk) | **the stock**: the base color, the outer 5 px frame, the silhouette | across the room | Chase is black and gold, Sticker has a white die-cut edge, Jumbo is bigger |
+| **Card type** (variant, Joker, Ash) | **the stock**: the base color, the outer 5 px frame, the silhouette | across the room | Chase is black and gold, Sticker has a white die-cut edge, Jumbo is bigger |
 | **Finish** | **the surface**: a shader over the whole card + a 2 px trim on the inner window | across the table, by motion | foil sheen, holo rainbow, embers |
 | **Stamp / knockoff** | **the center**: a big mark over the pips or court | in hand | the 1st Edition stamp, the crayon scribbles, the beer ring |
 | **Tier** | **the rim**: a colored outline outside the card edge + stars | across the table | ★3 is a white-hot outline |
 | **Traits** | **below**: the brass plate hanging off the bottom | in hand | Twin, Bridge |
 
 Rules:
-- **The card type changes the frame, never the inner window.** The window stays cream paper, so suit colors and the index read the same on every card. Bulk is the only exception (it has no rank or suit).
+- **The card type changes the frame, never the inner window.** The window stays cream paper, so suit colors and the index read the same on every card. Ash is the only exception (it has no rank or suit).
 - **One signature color per special.** Its tooltip chip and its pack-odds line use the same color, the way Balatro colors keywords. The table below is the source.
 - **Every shader has a static backup** (a trim or frame sprite), so the card reads with effects off and in screenshots.
 - **No text on the card face**, except the CHASE plaque and the Rookie RC shield (both are real trading-card conventions).
@@ -54,7 +54,7 @@ Rules:
 | **Jumbo** | kraft `#bfa77e` | the whole card at 1.5× with a visible cardboard thickness edge |
 | **Joker** | violet `#7a4ab0` | a harlequin diamond frame (violet, burgundy, brass) with bells at the corners |
 | **Crayon Joker** | crayon red | the Joker frame redrawn in wobbly wax crayon |
-| **Bulk** | stone grey `#43342e` | a stone slab: no paper at all |
+| **Ash** | charcoal and grey ash | a burnt card: charred, bitten edges |
 | Gold foil | gold `#e8c260` | gold window trim + sheen over the whole card |
 | Holographic | violet `#b088e0` | rainbow over the whole card + hex grid + seal |
 | Embers | flame `#ff7a24` | charred edge vignette + ember dots + glow |
@@ -149,7 +149,7 @@ Names are atlas keys. A **[T]** marks a tintable sprite (greyscale). Sizes are i
 | `base/paper` | 64×88 | Cream stock (paper ramp), 1 px ink outline, 3 px rounded corners, a printed inner border 3 px in (a thin burgundy line, with a tiny flourish at each corner). Faint paper texture: 2–3 px of dither, nothing busy. |
 | `base/sticker` | 68×92 | For the Sticker variant: the card printed on a sticker sheet. A **2 px white die-cut margin outside** the normal outline, with rounder 5 px corners and its own 1 px ink outline, so the silhouette is bigger and softer than any other card. The face inside is the normal cream paper, a touch brighter. Pivot (2,2), so the face lines up with every other part. |
 | `base/sticker/gloss` | 64×88 | A diagonal white vinyl gloss stripe (two parallel bands, 4 px and 2 px, top-left to bottom-right) at ~35% white. Static, so it reads without the shader. |
-| `base/bulk` | 64×88 | A **stone slab**, not paper: grey-brown stone ramp, chipped corners, a chiselled **+5** in the center (part of this sprite, never tinted), and moss in one corner. No index, no border. Heavy, dull, slightly funny. |
+| `base/bulk` | 64×88 | The **Ash** card: what a flambé leaves of a card. The paper silhouette with charred, bitten edges and a curled corner, a grey ash body with cracks and a few ember pixels, a **+5** pressed into the middle (part of this sprite, never tinted). No index, no border. Full spec in docs/FLAMBER.md §4. |
 
 ### 4.1b Type frames (the stock)
 Each frame is a 64×88 sprite that covers the outer 5 px of the card (§3) and leaves the inner window transparent. They are the loudest thing on the card after the shape itself.
@@ -383,7 +383,7 @@ The card must read at each of these sizes:
 
 Squint test: at 0.5× you must still tell 7 from 9 and ♣ from ♠.
 
-Special test (§0.5): at 0.5× on the felt, **with shaders off**, you must tell plain, Chase, Sticker, Rookie, Jumbo, Joker and Bulk apart by color and silhouette alone, and spot a finish, a stamp and a ★ on each. Review row 28 checks this.
+Special test (§0.5): at 0.5× on the felt, **with shaders off**, you must tell plain, Chase, Sticker, Rookie, Jumbo, Joker and Ash apart by color and silhouette alone, and spot a finish, a stamp and a ★ on each. Review row 28 checks this.
 
 ---
 
@@ -415,10 +415,10 @@ When the parts exist, assemble these sample cards on one contact sheet (`art/car
 22. A♥ Jumbo (1.5×)
 23. 8♠ graded 3 in slab (heavy wear)
 24. J♣ graded 10 in slab
-25. Bulk
+25. Ash
 26. All 7 backs in a row
 27. The same row of 7♥ 8♦ 9♣ 10♠ in four-color mode
-28. The special test at 0.5×, shaders off: plain, Chase, Sticker, Rookie, Jumbo, Joker, Crayon Joker, Bulk in a row, then one row of 9♠ foil / holo / embers / misprint, then K♥ ★1 / ★2 / ★3
+28. The special test at 0.5×, shaders off: plain, Chase, Sticker, Rookie, Jumbo, Joker, Crayon Joker, Ash in a row, then one row of 9♠ foil / holo / embers / misprint, then K♥ ★1 / ★2 / ★3
 29. The worst case: a foil Chase ★3 with a Gold seal and a 3-trait plate. It must still read as all five things.
 
 ---

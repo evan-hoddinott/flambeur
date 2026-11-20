@@ -107,7 +107,7 @@ export const RIVALS: readonly RivalDef[] = [
     hands: ['pair', 'twopair'],
   },
   {
-    id: 'scaramouche', name: 'Scaramouche', lane: 'Junk', leans: 'Bulk and knockoffs',
+    id: 'scaramouche', name: 'Scaramouche', lane: 'Junk', leans: 'Ash and knockoffs',
     deck: (rng, ids) => fill(rng, ids, [
       newBulk(ids, 0), newBulk(ids, 0), newBulk(ids, 0),
       anyCard(rng, ids, { knockoff: { kind: 'crayon' } }),

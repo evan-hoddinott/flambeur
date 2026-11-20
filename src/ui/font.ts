@@ -188,7 +188,7 @@ export function wrapText(s: string, width: number, font: FontName, bold = false)
 
 // ---------- rich text: the rules markup (docs/UX.md §6) ----------
 // {v}+30 Value{/} cream on a value-blue chip, {h} hype, {x}×1.5 Hype{/} cream on a flame chip, {g} grade, {$} money, {-} a loss,
-// [Bulk] a keyword (brass underline), a newline breaks. a token never wraps apart
+// [Ash] a keyword (brass underline), a newline breaks. a token never wraps apart
 
 type Mark = 'v' | 'h' | 'x' | 'g' | '$' | '-'
 type Part = { s: string; mark: Mark | null; keyword: boolean }

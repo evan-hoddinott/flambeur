@@ -199,7 +199,7 @@ export const INSERTS: Record<Insert, { name: string; text: string; when: InsertW
   holo: { name: 'Holo wrap', text: '1 card becomes Holo', when: 'hand', cards: [1, 1], odds: 7 },
   prism: { name: 'Prism wrap', text: '1 card becomes Prism', when: 'hand', cards: [1, 1], odds: 2 },
   tampon: { name: 'Tampon', text: '1 card gets a random stamp: 1st Edition, Signed or Gold Border', when: 'hand', cards: [1, 1], odds: 6 },
-  allumettes: { name: 'Allumettes', text: 'Merge 2 same-rank cards in your hand into a ★ card now. Leaves 1 Bulk', when: 'hand', cards: [2, 2], odds: 6 },
+  allumettes: { name: 'Allumettes', text: 'Merge 2 same-rank cards in your hand into a ★ card now. Leaves 1 Ash', when: 'hand', cards: [2, 2], odds: 6 },
   wishlist: { name: 'Wishlist', text: '1 binder card shuffles into your deck', when: 'shop', cards: [1, 1], odds: 5 },
   grail: { name: 'Grail', text: 'A free rare collectible or a Joker', when: 'spot', cards: [0, 0], odds: 3 },
 }

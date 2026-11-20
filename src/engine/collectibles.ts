@@ -99,7 +99,7 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   { id: 'thin_binder', name: 'Thin Binder', rarity: 'rare', text: '+1 Grade if your deck has 18 or fewer cards', onHand: c => (c.deckSize <= 18 ? { grade: 1 } : null) },
   { id: 'high_roller', name: 'High Roller', rarity: 'rare', text: '+1 Grade and +10 Hype while bankroll is under 3× the ante', onHand: c => (c.bankroll < 3 * c.ante ? { grade: 1, hype: 10 } : null) },
   // bulk feeder
-  { id: 'bulk_bin', name: 'Bulk Bin', rarity: 'common', text: 'Each Bulk played: +2 Hype', onHand: c => (c.bulk > 0 ? { hype: 2 * c.bulk } : null) },
+  { id: 'bulk_bin', name: 'Ash Bucket', rarity: 'common', text: 'Each Ash played: +2 Hype', onHand: c => (c.bulk > 0 ? { hype: 2 * c.bulk } : null) },
   // the lane payoffs: rare, and they multiply
   { id: 'les_jumeaux', name: 'Les Jumeaux', rarity: 'rare', payoff: true, text: 'Each Pair in the hand: ×1.5 Hype', onHand: c => times(1.5, pairsIn(c)) },
   {
@@ -109,7 +109,7 @@ export const COLLECTIBLES: readonly CollectibleDef[] = [
   { id: 'flamme_bleue', name: 'Flamme Bleue', rarity: 'rare', payoff: true, text: 'Each scored flambéed card: ×1.5 Hype', onCard: c => (isForged(c) ? { xhype: 1.5 } : null) },
   { id: 'vitrine', name: "L'Écrin", rarity: 'rare', payoff: true, text: '×1 Hype per different Finish scored', onHand: c => (new Set(c.worn).size > 1 ? { xhype: new Set(c.worn).size } : null) },
   { id: 'petite_monnaie', name: 'Petite Monnaie', rarity: 'rare', payoff: true, text: 'Each scored 2–6: ×1.25 Hype', onCard: c => (!isCrayon(c) && c.rank <= 6 ? { xhype: 1.25 } : null) },
-  { id: 'ferrailleur', name: 'Le Ferrailleur', rarity: 'rare', payoff: true, text: 'Each Bulk played: ×1.5 Hype', onHand: c => times(1.5, c.bulk) },
+  { id: 'ferrailleur', name: 'Le Ferrailleur', rarity: 'rare', payoff: true, text: 'Each Ash played: ×1.5 Hype', onHand: c => times(1.5, c.bulk) },
   { id: 'le_flambeur', name: 'Le Flambeur', rarity: 'rare', payoff: true, text: '×Hype: 1, +1 per $20 you hold', onHand: c => (c.bankroll >= 20 ? { xhype: 1 + Math.floor(c.bankroll / 20) } : null) },
   { id: 'bis', name: 'Bis !', rarity: 'rare', payoff: true, text: 'Signed cards score 3 times, not 2' }, // scoring.ts reads it
   {

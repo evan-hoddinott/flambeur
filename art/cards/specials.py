@@ -10,6 +10,152 @@ RED, BLUE, VIOLET = "#a82a38", "#3e66a0", "#7a4ab0"
 WAX, FLAME = "#cf403c", "#ff7a24"
 
 
+# Ash (docs/FLAMBER.md §4): what's left of a card after a flambé. the card's own outline, burnt ragged with bites
+# out of it and a curled corner, a char ring, a grey ash body with cracks, embers still in them, a ghost of its
+# pip, and the +5 pressed in
+CHAR2, CHAR1 = "#2e1810", "#5a3420"
+ASH = ["#43342e", "#6b605a", "#9a8f86", "#c9bfb4"]
+EMBER = ["#9c1f26", "#f77a1c", "#ffe45e"]
+BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+
+
+def ash_card():
+    W, H = 64, 88
+    rgba = lambda c: (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16), 255)
+    rng = Random(5)
+
+    def noise(x, y, s, seed):
+        # smooth value noise, enough for ragged edges and the ash's blotches
+        fx, fy = x / s, y / s
+        x0, y0 = int(fx // 1), int(fy // 1)
+        tx, ty = fx - x0, fy - y0
+        tx, ty = tx * tx * (3 - 2 * tx), ty * ty * (3 - 2 * ty)
+        h = lambda a, b: Random(a * 7919 + b * 104729 + seed * 31).random()
+        top = h(x0, y0) + (h(x0 + 1, y0) - h(x0, y0)) * tx
+        bot = h(x0, y0 + 1) + (h(x0 + 1, y0 + 1) - h(x0, y0 + 1)) * tx
+        return top + (bot - top) * ty
+
+    # the card's outline, then the burn eats in from it
+    shape = Image.new("L", (W, H))
+    ImageDraw.Draw(shape).rounded_rectangle((0, 0, W - 1, H - 1), 4, 255)
+    bites = [(0, 27, 6), (63, 58, 7), (22, 87, 5), (47, 0, 4)]
+    curl = 15 # the top right corner folded over
+    on = [[False] * W for _ in range(H)]
+    for y in range(H):
+        for x in range(W):
+            if not shape.getpixel((x, y)):
+                continue
+            edge = min(x, W - 1 - x, y, H - 1 - y)
+            if edge < 0.6 + 2.6 * noise(x + y * 0.7, x * 0.3 + y, 3.5, 1):
+                continue
+            if any((x - bx) ** 2 + (y - by) ** 2 < (r + 2.5 * (noise(x, y, 2.5, 2) - 0.5)) ** 2 for bx, by, r in bites):
+                continue
+            if (W - 1 - x) + y < curl:
+                continue
+            on[y][x] = True
+    # distance to the burnt edge (chamfer)
+    INF = 99.0
+    d = [[(INF if on[y][x] else 0.0) for x in range(W)] for y in range(H)]
+    for y in range(H):
+        for x in range(W):
+            if d[y][x]:
+                for dx, dy, c in ((-1, 0, 1), (0, -1, 1), (-1, -1, 1.4), (1, -1, 1.4)):
+                    if 0 <= x + dx < W and 0 <= y + dy < H:
+                        d[y][x] = min(d[y][x], d[y + dy][x + dx] + c)
+                    else:
+                        d[y][x] = min(d[y][x], c)
+    for y in range(H - 1, -1, -1):
+        for x in range(W - 1, -1, -1):
+            if d[y][x]:
+                for dx, dy, c in ((1, 0, 1), (0, 1, 1), (1, 1, 1.4), (-1, 1, 1.4)):
+                    if 0 <= x + dx < W and 0 <= y + dy < H:
+                        d[y][x] = min(d[y][x], d[y + dy][x + dx] + c)
+                    else:
+                        d[y][x] = min(d[y][x], c)
+
+    im = Image.new("RGBA", (W, H))
+    px = im.load()
+    for y in range(H):
+        for x in range(W):
+            if not on[y][x]:
+                continue
+            e = d[y][x] + 1.2 * (noise(x, y, 2, 3) - 0.5)
+            if e < 1.6:
+                px[x, y] = rgba(CHAR2)
+            elif e < 3.2:
+                px[x, y] = rgba(CHAR1 if (x + y) % 3 or e < 2.6 else ASH[0])
+            else:
+                # the ash: pale in the middle where it burnt clean, dark toward the char, blotched
+                v = 0.12 + 0.62 * min(1, (e - 3) / 15) + 0.5 * (noise(x, y, 9, 4) - 0.5) + 0.12 * (noise(x, y, 3, 5) - 0.5)
+                level = v * 3 + (BAYER[y % 4][x % 4] / 16 - 0.5) * 0.55
+                px[x, y] = rgba(ASH[max(0, min(3, int(level + 0.5)))])
+
+    # the curl: the burnt corner rolled over onto the card, a dark lip with a hot crease
+    for y in range(curl + 6):
+        for x in range(W - curl - 6, W):
+            fold = (W - 1 - x) + y
+            if on[y][x] and curl <= fold < curl + 4:
+                px[x, y] = rgba([CHAR2, "#7a4a2c", "#a0663a", CHAR2][fold - curl])
+
+    # the ghost of its pip in both corners, scorched into the ash
+    spade = ["...#...", "..###..", ".#####.", "#######", "#######", ".#.#.#.", "...#...", "..###.."]
+    for gx, gy, flip in ((7, 9, False), (W - 14, H - 17, True)):
+        for j, row in enumerate(spade):
+            for i, dot in enumerate(row):
+                xx, yy = (gx + 6 - i, gy + 7 - j) if flip else (gx + i, gy + j)
+                if dot == "#" and on[yy][xx] and d[yy][xx] > 3:
+                    px[xx, yy] = rgba(ASH[0] if j < 2 or i in (0, 6) else ASH[1])
+
+    # cracks: short walks in from the char, with a pale lip under each
+    lit = []
+    for start in [(3, 40), (60, 22), (12, 84), (60, 72), (30, 3), (3, 64), (52, 86), (3, 14)]:
+        x, y = start
+        for _ in range(rng.randrange(9, 15)):
+            cx, cy = (W // 2 - x), (H // 2 - y)
+            x += (cx > 0) - (cx < 0) if rng.random() < 0.6 else rng.choice((-1, 0, 1))
+            y += (cy > 0) - (cy < 0) if rng.random() < 0.6 else rng.choice((-1, 0, 1))
+            if not (0 <= x < W and 0 <= y < H - 1) or not on[y][x]:
+                continue
+            if 3 < d[y][x] < 13 and 16 < x < 48 and 30 < y < 54:
+                break # keep the +5 clean
+            px[x, y] = rgba(CHAR1 if d[y][x] < 6 else ASH[0])
+            if on[y + 1][x] and d[y + 1][x] > 3 and rng.random() < 0.7:
+                px[x, y + 1] = rgba(ASH[3])
+            if d[y][x] < 9:
+                lit.append((x, y))
+    # embers still in the cracks near the edge
+    rng.shuffle(lit)
+    for x, y in lit[:6]:
+        px[x, y] = rgba(EMBER[2] if rng.random() < 0.4 else EMBER[1])
+        if on[y][x - 1]:
+            px[x - 1, y] = rgba(EMBER[1])
+        for dx, dy in ((1, 0), (0, 1)):
+            if on[y + dy][x + dx]:
+                px[x + dx, y + dy] = rgba(EMBER[0])
+    # flecks of white ash
+    for _ in range(26):
+        x, y = rng.randrange(6, 58), rng.randrange(8, 80)
+        if on[y][x] and d[y][x] > 4:
+            px[x, y] = rgba("#e9e2d6")
+
+    # the +5, pressed into the ash: a pale face with a dark underside, on a scorched smudge so it reads small
+    for y in range(28, 60):
+        for x in range(12, 54):
+            k = ((x - 32) / 19) ** 2 + ((y - 43) / 13) ** 2 + 0.35 * (noise(x, y, 3, 7) - 0.5)
+            if on[y][x] and k < 1:
+                i = ASH.index("#%02x%02x%02x" % px[x, y][:3]) if "#%02x%02x%02x" % px[x, y][:3] in ASH else -1
+                if i > 0:
+                    px[x, y] = rgba(ASH[i - 1 if k > 0.55 else max(0, i - 2)])
+    dr = ImageDraw.Draw(im)
+    plus = [[(20, 43), (29, 43)], [(24, 38), (24, 48)], [(44, 36), (34, 36), (34, 43), (43, 43), (43, 50), (33, 50)]]
+    for dx, dy, col in ((1, 1, CHAR2), (0, 0, ASH[3])):
+        for pts in plus:
+            dr.line([(x + dx, y + dy) for x, y in pts], col, 3)
+    for pts in plus:
+        dr.line([(x - 1, y - 1) for x, y in pts[:1]], "#e9e2d6")
+    return im
+
+
 def layers():
     parts = {}
     rng = Random(1948)
@@ -80,20 +226,10 @@ def layers():
     d = layer("variant/peel",(14,14))
     d.polygon([(0,0),(13,13),(1,13)],"#ad947c")
     d.polygon([(0,0),(12,12),(5,11),(2,8)],"white","#85765f")
-    d = layer("base/bulk")
-    d.polygon([(5,1),(54,0),(62,5),(61,32),(63,36),(62,81),(55,87),(8,86),(1,80),(0,10)],"#43342e",INK)
-    d.polygon([(6,4),(53,3),(59,7),(58,32),(60,37),(58,78),(53,82),(9,81),(4,77),(3,11)],"#84796e","#bcaa94")
+    parts["base/bulk"] = ash_card()
+    # the old slab drew from the shared rng. burn the same draws so every layer after it stays put
     for _ in range(94):
-        x,y = rng.randrange(6,55),rng.randrange(7,77)
-        d.line((x,y,x+rng.randrange(1,4),y),rng.choice(["#776b62","#998b7d"]))
-    for p in [[(3,18),(10,24),(9,29),(16,33)],[(58,65),(50,62),(47,56)]]:
-        d.line(p,"#544a43")
-    for x,y in [(5,6),(9,4),(12,6),(6,9),(16,4),(4,12)]:
-        d.rectangle((x,y,x+3,y+2),"#637249")
-        d.point((x,y),"#a1a365")
-    for dx,dy,col in [(1,2,"#b9ae9c"),(0,0,"#473f3a")]:
-        for pts in [[(20,43),(29,43)],[(24,38),(24,48)],[(44,36),(34,36),(34,43),(43,43),(43,50),(33,50)]]:
-            d.line([(x+dx,y+dy) for x,y in pts],col,3)
+        rng.randrange(6,55), rng.randrange(7,77), rng.randrange(1,4), rng.choice([0, 1])
 
     for kind,col in [("foil",GOLD),("holo","#b088e0"),("embers",FLAME)]:
         d = layer("finish/"+kind)

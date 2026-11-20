@@ -29,7 +29,7 @@ BronnonY is a strong Balatro player, finished a run, called it "super addicting"
 4. ✅ **Fiche placement.** Panel cards (pack sort, spoils, draft) dock their Fiche at the top of the action column. Esc and click-away already closed it, keywords already nest one level. Still open: the "won't go away" screenshot.
 5. ◐ **Exact numbers in every Fiche.** Collectibles already print exact numbers. Not yet: a "right now" line for state-based ones (Team Bag, Le Flambeur, Thin Binder, High Roller). 
 6. **Vocabulary collisions.**
-   - Rename **Bulk** (flambé leftovers). Proposal: **Cendre / Ash**, it's what a flambé leaves and it can't be confused with the binder.
+   - ✅ **Bulk is now Ash** (Nov 20): it's what a flambé leaves and it can't be confused with the binder. The shop's Bulk bin is the Ashtray, the collectible Bulk Bin is the Ash Bucket. Ids stay `bulk`.
    - Collectible Fiche and first tag: "Display case: passive effects, left to right" so Balatro players map it to their Jokers. Joker card Fiche: "A playable card, not a passive".
 7. ✅ **Hand-label fixes.** (`handNote` in hands.ts, shown on the hand readout and the score tag. Rules example row not changed) 5 of a rank labels "Four of a Kind (5 counts as 4)". Unsuited 10–A labels "Straight (Royal needs one suit)". Rules paper example row in one suit.
 8. ◐ **Detail toggle.** Built: Tips On / Off at the foot of the carnet's rules page, next to the language, which silences tags only. Not yet: Full detail and Shift-to-expand, which need a short and long text per entry.
@@ -45,5 +45,4 @@ BronnonY is a strong Balatro player, finished a run, called it "super addicting"
 ## Open
 
 - The "won't go away" screenshot: need it from Discord to repro.
-- Bulk's new name.
 - Whether run-one staging (11) hides too much of what makes the game unique. Balatro's answer: run 2 comes within the hour.

@@ -1,4 +1,4 @@
-"""The guichet, its three dispatch parcels and the register's bulk bin."""
+"""The guichet, its three dispatch parcels and the register's ashtray (the Ash service, ids still say bulk)."""
 from PIL import Image, ImageDraw
 
 INK,WOOD,TAN,PAPER,GOLD="#1c1513","#5c4a36","#bfa77e","#f6ecd2","#e8c260"
@@ -34,14 +34,34 @@ def parts(text):
     d.arc((3,3,20,19),12,168,"#a82a38")
     text(im,"PARIS",12,7,"tiny","#7a1a2c","center")
     out["shop/grading/postmark"]=im
+    # the ashtray (the Ash service, docs/FLAMBER.md §5): a low brass cendrier full of ash, a burnt card corner
+    # sticking out of it, a cigarette resting in a notch
     im=Image.new("RGBA",(50,40))
     d=ImageDraw.Draw(im)
-    for x,y in ((8,8),(23,4)):
-        d.polygon([(x,y),(x+13,y-3),(x+19,y+8),(x+3,y+13)],WOOD,INK)
-        d.line((x+1,y,x+12,y-2),TAN)
-    d.polygon([(1,12),(49,11),(43,35),(8,39)],"#818193",INK,2)
-    d.line((3,13,47,12),"#dcdce8",2)
-    for x in (8,12,39,43): d.line((x,16,x-1,33),"#5c5c6e")
-    text(im,"VRAC",25,18,"sans",INK,"center")
+    d.ellipse((2,15,47,38),"#775023",INK)
+    d.rectangle((3,21,46,27),"#775023")
+    d.line((2,21,2,27),INK)
+    d.line((47,21,47,27),INK)
+    for x in range(6,44,5): d.line((x,29,x,33),"#5c3a1a")
+    d.ellipse((2,9,47,32),"#c99a3a",INK)
+    d.arc((4,10,45,31),190,330,GOLD)
+    d.ellipse((7,12,42,29),"#3a2c26","#5c3a1a")
+    d.ellipse((10,15,39,28),"#6b605a")
+    for y in range(15,28):
+        for x in range(10,40):
+            if (x+y)%2==0 and ((x-24.5)/14)**2+((y-21)/6)**2<0.45: d.point((x,y),"#9a8f86")
+    for x,y in ((15,19),(21,23),(30,18),(34,24),(26,21),(18,25)): d.point((x,y),"#c9bfb4")
+    d.point((28,25),"#f77a1c"); d.point((29,25),"#9c1f26"); d.point((13,22),"#ffe45e")
+    # a burnt card corner in the ash
+    d.polygon([(19,20),(23,7),(33,10),(30,22)],PAPER,"#2e1810")
+    d.line((24,8,32,11),"#5a3420")
+    d.polygon([(27,15),(31,13),(30,22),(25,21)],"#5a3420")
+    d.point((22,12),"#a82a38"); d.point((23,13),"#a82a38")
+    # notches in the rim, the cigarette in the right one
+    for x,y in ((10,12),(39,12),(24,30)): d.rectangle((x,y,x+2,y+1),"#3a2c26")
+    d.line((35,14,48,9),INK,3)
+    d.line((35,13,48,8),"#f6ecd2",2)
+    d.line((35,13,38,12),"#d08a4a",2)
+    d.point((48,7),"#f77a1c"); d.point((49,7),"#9a8f86")
     out["shop/bulk/bin"]=im
     return out

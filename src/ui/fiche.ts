@@ -40,7 +40,7 @@ const LINE_INK: [string, string][] = ([
   ['Chase', modifierInk('chase')], ['Sticker', modifierInk('sticker')], ['Rookie', modifierInk('rookie')], ['Jumbo', modifierInk('jumbo')],
   ['Crayon Joker', specialInk.crayon], ['Joker', specialInk.joker], ['Sticky Fingers', specialInk.joker], ['Double or Nothing', specialInk.joker],
   ['Courtier', specialInk.joker], ['Catalyst', specialInk.joker], ['Poker Face', specialInk.joker], ["Rival's Card", specialInk.joker],
-  ['Bulk', modifierInk('bulk')], ['Gold foil', modifierInk('foil')], ['Foil', modifierInk('foil')], ['Holographic', modifierInk('holo')],
+  ['Ash', modifierInk('bulk')], ['Gold foil', modifierInk('foil')], ['Foil', modifierInk('foil')], ['Holographic', modifierInk('holo')],
   ['Holo', modifierInk('holo')], ['Embers', modifierInk('prism')], ['Prism', modifierInk('prism')], ['Misprint', modifierInk('misprint')],
   ['1st Edition', modifierInk('first')], ['Signed', modifierInk('signed')], ['Gold Border', modifierInk('gold')], ['Damaged', modifierInk('damaged')],
   ['Crayon', modifierInk('crayon')], ['Marked', modifierInk('marked')], ['Wrong Suit', modifierInk('wrongsuit')], ['Beer-stained', modifierInk('beer')],

@@ -61,14 +61,14 @@ test('ctx fills the rolled bits: playmat ♥, ban wave clubs, wrong suit ♦', (
   assert.equal(entry('knockoff', 'wrongsuit', { kind: 'wrongsuit', suit: 'D' }).text[0], 'Also counts as ♦ for a Flush')
 })
 
-test('compare: a 5th ♥ in a ♥-heavy deck, a 2nd Q and a 3rd Bulk', () => {
+test('compare: a 5th ♥ in a ♥-heavy deck, a 2nd Q and a 3rd Ash', () => {
   const deck = [c(2, 'H'), c(5, 'H'), c(9, 'H'), c(13, 'H'), c(12, 'S'), c(3, 'C'), c(2, 'S', { bulk: true }), c(2, 'S', { bulk: true })]
   const d = deckDelta(deck, [c(12, 'H'), c(2, 'S', { bulk: true })])
   assert.deepEqual(d.suit.H, [4, 5])
   assert.deepEqual(d.suit.S, [1, 1]) // bulk has no suit
   assert.deepEqual(d.rank[12], [1, 2])
   assert.deepEqual(d.rank[2], [1, 1])
-  assert.deepEqual(d.lines, ['5th ♥: flush lane', 'makes a Q pair possible', '3rd Bulk'])
+  assert.deepEqual(d.lines, ['5th ♥: flush lane', 'makes a Q pair possible', '3rd Ash'])
 })
 
 test('compare: a 3rd Joker is over the cap of 2, a crayon has no rank to count', () => {

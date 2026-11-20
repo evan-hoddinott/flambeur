@@ -40,7 +40,7 @@ export function deckDelta(deck: Card[], add: Card[]): DeckDelta {
   for (const c of add) {
     count(c)
     if (c.bulk) {
-      say(`${ordinal(bulk)} Bulk`)
+      say(`${ordinal(bulk)} Ash`)
       continue
     }
     const n = suits.get(c.suit)!

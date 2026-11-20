@@ -67,7 +67,7 @@ export const KEYWORDS: Record<string, string> = {
   Trait: 'What a ★ card does, from the hand it was flambéed out of. A card holds as many as its ★',
   '★': 'Flambé tier, ★1 to ★3. Each ★ holds one Trait',
   Flamber: 'Throw a hand: a Pair or better merges its cards into one ★ card, otherwise one card gets +1 Value',
-  Bulk: `A stone card a flambé leaves behind: +${BULK_VALUE} Value when played, never part of a hand`,
+  Ash: `The burnt card a flambé leaves behind: +${BULK_VALUE} Value when played, never part of a hand`,
   'Bonus hand': 'A second hand type stacked on top, only when a ★ trait made it happen',
   Joker: `A real playing card with a rule on top. Max ${MAX_JOKERS} in a deck`,
   'K.O.': 'Win a hand by K× or more and the round ends right there',
@@ -173,11 +173,11 @@ function gradeLine(grade: number): string {
 const FRENCH_RANK: Record<number, string> = { 11: 'Valet', 12: 'Dame', 13: 'Roi', 14: 'As' }
 
 const BULK: Entry = {
-  name: 'Bulk', kind: 'bulk',
+  name: 'Ash', kind: 'bulk',
   text: [
     `${v(`+${BULK_VALUE} Value`)} when played, but never part of a poker hand`,
     'Every card a flambé eats beyond the first leaves one',
-    `No rank or suit. Can't be flambéed or sold. The Bulk bin takes it for $${BULK_BIN_PRICE}+`,
+    `No rank or suit. Can't be flambéed or sold. The Ashtray takes it for $${BULK_BIN_PRICE}+`,
   ],
 }
 
@@ -387,7 +387,7 @@ const HUD: Record<string, HudDef> = {
   // the shop
   restock: { name: 'Restock', text: () => ['Rerolls the packs, collectibles and scratchers. $1, $2, $3… each shop. Never the pochette'] },
   scratcher: { name: 'Scratcher', text: () => [`$${SCRATCHER_PRICE}: scratch it for a random [Insert]. It goes in the [Sleeve]`] },
-  'bulk-bin': { name: 'Bulk bin', text: () => [`Throw away one [Bulk] card: $${BULK_BIN_PRICE}, then $${BULK_BIN_PRICE + 1}, $${BULK_BIN_PRICE + 2}… for the run`] },
+  'bulk-bin': { name: 'Ashtray', text: () => [`Empty one [Ash] card from your deck: $${BULK_BIN_PRICE}, then $${BULK_BIN_PRICE + 1}, $${BULK_BIN_PRICE + 2}… for the run`] },
   grading: { name: 'Grading desk', text: () => ['Ship one card: it comes back graded 1–10 at the next shop', 'Grade = 1d10 + [Freshness], max 10'] },
   'pack-offbrand': { name: PACKS.offbrand.name, tag: `$${PACK_PRICE.offbrand}`, text: () => [PACKS.offbrand.text] },
   'pack-repack': { name: PACKS.repack.name, tag: `$${PACK_PRICE.repack}`, text: () => [PACKS.repack.text] },

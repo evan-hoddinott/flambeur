@@ -12,7 +12,7 @@ export const SLEEVES: readonly { id: SleeveId; name: string; text: string }[] = 
   { id: 'hot_market', name: 'Hot Market', text: 'STONKS sells at +1×' },
   { id: 'riser', name: 'Display Riser', text: '+1 display case slot' },
   { id: 'deep_pockets', name: 'Deep Pockets', text: 'Interest caps at +$4 instead of +$2' },
-  { id: 'bulk_deal', name: 'Bulk Deal', text: 'Binning a Bulk card always costs $1' },
+  { id: 'bulk_deal', name: 'Ash Deal', text: 'Emptying an Ash card always costs $1' },
   { id: 'archival', name: 'Pochette Archive', text: 'Damaged cards never tear, and grading never comes back damaged' },
 ]
 

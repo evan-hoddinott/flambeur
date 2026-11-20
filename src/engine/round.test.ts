@@ -147,7 +147,7 @@ test('a thrown hand loses the hand but can\'t be knocked out, and reveals nothin
   assert.deepEqual(sd.theirCards, [])
 })
 
-test('flamber a pair: a K★ Twin comes straight back into your hand for hand 2, 1 Bulk to the discard, deck size the same', () => {
+test('flamber a pair: a K★ Twin comes straight back into your hand for hand 2, 1 Ash to the discard, deck size the same', () => {
   let m = start('bforge')
   const a = setHand(m, 0, KK)
   const before = deckSize(m.players[0])

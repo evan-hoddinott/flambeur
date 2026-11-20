@@ -130,7 +130,7 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
 
   // bulk is the one card that scores without being in the hand
   const bulk = played.filter(c => c.bulk)
-  for (const card of bulk) add('Bulk', card.id, null, { value: BULK_VALUE })
+  for (const card of bulk) add('Ash', card.id, null, { value: BULK_VALUE })
 
   const handCtx: HandCtx = {
     hand,

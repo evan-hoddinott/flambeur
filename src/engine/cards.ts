@@ -64,7 +64,7 @@ export type Card = {
   bonusHype: number // grows on 1st Edition cards
   grade: number | null // 1..10 once graded
   pulledRound: number // 0 = starting deck
-  bulk: boolean // stone card a forge leaves behind: no rank or suit, always +5 value when played
+  bulk: boolean // ash: the burnt card a flambé leaves behind: no rank or suit, always +5 value when played
 }
 
 export const MAX_TIER = 3
@@ -182,7 +182,7 @@ export function traitLabel(card: Card, t: Trait): string {
 }
 
 export function cardName(card: Card): string {
-  if (card.bulk) return 'Bulk'
+  if (card.bulk) return 'Ash'
   const suit = isWild(card) ? '★' : SUIT_GLYPH[card.suit]
   const stars = card.tier > 0 ? ` ${'★'.repeat(card.tier)}` : ''
   return `${rankLabel(card.rank)}${suit}${stars}`
