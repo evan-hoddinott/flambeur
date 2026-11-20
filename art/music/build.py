@@ -185,12 +185,81 @@ def stings():
                                            "true_peak_db": round(20 * np.log10(true_peak(a)), 1)}))
 
 
+TRAILER_LUFS = -14.0  # youtube's playback level
+
+
+def silence(a, start_s, end_s, fade_s=.006):
+    """hard cut to nothing between two times, a few ms of fade so it doesn't click"""
+    i, j, f = int(start_s * SR), int(end_s * SR), int(fade_s * SR)
+    a = a.copy()
+    a[:, i - f:i] *= np.linspace(1, 0, f)
+    a[:, i:j] = 0
+    a[:, j:j + f] *= np.linspace(0, 1, f)[: a.shape[1] - j]
+    return a
+
+
+def record_stop(a, start_s, dur_s, until_s):
+    """the joke: the band winds down like a record losing power, then nothing until the next section"""
+    from lab.fx import tape_stop
+    i = int(start_s * SR)
+    tail = tape_stop(a, start_s, dur_s, end_rate=.15)[:, i:]
+    a = a.copy()
+    a[:, i:i + tail.shape[1]] = tail
+    a[:, i + tail.shape[1]:int(until_s * SR)] = 0
+    return a
+
+
+def trailer(remaster=False):
+    """the youtube trailer cut (trailer.py): a stem per layer for the edit, the cue sheet, and the mastered mix.
+    `build.py trailer master` masters the stems again without rendering"""
+    import trailer as t
+    import soundfile as sf
+    out = OUT / "trailer"
+    out.mkdir(parents=True, exist_ok=True)
+    if remaster:
+        stems = {k: sf.read(out / f"stem-{k}.wav", dtype="float32")[0].T for k in ("perc", "orch", "band", "solo")}
+    else:
+        layers = render(t.song())
+        n = max(a.shape[1] for a in layers.values())
+        layers = {k: np.pad(a, ((0, 0), (0, n - a.shape[1]))) for k, a in layers.items()}
+        marks = t.cues()
+        drive = next(s for s in marks["sections"] if s["name"] == "drive")["start"]
+        finale = next(s for s in marks["sections"] if s["name"] == "finale")["start"]
+        for k in ("perc", "orch", "band"):
+            layers[k] = record_stop(layers[k], marks["hits"]["record_stop"], 1.4, drive - .02)
+            layers[k] = silence(layers[k], marks["hits"]["silence"], finale)
+        gain = 10 ** ((-20 - lufs(sum(layers.values()))) / 20)
+        stems = {k: (a * gain).astype(np.float32) for k, a in layers.items()}
+        for k, a in stems.items():
+            write(out / f"stem-{k}.wav", a)
+    from lab.fx import MidSide
+    from pedalboard import Compressor, HighShelfFilter, PeakFilter
+    mix = sum(stems.values())
+    for fx in (MidSide(mono_hz=140, width=1.15), PeakFilter(330, -3, .7), HighShelfFilter(3500, 3.5, .7),
+               Compressor(threshold_db=-18, ratio=2, attack_ms=30, release_ms=250)):
+        mix = fx(mix, SR)
+    final = master(mix, TRAILER_LUFS, 0)
+    write(out / "trailer.wav", final)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out / "trailer.wav"), "-c:a", "libmp3lame", "-b:a", "256k",
+                    str(out / "trailer.mp3")], check=True)
+    marks = t.cues()
+    marks["seconds"] = round(final.shape[1] / SR, 3)
+    (out / "trailer.json").write_text(json.dumps(marks, indent=1))
+    m, png = analyze(out / "trailer.wav", t.BPM, t.BEATS)
+    print(json.dumps({"seconds": marks["seconds"], "lufs": round(lufs(final), 1), "true_peak_db": round(20 * np.log10(true_peak(final)), 1),
+                      "bands": m.get("band_energy_pct"), "report": str(png)}, default=float))
+    for s in marks["sections"]:
+        print(s["name"], s["start"], round(lufs(final[:, int(s["start"] * SR):int(s["end"] * SR)]), 1))
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "full"
     if mode == "sketch":
         sketch(sys.argv[2:] or ("table", "tabac", "fee"))
     elif mode == "stings":
         stings()
+    elif mode == "trailer":
+        trailer(remaster=sys.argv[2:] == ["master"])
     else:
         full()
         stings()
