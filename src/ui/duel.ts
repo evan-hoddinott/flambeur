@@ -1,6 +1,6 @@
 import { forgePlan } from '../engine/forge.ts'
 import { REF_SCORE } from '../engine/bot.ts'
-import { progress, mix, juiceAt, spring, springs, stepSprings } from './motion.ts'
+import { progress, land, mix, juiceAt, spring, springs, stepSprings } from './motion.ts'
 // the duel scene: you vs the rival across the table, drawn on one canvas from the atlases.
 // layout is the art proof's (art/duel/review.py), in 640x360 stage units. main.ts owns the game,
 // this file only draws a DuelState and reports clicks back through it
@@ -215,7 +215,7 @@ function insertEffect(): void {
 type Live = { v: number; h: number; g: number; label: string; step: string }
 let live: [Live, Live] | null = null
 
-let forgeFx: { at: number; cards: Card[]; result?: Card; bulk: number; landed: boolean; rang: boolean } | null = null
+let forgeFx: { at: number; started: boolean; cards: Card[]; result?: Card; forged: boolean; bulk: number; landed: boolean; rang: boolean } | null = null
 let reelAt = -Infinity
 let pendingBust: number | null = null
 let bustAt = -Infinity
@@ -288,14 +288,14 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
   if (next.settled && sd?.myKind === 'flamber' && !stillCards.matches &&
       (!state?.settled || state.view.showdown?.hand !== sd.hand || state.view.round !== next.view.round)) {
     const previous = state?.view.me
-    const known = new Set(previous ? [...previous.hand,...previous.pile,...previous.discard].map(c=>c.id) : [])
+    const before = previous ? [...previous.hand, ...(previous.locked ?? []), ...previous.pile, ...previous.discard] : []
+    const known = new Set(before.map(c => c.id))
     const plan = forgePlan(sd.myCards)
-    const current = [...next.view.me.hand,...next.view.me.discard,...next.view.me.pile]
-    const result = plan ? current.find(c=>c.tier>0 && !known.has(c.id)) :
-      current.find(c=>sd.myCards.some(old=>old.id===c.id && old.grind<c.grind))
-    forgeFx = {at:performance.now(),cards:sd.myCards,result,bulk:plan?plan.merged.length-1:0,landed:false,rang:false}
-    if (plan) sfx.flambe()
-    else sfx.grind()
+    const current = [...next.view.me.hand, ...next.view.me.discard, ...next.view.me.pile]
+    // the showdown's cards are already ground, so a grind is found against the cards from before the reveal
+    const result = plan ? current.find(c => c.tier > 0 && !known.has(c.id)) :
+      current.find(c => before.some(old => old.id === c.id && old.grind < c.grind))
+    forgeFx = { at: performance.now(), started: false, cards: sd.myCards, result, forged: !!plan, bulk: plan ? plan.merged.length - 1 : 0, landed: false, rang: false }
   }
   listen(state, next)
   state = next
@@ -898,7 +898,7 @@ function draw(st: DuelState): void {
   g.beginPath()
   g.rect(0, 0, W, H)
   g.clip()
-  const forgeShake=forgeFx?.result?.tier===3 && now-forgeFx.at>=540 ? 4*shakeAmount()*(1-progress(now-forgeFx.at-540,450)) : 0
+  const forgeShake=forgeFx?.started && forgeFx.result?.tier===3 && now-forgeFx.at>=FORGE.burn ? 4*shakeAmount()*(1-progress(now-forgeFx.at-FORGE.burn,450)) : 0
   const impact = calling() ? shakeAmount() * Math.max(0, 1 - (now - callout!.t) / 200) : 0
   g.translate(320 + forgeShake*Math.sin(now*.08) + impact * Math.sin(now * 0.12) * 2, 180 - impact * 2)
   const age = now-reelAt
@@ -1175,54 +1175,102 @@ function feltBets(st: DuelState): void {
 
 // played cards on their spots. locked in: yours face down on your spots, theirs a squared stack
 // (never their count). a fold or flambé leaves yours face down. showdown: both flip face up
-function forgeReturn(): boolean {
+// the flambé, as a beat of its own (ART.md §12). the locked cards slide to the middle of the felt (0-350ms) and burn
+// together (350-950). a flash, and the ★ card rises big in the middle with its stars (950-1250), holds (to 1850), then
+// flies down into your hand (to 2250). Bulk drops out of the smoke onto your discard. a grind is the same with the
+// one card coming back +1 Value and going to the discard. it waits for the count-up, so the reveal has the stage first
+const FORGE = { gather: 350, burn: 950, rise: 1250, hold: 1850, end: 2250 }
+const FORGE_C = { x: 320, y: 186 }
+
+function forgeReturn(back: HTMLCanvasElement): boolean {
   if (!forgeFx) return false
+  if (!forgeFx.started) {
+    if (live) {
+      faceDown(forgeFx.cards, back)
+      return true
+    }
+    forgeFx.started = true
+    forgeFx.at = now
+    if (forgeFx.forged) sfx.flambe()
+    else sfx.grind()
+  }
   const age = now - forgeFx.at
-  if (age >= 1000) {
+  if (age >= FORGE.end) {
     forgeFx = null
     return true
   }
-  if (age < 560) {
-    const u = Math.max(0, age / 560)
-    forgeFx.cards.forEach((c, i, cards) => {
-      const x = NEAR_ROW.cx + (i - (cards.length - 1) / 2) * 42 * (1 - u)
+  const cards = forgeFx.cards
+  if (age < FORGE.burn) {
+    const gather = land(progress(age, FORGE.gather))
+    cards.forEach((c, i) => {
+      const from = NEAR_ROW.cx + (i - (cards.length - 1) / 2) * NEAR_ROW.gap
+      const x = mix(from, FORGE_C.x + (i - (cards.length - 1) / 2) * 10, gather)
+      const y = mix(NEAR_ROW.y, FORGE_C.y, gather)
       const art = cardCanvas(c)
-      const melt = progress(age - i * 55, Math.max(200, 560 - i * 55))
+      const melt = progress(age - FORGE.gather - i * 50, FORGE.burn - FORGE.gather - i * 50)
+      const w = 44 * mix(1, 1.15, gather)
+      const full = art.height * (w / art.width)
       const h = Math.ceil(art.height * (1 - melt))
-      if (h) g.drawImage(art, 0, 0, art.width, h, x - 22, 200, 44, h * 0.68)
-      if (melt > 0) {
-        pin('fx/flame/' + ((Math.floor(age / 65 + i) % 4) + 1), x - 22 + 19 * melt, 191 + h * 0.68, { s: 1.1 })
-        pin('fx/ember/' + ((i % 3) + 1), x - 10 + Math.sin(i + u * 7) * 15, 205 - 30 * u)
+      g.save()
+      g.translate(x, y)
+      g.rotate((i - (cards.length - 1) / 2) * 0.08 * gather)
+      if (h) g.drawImage(art, 0, 0, art.width, h, -w / 2, -full / 2, w, h * (w / art.width))
+      // the char line eats down the card, flames riding it
+      if (melt > 0 && h) {
+        const edge = -full / 2 + h * (w / art.width)
+        g.fillStyle = 'rgba(46,35,32,0.85)'
+        g.fillRect(-w / 2, edge - 3, w, 3)
+        for (let f = 0; f < 3; f++) pin('fx/flame/' + ((Math.floor(age / 65 + i + f) % 4) + 1), -w / 2 + 6 + f * (w / 3), edge - 6, { s: 1.2 })
       }
+      g.restore()
+      if (melt > 0) for (let e = 0; e < 3; e++) pin('fx/ember/' + (((i + e) % 3) + 1), x - 12 + e * 12 + Math.sin(i + e + age / 90) * 6, y - 20 - 50 * progress(age - FORGE.gather - e * 90, 500))
     })
-  } else if (forgeFx.result) {
-    const u = (age - 560) / 440
-    if (!forgeFx.rang) {
-      forgeFx.rang = true
-      if (forgeFx.result.tier > 0) sfx.stars(forgeFx.result.tier)
+    return true
+  }
+  const result = forgeFx.result
+  if (!result) return age < FORGE.rise
+  if (!forgeFx.rang) {
+    forgeFx.rang = true
+    if (result.tier > 0) sfx.stars(result.tier)
+  }
+  // the flash as it comes out of the fire
+  const flashed = 1 - progress(age - FORGE.burn, 260)
+  if (flashed > 0) {
+    g.fillStyle = `rgba(255,251,232,${flash((result.tier === 3 ? 0.6 : 0.35) * flashed)})`
+    g.fillRect(0, 0, W, H)
+  }
+  if (forgeFx.bulk > 0) {
+    if (age >= FORGE.burn + 220 && !forgeFx.landed) {
+      forgeFx.landed = true
+      sfx.bulk()
     }
-    if (forgeFx.bulk > 0) {
-      const count = forgeFx.bulk
-      if (age >= 780 && !forgeFx.landed) {
-        forgeFx.landed = true
-        sfx.bulk()
-      }
-      for (let i = 0; i < count; i++) {
-        const drop = progress(age - 560 - i * 40, 220)
-        pin('base/bulk', NEAR_ROW.cx - 30 + i * 16, 198 + 42 * drop * drop, { s: 0.36, r: i * 0.09 })
-      }
-      if (forgeFx.result.tier === 3) {
-        g.fillStyle = `rgba(255,251,232,${0.5 * (1 - u)})`
-        g.fillRect(0, 0, W, H)
-      }
+    for (let i = 0; i < forgeFx.bulk; i++) {
+      const drop = land(progress(age - FORGE.burn - i * 60, 420))
+      pin('base/bulk', mix(FORGE_C.x - 20 + i * 14, MY_DISCARD.x, drop), mix(FORGE_C.y, MY_DISCARD.y, drop) - 30 * Math.sin(Math.PI * drop), { s: mix(0.36, 0.28, drop), r: i * 0.09 + drop })
     }
-    drawCard(
-      forgeFx.result,
-      NEAR_ROW.cx + 25 * u,
-      231 + 70 * u - 22 * Math.sin(Math.PI * u),
-      0.7 + 0.2 * Math.sin(Math.PI * u),
-      0.12 * Math.sin(Math.PI * u),
-    )
+  }
+  const rise = land(progress(age - FORGE.burn, FORGE.rise - FORGE.burn))
+  const away = progress(age - FORGE.hold, FORGE.end - FORGE.hold)
+  const fly = away * away
+  const bob = Math.sin((age - FORGE.rise) / 160) * 1.5 * (1 - away)
+  const to = forgeFx.forged ? { x: HAND_C.x, y: 330 } : MY_DISCARD
+  const x = mix(FORGE_C.x, to.x, fly)
+  const y = mix(FORGE_C.y + 20 * (1 - rise), to.y, fly) + bob
+  const scale = mix(mix(0.4, 1.15, rise), 0.6, fly)
+  if (away === 0) {
+    const rays = sprite('fx/rays')
+    const k = 168 / Math.max(rays.w, rays.h)
+    g.save()
+    g.translate(x, y)
+    g.rotate(age / 900)
+    g.globalAlpha = 0.5 * rise
+    g.drawImage(rays.img, rays.x, rays.y, rays.w, rays.h, (-rays.w * k) / 2, (-rays.h * k) / 2, rays.w * k, rays.h * k)
+    g.restore()
+  }
+  drawCard(result, x, y, scale, 0.05 * Math.sin(Math.PI * rise) * (1 - fly))
+  if (away === 0 && rise === 1) {
+    const what = result.tier > 0 ? '★'.repeat(result.tier) : '+1 Value'
+    text(what, x, y + 56, { font: 'chalk', color: result.tier > 0 ? GOLD : '#f6ecd2', align: 'center', bold: true, outline: OUTLINE })
   }
   return true
 }
@@ -1235,7 +1283,7 @@ function playedCards(st: DuelState): void {
     if (sd.theirKind === 'play') rowOf(sd.theirCards, FAR_ROW, sd.theirs!, 'far', backCanvas(st.rival.back))
     else drawPile(FAR_ROW.cx, FAR_ROW.y + 18, 0.6, st.rival.back, 5)
     if (sd.myKind === 'play') rowOf(sd.myCards, NEAR_ROW, sd.mine!, 'near', backCanvas(view.me.starter))
-    else if (!forgeReturn() && sd.myKind !== 'flamber') faceDown(sd.myCards, backCanvas(view.me.starter))
+    else if (!forgeReturn(backCanvas(view.me.starter)) && sd.myKind !== 'flamber') faceDown(sd.myCards, backCanvas(view.me.starter))
     scoreTag(st, sd, false)
     scoreTag(st, sd, true)
     return
