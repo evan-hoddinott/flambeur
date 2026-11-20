@@ -892,9 +892,7 @@ function draw(st: DuelState): void {
   layers(table, tournament)
   const t = now / 1000
 
-  // world layers drift a little, the hud stays put
-  const sway = stillCards.matches ? 0 : 1
-  const drift = { x: Math.sin(t / 6 * Math.PI * 2) * 2 * sway, y: Math.cos(t / 7.3 * Math.PI * 2) * sway, r: Math.sin(t / 9 * Math.PI * 2) * 0.003 * sway }
+  // the camera holds still. it only moves on a beat: the reel push-in, a call-out's impact, a ★3 flambé
   g.setTransform(k, 0, 0, k, ox, oy)
   g.save()
   g.beginPath()
@@ -902,11 +900,11 @@ function draw(st: DuelState): void {
   g.clip()
   const forgeShake=forgeFx?.result?.tier===3 && now-forgeFx.at>=540 ? 4*shakeAmount()*(1-progress(now-forgeFx.at-540,450)) : 0
   const impact = calling() ? shakeAmount() * Math.max(0, 1 - (now - callout!.t) / 200) : 0
-  g.translate(320 + drift.x + forgeShake*Math.sin(now*.08) + impact * Math.sin(now * 0.12) * 2, 180 + drift.y - impact * 2)
-  g.rotate(drift.r)
+  g.translate(320 + forgeShake*Math.sin(now*.08) + impact * Math.sin(now * 0.12) * 2, 180 - impact * 2)
   const age = now-reelAt
   const push = !stillCards.matches && age<1200 ? .03*Math.sin(Math.PI*progress(age,1200)) : 0
-  g.scale(1.01+push, 1.01+push) // so the drift never shows the stage edge
+  const zoom = 1 + push + (forgeShake || impact ? 0.015 : 0) // a shake zooms in a hair so it never shows the stage edge
+  g.scale(zoom, zoom)
   g.translate(-320, -180)
 
   room(st, tournament, t)
