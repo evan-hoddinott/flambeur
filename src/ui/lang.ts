@@ -3,6 +3,7 @@
 // call sites never translate, they keep writing the french. english is the default: a first-timer reads the rules
 // in their own words, and the french stays as the names, the barks and the glint
 import { toggle } from './sound.ts'
+import { pref, setPref } from './prefs.ts'
 import { RIVALS } from '../engine/rivals.ts'
 
 export type Lang = 'fr' | 'en'
@@ -50,17 +51,8 @@ const terms = [...WORDS.map(w => w[0]), ...NAMES].sort((a, b) => b.length - a.le
 // no letter right before or after, so "Bon." never hits "Bonjour."
 const FRENCH = new RegExp(`(?<!\\p{L})(${terms.map(escape).join('|')})(?!\\p{L})`, 'giu')
 
-const KEY = 'flambeur:lang'
-let current: Lang = load()
+let current: Lang = pref('lang')
 const cache = new Map<string, Seg[]>()
-
-function load(): Lang {
-  try {
-    return localStorage.getItem(KEY) === 'fr' ? 'fr' : 'en'
-  } catch {
-    return 'en'
-  }
-}
 
 export function lang(): Lang {
   return current
@@ -70,11 +62,7 @@ export function setLang(l: Lang): void {
   if (l !== current) toggle(l === 'fr')
   current = l
   cache.clear()
-  try {
-    localStorage.setItem(KEY, l)
-  } catch {
-    // private window: it just won't stick
-  }
+  setPref('lang', l)
 }
 
 export function toggleLang(): void {

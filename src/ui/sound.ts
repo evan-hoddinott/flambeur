@@ -4,47 +4,33 @@
 import atlasUrl from '../../art/sfx/sfx.ogg'
 import atlasIndex from '../../art/sfx/sfx.json'
 import { chordAt } from './music.ts'
+import { onPref, pref, setPref } from './prefs.ts'
 
 export type Sample = keyof typeof atlasIndex
 const INDEX: Record<Sample, [number, number][]> = atlasIndex as Record<Sample, [number, number][]>
 
 // ---------- settings ----------
+// the volumes live in prefs.ts with every other setting. the pause menu sets them, M mutes anywhere
 
-type Settings = { master: number; music: number; sfx: number; muted: boolean }
-const SAVED = 'flambeur.sound'
-const settings: Settings = { master: 0.9, music: 0.7, sfx: 1, muted: false }
-try {
-  Object.assign(settings, JSON.parse(localStorage.getItem(SAVED) ?? '{}'))
-} catch {
-  // private window or blocked storage: the defaults are fine
-}
-
-export function getSettings(): Readonly<Settings> {
-  return settings
-}
-
-export function setSetting(key: 'master' | 'music' | 'sfx', value: number): void {
-  settings[key] = Math.max(0, Math.min(1, value))
-  apply()
-}
+const vol = (key: 'master' | 'music' | 'sfx' | 'ambience') => pref(key)
 
 export function toggleMute(): void {
-  settings.muted = !settings.muted
-  apply()
+  setPref('muted', !pref('muted'))
 }
 
+onPref(key => { if (['master', 'music', 'sfx', 'ambience', 'muted', 'bgMute'].includes(key)) apply() })
+document.addEventListener('visibilitychange', () => apply())
+
+// silent: muted, or the tab is hidden and that should mute it
+const silent = () => pref('muted') || (pref('bgMute') && document.hidden)
+
 function apply(): void {
-  try {
-    localStorage.setItem(SAVED, JSON.stringify(settings))
-  } catch {
-    // not saved, still applied
-  }
   if (!ctx) return
   const t = ctx.currentTime
-  master!.gain.setTargetAtTime(settings.muted ? 0 : settings.master, t, 0.03)
-  sfxBus!.gain.setTargetAtTime(settings.sfx * 0.8, t, 0.03)
-  ambBus!.gain.setTargetAtTime(settings.sfx, t, 0.03)
-  musicBus_!.gain.setTargetAtTime(settings.music, t, 0.03)
+  master!.gain.setTargetAtTime(silent() ? 0 : vol('master'), t, 0.03)
+  sfxBus!.gain.setTargetAtTime(vol('sfx') * 0.8, t, 0.03)
+  ambBus!.gain.setTargetAtTime(vol('ambience'), t, 0.03)
+  musicBus_!.gain.setTargetAtTime(vol('music'), t, 0.03)
 }
 
 // ---------- the mixer ----------
@@ -140,7 +126,7 @@ type PlayOpts = { gain?: number; rate?: number; x?: number; far?: boolean; lp?: 
 // far = across the table (quieter, duller), lp = a lowpass in Hz
 export function play(name: Sample, o: PlayOpts = {}): void {
   plays++
-  if (!ctx || !atlas || settings.muted) return
+  if (!ctx || !atlas || silent()) return
   const live = voices.get(name) ?? 0
   if (live >= (o.cap ?? 4)) return
   const takes = INDEX[name]
@@ -194,7 +180,7 @@ type Tone = { type?: OscillatorType; wave?: PeriodicWave; attack?: number; glide
 
 // one oscillator note: freq in hz, ms long, gain linear. glide = end frequency
 function tone(freq: number, ms: number, gain: number, o: Tone = {}): void {
-  if (!ctx || settings.muted) return
+  if (!ctx || silent()) return
   const t = ctx.currentTime + (o.delay ?? 0) / 1000
   const end = t + ms / 1000
   const osc = ctx.createOscillator()
@@ -217,7 +203,7 @@ type Hiss = { type?: BiquadFilterType; freq?: number; q?: number; sweep?: number
 
 // filtered noise: hiss, breath, crackle, whoosh
 function noise(ms: number, gain: number, o: Hiss = {}): void {
-  if (!ctx || !noiseBuf || settings.muted) return
+  if (!ctx || !noiseBuf || silent()) return
   const t = ctx.currentTime + (o.delay ?? 0) / 1000
   const end = t + ms / 1000
   const src = ctx.createBufferSource()
@@ -239,7 +225,7 @@ function noise(ms: number, gain: number, o: Hiss = {}): void {
 // a musette accordion note: 1 reed dry, or 3 reeds (in tune, +14 and -14 cents) for the wet French shimmer.
 // a reed honk at 1.2 kHz, a 10 ms bellows attack and a puff of breath. docs/SOUND.md §5
 function accordion(midi: number, ms: number, gain: number, o: { reeds?: 1 | 3; delay?: number; attack?: number; glide?: number } = {}): void {
-  if (!ctx || !pulse || settings.muted) return
+  if (!ctx || !pulse || silent()) return
   const lp = ctx.createBiquadFilter()
   lp.type = 'lowpass'
   lp.frequency.value = 2800
@@ -360,7 +346,7 @@ export function knockout(): void {
 
 // the crowd upstairs, through the floor: detuned saws through an "oh" formant, pitch up then down
 function crowd(): void {
-  if (!ctx || settings.muted) return
+  if (!ctx || silent()) return
   const vowel = ctx.createBiquadFilter()
   vowel.type = 'bandpass'
   vowel.frequency.value = 600
@@ -753,6 +739,7 @@ export function voiceOf(id: string): Voice {
 // the i-th letter of a line typing out. plays on every `every` letters, nothing on spaces and punctuation,
 // a step up on "!", a bend up on "?". masked = behind a mask, duller
 export function blip(voice: Voice, i: number, ch: string, masked = false): void {
+  if (!pref('blips')) return
   const v = VOICES[voice]
   if (ch === '!' || ch === '?') {
     const l = ladder()
@@ -772,7 +759,7 @@ function nearest(l: number[], m: number): number {
 
 function say(v: Speaker, m: number, masked: boolean, bend: boolean): void {
   plays++
-  if (!ctx || settings.muted) return
+  if (!ctx || silent()) return
   if (v.wave === 'reed') return accordion(m, v.ms, 0.16, { attack: 4, glide: bend ? 3 : undefined })
   const f = ctx.createBiquadFilter()
   f.type = 'lowpass'

@@ -79,6 +79,8 @@ export function setPanel(next: Panel | null): void {
 }
 
 export const panelOpen = () => panel !== null
+// the open panel closes on Esc, so Esc is its, not the pause menu's
+export const panelEscapes = () => !!panel?.onEscape
 
 // draw over the scene: scrim, sheet, content, buttons. call after the scene, before the frame pieces and the Fiche
 export function drawPanel(g: CanvasRenderingContext2D, now: number, mouse: { x: number; y: number }): void {

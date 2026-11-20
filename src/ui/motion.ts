@@ -1,8 +1,10 @@
+import { still } from './prefs.ts'
+
 // normalized time for canvas sequences
 export const progress = (ms: number, duration: number) => Math.min(1, Math.max(0, ms / duration))
 export const mix = (a: number, b: number, t: number) => a + (b - a) * t
 export const land = (t: number) => 1 + 2.4 * (t - 1) ** 3 + 1.4 * (t - 1) ** 2
-export const still = matchMedia('(prefers-reduced-motion: reduce)')
+export { still } // reduce motion, from the pause menu or the system
 
 // carry the outgoing scene over the cut, with two short trails on its moving edge
 export function whipPan(stage: HTMLCanvasElement | null, direction: number): void {

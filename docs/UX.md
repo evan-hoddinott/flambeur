@@ -53,7 +53,7 @@ The **round-end tally** is the only place money gets itemized: marker, spoils sk
 
 Every piece of information has one home on the HUD. A world prop can repeat a number (the chalkboard's Ante/Max, the pile's count), but it's never the only place it shows. Cut on Nov 19, and don't bring them back:
 
-- **Top bar:** the VITRINE/DISPLAY and CARNET tabs. The carnet in the corner and D/B/S/V/? are the way in. FR · EN and Tips moved to the foot of the carnet's rules page (the title screen keeps its FR · EN chip).
+- **Top bar:** the VITRINE/DISPLAY and CARNET tabs. The carnet in the corner and D/B/S/V/? are the way in. FR · EN, Tips and the volumes live in the pause menu (§2b). The title screen keeps its FR · EN chip.
 - **The rules ball and the separate rules sheet.** The carnet's Rules tab is the one rules view.
 - **Plate counters** (cards in hand, discards, Sleeve) on both plates. They show where you use them: your fan, the Discard ticket, the Sleeve cards, the rival's backs.
 - **Bankroll chip stacks.** The pot keeps its chips.
@@ -62,6 +62,20 @@ Every piece of information has one home on the HUD. A world prop can repeat a nu
 - **"You bet first" headline and "À vous" banner.** The 1er puck, the chime and the lamp flare stay. The bet hint says the order once.
 - **One voice:** while a first-encounter tag is up, the hint line waits. Nothing picked means no hint, since the readout says "pick 1–5 cards".
 - **Shop:** services closed today are hidden, not greyed "not today" tickets.
+
+### 2b. The pause menu (Nov 19)
+
+A plain game pause: **Esc** or the **Pause** tab hanging off the top edge above the run strip (on the title, **Settings** beside FR · EN) dims the whole canvas and opens one paper sheet in the middle (`src/ui/pause.ts`). Esc goes to whatever else is open first: the carnet, a panel that closes on Esc, a pinned Fiche, the scratch ticket. While it's up it takes every click and key except **M**. Clicking off the sheet closes it.
+
+- **Tabs** down the left: Sound, Game, Display, Access, Keys, Credits. Each row is a label and its control; hovering a row puts its one line at the foot of the sheet (the complexity rule).
+- **At the foot of the tabs:** Resume, Abandon run (in a run, tap twice) and First run (the seeded first run; tap twice in a run).
+- **Sound:** master, music, effects and room volumes (ten notches, click or drag), mute (M), mute when the tab is hidden, voice blips.
+- **Game:** speed 1×–3× (the count-up, the tally, the rival's pauses), count-up watch or skip, confirm bets (Max, or Max and Flamber, take a second press within 3 s; the ticket reads Sure?), hand order, hand preview, tips and tips again, Fiche delay, language, French glint.
+- **Display:** fullscreen (F anywhere), crisp or fill pixels, atmosphere (vignette, smoke, light leaks), screen shake off/low/full, frame rate 60/30/saver (saver goes to 15 after 5 s idle), pixel cursor.
+- **Access:** reduce motion (auto follows the system), calm flashes, four-color suits, high contrast text, Large Fiche (2×).
+- **Keys** lists every key. **Credits** names the music and the CC0 sound packs.
+
+Every setting lives in one object in `src/ui/prefs.ts`, saved under `flambeur.prefs` (the old sound, language and tips keys migrate once). The engine never reads it.
 
 **Color:** violet only ever means Discard, so the Grading ticket gets recolored. Green only ever means Min.
 

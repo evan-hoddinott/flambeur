@@ -7,6 +7,7 @@ import { band } from './sound.ts'
 import { tableOf } from '../engine/economy.ts'
 import { twistName } from '../engine/twists.ts'
 import type { SeatView } from '../engine/match.ts'
+import { still } from './prefs.ts'
 
 export const STRIP = { x: 8, y: 18, w: 150, h: 36 }
 const INK = '#2e2320'
@@ -69,7 +70,6 @@ type Call = { fr: string; en: string; tone: Tone; t: number | null }
 const BAND_MS = 1600
 const BAND_RIGHT = 504 // never over the action stack
 const calls: Call[] = []
-const still = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
 const TONE: Record<Tone, { big: string; small: string }> = {
   good: { big: '#a8260a', small: '#3a8040' },
   bad: { big: INK, small: BURGUNDY },
@@ -107,7 +107,7 @@ export function drawBand(g: CanvasRenderingContext2D, now: number, centerY = 195
   const scale = measure(big, 'didone') * 2 <= 400 ? 2 : 1
   const w = Math.max(measure(big, 'didone') * scale, measure(small, 'sans', true)) + 40
   const h = 30 + 14 * scale
-  const pop = still?.matches || age >= 260 ? 1 : 0.6 + 0.4 * (1 - Math.exp(-age / 50)) + 0.12 * Math.exp(-age / 90)
+  const pop = still.matches || age >= 260 ? 1 : 0.6 + 0.4 * (1 - Math.exp(-age / 50)) + 0.12 * Math.exp(-age / 90)
   const ink = TONE[c.tone]
   const cx = Math.min(320, BAND_RIGHT - w / 2 - 5)
   g.save()

@@ -3,6 +3,7 @@
 // scenes call tip(id, text, anchor) every frame it applies and drawTips(g) before the Fiche
 import { nineSlice, sprite } from './art.ts'
 import { drawText, measure, wrapText } from './font.ts'
+import { pref } from './prefs.ts'
 
 type Rect = { x: number; y: number; w: number; h: number }
 type Side = 'above' | 'below' | 'left' | 'right'
@@ -13,7 +14,6 @@ const WRAP = 116
 const PAD = 5
 const GAP = 4
 const SEEN_KEY = 'flambeur.tips.seen'
-const ON_KEY = 'flambeur.tips'
 const INK = '#2e2320'
 const OUTLINE = '#1c1513'
 
@@ -29,32 +29,13 @@ function loadSeen(): Set<string> {
 function save(): void {
   try {
     localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]))
-    localStorage.setItem(ON_KEY, on ? 'on' : 'off')
   } catch {}
 }
 
-function loadOn(): boolean {
-  try {
-    return localStorage.getItem(ON_KEY) !== 'off'
-  } catch {
-    return true
-  }
-}
-
 const seen = loadSeen()
-let on = loadOn()
 let want: { id: string; text: string; anchor: Rect; side: Side } | null = null // this frame's first tip() call
 let showing: string | null = null // what was on screen last frame
 let shownAt = 0
-
-export function tipsOn(): boolean {
-  return on
-}
-
-export function setTips(v: boolean): void {
-  on = v
-  save()
-}
 
 // forget every tag seen, so a new player on this browser gets them all again
 export function resetTips(): void {
@@ -69,7 +50,7 @@ export function tipShowing(): boolean {
 
 // the first call each frame wins, so a busy moment still shows one tag
 export function tip(id: string, text: string, anchor: Rect, side: Side = 'above'): void {
-  if (!on || seen.has(id) || want) return
+  if (!pref('tips') || seen.has(id) || want) return
   want = { id, text, anchor, side }
 }
 

@@ -29,12 +29,14 @@ import { loadTitle, panTo, showTitle, type TitleOnline } from './ui/title.ts'
 import { albumSeen, ALBUM_SETS, recordPull } from './ui/album.ts'
 import { spoilPicked } from './ui/spoils.ts'
 import { showBareTable, rivalBusted, showDuel, insertUsed, countUp as duelCountUp, type HandSort, type Slip } from './ui/duel.ts'
-import { showShop, shelfCenter, gradingReturn, clearGradingReturn, dropCigarette, shopInsertUsed, keeperSays, type Scratch } from './ui/shop.ts'
+import { lottoOpen, showShop, shelfCenter, gradingReturn, clearGradingReturn, dropCigarette, shopInsertUsed, keeperSays, type Scratch } from './ui/shop.ts'
 import { setPanel, grid, fit, CARD_H, type Panel, type Ui } from './ui/panels.ts'
 import { closeCompare, closeDrawer, openDrawer, setCompareHover, setDrawerActions, setGlossary, type Compare } from './ui/drawer.ts'
 import { setKeywords } from './ui/fiche.ts'
 import { tip } from './ui/tips.ts'
 import { announce, bandShowing, type Tone } from './ui/frame.ts'
+import { onPref, pace, pref, setPref, shake as shakeAmount } from './ui/prefs.ts'
+import { pauseOpen, setPauseHooks } from './ui/pause.ts'
 import { twistName } from './engine/twists.ts'
 
 const app = document.getElementById('app') as HTMLElement
@@ -70,7 +72,7 @@ let patronPaid: number | null = null // le patron just collected this at the big
 let lastLocked: Card[] = [] // my locked cards, so a fold or forge result can still show them
 let binderOpen = false // the shop's binder sheet, kept open across renders while you sell
 let binderPicked = new Set<number>()
-let handSort: HandSort = 'rank' // how your hand fans out. display only, the engine's order never changes
+let handSort: HandSort = pref('sort') // how your hand fans out. display only, the engine's order never changes
 let overflowOpened = false // the Sleeve already popped open for the insert waiting on room
 let docked: Compare | null = null // this render's compare dock, set by the screen that offers a choice
 let announced = new Set<string>() // band callouts already made this run, so a redraw doesn't repeat one
@@ -115,6 +117,7 @@ function can(a: Action): boolean {
 // online it just goes to the server, and busy clears on its ok or reject
 async function dispatch(action: Action): Promise<void> {
   if (busy) return
+  armed = null // any move disarms a waiting Sure?
   if (online) {
     // false = socket not open. the click is dropped and the reconnect brings a fresh view
     if (net!.act(action)) busy = true
@@ -139,6 +142,7 @@ async function dispatch(action: Action): Promise<void> {
 // a pause you can watch, or skip with a click, space or enter
 let skipBeat: (() => void) | null = null
 function beat(ms: number): Promise<void> {
+  ms /= pace()
   return new Promise(done => {
     const finish = () => {
       clearTimeout(timer)
@@ -149,7 +153,7 @@ function beat(ms: number): Promise<void> {
     skipBeat = finish
   })
 }
-window.addEventListener('pointerdown', () => skipBeat?.())
+window.addEventListener('pointerdown', () => { if (!pauseOpen()) skipBeat?.() })
 // the music starts on the first click or key (browsers need one), on the sfx context and its music bus
 for (const ev of ['pointerdown', 'keydown'] as const) {
   window.addEventListener(ev, () => void music.start(sfx.context() ?? undefined, sfx.musicBus() ?? undefined), { once: true })
@@ -159,9 +163,10 @@ window.addEventListener('keydown', e => {
 })
 
 async function runBots(): Promise<void> {
+  const id = run
   for (;;) {
-    const m = match!
-    if (m.phase === 'over') return
+    const m = match
+    if (!m || id !== run || m.phase === 'over') return
     const bot = pending(m).find(s => s !== ME)
     // simultaneous phases: the bot goes once I'm done, so it never shops off what I just did
     if (bot === undefined || (pending(m).includes(ME) && m.phase !== 'bet')) return
@@ -171,6 +176,7 @@ async function runBots(): Promise<void> {
       render()
       // the rival thinks. longer when they open, so "Scaramouche bets first" has time to read
       await beat(v().bet?.choices.length ? 700 : 1200)
+      if (id !== run) return // abandoned while the rival thought
     }
     const dealing = m.phase === 'shop'
     const before = action.type === 'spoils' ? v() : null
@@ -182,6 +188,7 @@ async function runBots(): Promise<void> {
     if (betting) {
       render()
       await beat(1000) // their ticket lands on the felt and sits a beat before anything else moves
+      if (id !== run) return
     }
   }
 }
@@ -478,6 +485,8 @@ async function loadTitleBoard(): Promise<void> {
 }
 
 function startRun(seed: string, autoplay = false): void {
+  run++
+  armed = null
   announced = new Set()
   clearGradingReturn()
   receiptAt=null
@@ -517,6 +526,40 @@ function firstRunDone(): boolean {
     return true
   }
 }
+
+// the pause menu's Abandon run: straight back to the title. bumping run stops a rival mid-thought or a count-up
+// mid-way from carrying on into the next run
+let run = 0
+function abandonRun(): void {
+  run++
+  match = null
+  busy = counting = false
+  resultHold = tallyHold = toCount = false
+  skipBeat = null
+  armed = null
+  dailyBoard = null
+  boardAsked = false
+  setPanel(null)
+  closeDrawer()
+  if (online) leaveOnline()
+  else renderTitle()
+}
+
+setPauseHooks({
+  inRun: () => !!match || !!online,
+  abandon: abandonRun,
+  firstRun: () => {
+    if (match || online) abandonRun()
+    firstRun()
+  },
+  escBusy: lottoOpen,
+})
+
+// settings the pause menu changes that this file draws from
+onPref(key => {
+  if (key === 'sort') handSort = pref('sort')
+  if (key === 'sort' || key === 'confirm' || key === 'preview') render()
+})
 
 function firstRun(): void {
   difficulty = 'easy'
@@ -562,7 +605,9 @@ async function show(): Promise<void> {
     counting = true
     busy = true
     draw()
+    const id = run
     await duelCountUp(sd)
+    if (id !== run) return // abandoned mid count-up: abandonRun already cleaned up
     counting = false
     busy = false
     if (sd.winner === mySeat()) sfx.win()
@@ -690,7 +735,7 @@ function starterPanel(): Panel {
         const y = box.y + (box.h - h) / 2 - 14
         const over = ui.hit(x, y, w, h, rip)
         const t = boxRip === null ? 0 : ui.now - boxRip
-        const shake = boxRip !== null ? Math.sin(t / 25) * 4 * Math.max(0, 1 - t / 450) : over ? Math.sin(ui.now / 40) * 1.5 : 0
+        const shake = shakeAmount() * (boxRip !== null ? Math.sin(t / 25) * 4 * Math.max(0, 1 - t / 450) : over ? Math.sin(ui.now / 40) * 1.5 : 0)
         if (t >= 650) {
           const rise = land(progress(t - 650, 400))
           drawTray(ui.g, box.x, box.y + 20 + 100 * (1 - rise), box.w)
@@ -902,10 +947,10 @@ function packPanel(): Panel {
       const cy = box.y + box.h * 0.43
       if (t < fanAt + 500) {
         const lift = land(progress(t, 300))
-        const shake = progress(t - 300, 600)
+        const shake = progress(t - 300, 600) * shakeAmount()
         const burst = progress(t - 900, 350)
         g.save()
-        if (t >= 900 && t < 1050) g.translate(Math.sin(t * 0.15) * 2 * (1 - progress(t - 900, 150)), 0)
+        if (t >= 900 && t < 1050) g.translate(Math.sin(t * 0.15) * 2 * shakeAmount() * (1 - progress(t - 900, 150)), 0)
         g.translate(mix(packShelfX, cx, lift) + Math.sin(t * 0.13) * 4 * shake * (1 - burst), mix(245, cy, lift))
         g.rotate(Math.sin(t * 0.09) * 0.055 * shake * (1 - burst))
         g.scale(1, 1 - (Math.floor(t / 50) % 4 === 0 ? 0.035 * shake : 0))
@@ -1416,6 +1461,29 @@ function rivalFace(): DuelRival {
 }
 
 // the deal: pick cards, then play them, flambé them or discard them. a Sleeve insert picked up takes over the bar
+// Confirm bets (the pause menu): Max, and Flamber with Max + Flamber, take a second press within 3 s.
+// the first press only arms the ticket, which says Sure?
+let armed: { kind: 'max' | 'forge'; t: number } | null = null
+const isArmed = (kind: 'max' | 'forge') => armed?.kind === kind && performance.now() - armed.t < 3000
+const needsConfirm = (kind: 'max' | 'forge') => pref('confirm') === 'both' || (pref('confirm') === 'max' && kind === 'max')
+
+function confirmed(kind: 'max' | 'forge', go: () => void): () => void {
+  if (!needsConfirm(kind)) return go
+  return () => {
+    if (isArmed(kind)) {
+      armed = null
+      return go()
+    }
+    armed = { kind, t: performance.now() }
+    render()
+    setTimeout(() => {
+      if (armed?.kind !== kind || isArmed(kind)) return
+      armed = null
+      render()
+    }, 3050)
+  }
+}
+
 function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
   const ids = [...selected] // click order, which photocopie reads (the first becomes the second)
   const picked = me.hand.filter(c => selected.has(c.id))
@@ -1473,11 +1541,11 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
         selected = new Set()
         void dispatch({ type: 'discard', cardIds: ids })
       } },
-      { label: 'Flamber', price: merges ? '★' : n ? '+1 Value' : '', kind: 'forge', enabled: n > 0 && can({ type: 'flamber', cardIds: ids, grind: merges || !grindable.length ? null : grindable[0].id }), onClick: () => {
+      { label: isArmed('forge') ? 'Sure?' : 'Flamber', price: merges ? '★' : n ? '+1 Value' : '', kind: 'forge', ...(needsConfirm('forge') && !isArmed('forge') ? { stamp: '' } : {}), enabled: n > 0 && can({ type: 'flamber', cardIds: ids, grind: merges || !grindable.length ? null : grindable[0].id }), onClick: confirmed('forge', () => {
         if (merges || grindable.length <= 1) return lock('flamber', merges ? null : grindable[0]?.id ?? null)
         grindPick = true
         render()
-      } },
+      }) },
       { label: 'Play', price: n ? `${n} card${n > 1 ? 's' : ''}` : '', kind: 'lock', primary: n > 0, enabled: n > 0 && can({ type: 'play', cardIds: ids }), onClick: () => lock('play', null) },
     ],
   }
@@ -1511,7 +1579,8 @@ function renderTable(): void {
     const b = view_.bet
     const push = b.stage === 'push'
     const price = (c: BetChoice) => (c === 'min' ? (push ? 'stay' : `$${b.stake}`) : `+$${b.extra} on you`)
-    slips = (['max', 'min'] as const).map(c => ({ label: push && c === 'max' ? 'Push' : BET_LABEL[c], price: b.options.includes(c) ? price(c) : b.why[c] ?? price(c), stamp: c, kind: c, enabled: b.options.includes(c), onClick: () => {
+    const ask = (c: BetChoice) => c === 'max' && needsConfirm('max')
+    slips = (['max', 'min'] as const).map(c => ({ label: c === 'max' && isArmed('max') ? 'Sure?' : push && c === 'max' ? 'Push' : BET_LABEL[c], price: b.options.includes(c) ? price(c) : b.why[c] ?? price(c), stamp: ask(c) && !isArmed('max') ? '' : c, kind: c, enabled: b.options.includes(c), onClick: c === 'max' ? confirmed('max', () => void dispatch({ type: 'bet', choice: c })) : () => {
       void dispatch({ type: 'bet', choice: c })
     } }))
     const off = (['min', 'max'] as const).filter(c => b.why[c]).map(c => `${BET_LABEL[c]}: ${b.why[c]}.`).join(' ')
@@ -1532,6 +1601,7 @@ function renderTable(): void {
     sort: handSort,
     onSort: by => {
       handSort = by
+      setPref('sort', by)
       render()
     },
     settled,

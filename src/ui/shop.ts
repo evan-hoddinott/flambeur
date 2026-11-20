@@ -21,6 +21,9 @@ import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } 
 import { drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, setDrawerHover, type DrawerThing } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
 import { drawTips, tip as teach } from './tips.ts'
+import { still as reducedMotion, frameGate, stageScale, flash as calm } from './prefs.ts'
+import { PAUSE_TAB, drawPause, openPause, pauseClick, pauseHoverAt, pauseOpen, pauseTab } from './pause.ts'
+import { cursorFor } from './cursor.ts'
 
 export type ShopState = {
   view: SeatView
@@ -75,7 +78,6 @@ type Hit = { x: number; y: number; w: number; h: number; onClick: () => void; ma
 let hits: Hit[] = []
 let bubble: { text: string; t: number } | null = null
 let enteredRound = -1
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 let enteredAt = -Infinity
 let restockBeat: { at: number; old: ShopState; landed: boolean } | null = null
 let purchases: { at: number; offer: ShopOfferView; slot: number; center: number }[] = []
@@ -181,7 +183,7 @@ export function showShop(app: HTMLElement, next: ShopState): void {
       lastInput = now
     }
     cv.onpointerdown = e => {
-      if (!lotto) return
+      if (!lotto || pauseOpen()) return
       dragging = true
       lotto.rubbed = false
       mouse = toStage(e)
@@ -403,9 +405,9 @@ function resize(): void {
   const dpr = window.devicePixelRatio || 1
   cv.width = Math.round(innerWidth * dpr)
   cv.height = Math.round(innerHeight * dpr)
-  k = Math.min(cv.width / W, cv.height / H)
-  ox = (cv.width - W * k) / 2
-  oy = (cv.height - H * k) / 2
+  k = stageScale(cv.width, cv.height, W, H)
+  ox = Math.round((cv.width - W * k) / 2)
+  oy = Math.round((cv.height - H * k) / 2)
   g.imageSmoothingEnabled = false
 }
 
@@ -417,6 +419,13 @@ function toStage(e: MouseEvent): { x: number; y: number } {
 // a click that lands on something always makes a sound: its own, or the press
 function click(p: { x: number; y: number }): void {
   lastInput = now
+  if (pauseOpen()) {
+    const mark = sfx.played()
+    const on = pauseHoverAt(p) !== null
+    pauseClick(p)
+    if (on) sfx.quietSince(mark)
+    return
+  }
   if (lotto) return lottoClick()
   const mark = sfx.played()
   if (clicked(p)) sfx.quietSince(mark)
@@ -454,11 +463,14 @@ window.addEventListener('keydown', e => {
   bulkAt = enteredAt = stockAt = -Infinity
 })
 
+const gate = frameGate()
+
 function frame(t: number): void {
   if (!cv || !cv.isConnected || !state) {
     running = false
     return
   }
+  if (!gate(t)) return void requestAnimationFrame(frame)
   now = t
   requestAnimationFrame(frame) // booked first, so a throw in draw shows in the console without freezing the shop
   hits = []
@@ -474,18 +486,25 @@ function frame(t: number): void {
   // under a panel or the bifold the scene doesn't see the mouse, so nothing behind it lights up
   const real = mouse
   const away = { x: -1, y: -1 }
-  const drawer = !lotto && (drawerOpen() || overDrawer)
-  if (panelOpen() || drawer) mouse = away
+  const paused = pauseOpen()
+  const drawer = !paused && !lotto && (drawerOpen() || overDrawer)
+  if (paused || panelOpen() || drawer) mouse = away
   draw(state)
   mouse = real
   g.restore()
-  drawPanel(g, now, drawer ? away : mouse)
+  drawPanel(g, now, drawer || paused ? away : mouse)
   sales()
   drawDrawer(g, state.view, now)
   drawBand(g, now,state.view.me.shop?.open ? 76 : 195)
-  drawTips(g, drawerOpen())
+  drawTips(g, drawerOpen() || paused)
   drawFiche(g)
-  cv.style.cursor = jeton ? 'none' : lotto || drawer || (panelOpen() ? panelHover(mouse) : over()) ? 'pointer' : 'default'
+  drawPause(g, mouse)
+  if (paused) {
+    const key = pauseHoverAt(mouse)
+    cv.style.cursor = cursorFor(key ? 'pointer' : 'default')
+    return sfx.hover(key)
+  }
+  cv.style.cursor = cursorFor(jeton ? 'none' : lotto || drawer || (panelOpen() ? panelHover(mouse) : over()) ? 'pointer' : 'default')
   // the hover tick, from whichever layer has the mouse. shop hits are by index and size, so a swaying box stays one hover
   const layer = lotto ? null : drawer ? drawerHoverAt() : panelOpen() ? panelHoverAt(mouse) : undefined
   if (layer !== undefined) sfx.hover(layer?.key ?? null, layer?.card, layer?.x)
@@ -595,6 +614,7 @@ function draw(st: ShopState): void {
   bell(st)
   sign(v)
   const twistBox = runStrip(g, v)
+  pauseTab(g, hit(PAUSE_TAB.x, PAUSE_TAB.y, PAUSE_TAB.w, PAUSE_TAB.h, openPause))
   const twist = v.twist ?? v.nextTwist?.twist
   if (twistBox && twist) tip(() => entry('twist', twist.id, twist), twistBox.x, twistBox.y, twistBox.w, twistBox.h)
   if (shop.services.bulkBin) {
@@ -1285,6 +1305,8 @@ const FOIL_FLAKES = ['#5c5c6e', '#9a9aae', '#dcdce8']
 type Win = { symbol: Insert; foil: HTMLCanvasElement; mask: Uint8Array; left: number; clearedAt: number }
 type Lotto = Scratch & { wins: Win[]; at: number; wonAt: number; autoAt: number; closeAt: number; rubbed: boolean; noiseAt: number }
 let lotto: Lotto | null = null
+// the scratch ticket is up: Esc is its (it closes the ticket), not the pause menu's
+export const lottoOpen = () => lotto !== null
 let shownKey = -1
 let spent = 0
 let dragging = false
@@ -1473,8 +1495,8 @@ function drawTicket(t: Lotto): void {
     const flash = Math.max(0, 1 - age / 2000)
     if (flash) {
       const bloom = g.createRadialGradient(cx, cy, 20, cx, cy, 420)
-      bloom.addColorStop(0, `rgba(176,232,120,${0.55 * flash})`)
-      bloom.addColorStop(1, `rgba(74,154,116,${0.2 * flash})`)
+      bloom.addColorStop(0, `rgba(176,232,120,${calm(0.55 * flash)})`)
+      bloom.addColorStop(1, `rgba(74,154,116,${calm(0.2 * flash)})`)
       g.fillStyle = bloom
       g.fillRect(0, 0, W, H)
     }

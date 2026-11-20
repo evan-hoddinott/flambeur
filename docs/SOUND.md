@@ -11,7 +11,7 @@ Nov 19 2026, from Evan's ask: French, an accordion count-up like Balatro's, cris
 - Every hover, press and state change in both scenes makes a sound. Nothing you can click is silent.
 - Cards sound crisp: short, dry, transient-first, never two identical hits in a row.
 - The Appraisal count-up is an accordion. It rises one step per scoring step and always sits in key with the music.
-- There's a master, music and sfx volume in the carnet, and **M** mutes.
+- There's a master, music, effects and room volume in the pause menu (UX.md §2b), and **M** mutes.
 - No sound starts late. Everything is decoded before the first deal.
 - A full `/?quick&auto` run plays without clipping and without console errors.
 
@@ -77,7 +77,7 @@ ambience ─ amb bus ──┘
 - **Distance:** the rival's side gets −6 dB and a 3 kHz lowpass. Their cards sound across the table.
 - **Voice caps:** 4 copies of a sound at once, max. Hover sounds have a 40 ms cooldown, so sweeping across the hand ripples instead of buzzing.
 - **Ducking:** the music bus ducks by a gain ramp, never a cut. Count-up −4 dB. Pack rip −6 dB and a 900 Hz lowpass. The god pull hold −24 dB. Recovers over 600 ms.
-- **Volume:** master, music and sfx sliders on the carnet's Rules page, saved in `localStorage` (wrapped in try/catch). **M** toggles mute.
+- **Volume:** master, music, effects and room (the ambience bus) in the pause menu, saved with every other setting in `src/ui/prefs.ts`. **M** toggles mute, the tab going hidden mutes too (a setting, on by default), and the voice blips have their own switch.
 - **Levels** (starting values, tune by ear):
 
 | Group | Peak | Examples |

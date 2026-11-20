@@ -1,5 +1,5 @@
 import { mix, still } from './motion.ts'
-import { bookClose, creak, getSettings, page as pageTurn, setSetting, thunk } from './sound.ts'
+import { bookClose, creak, page as pageTurn, thunk } from './sound.ts'
 // the drawer (UX.md §3): a worn leather carnet poking out of the bottom-left corner, the same in every scene. its
 // index tabs stick out with live counts, hover pulls it into view, a click or D/B/S/V/? flies it to the middle and
 // swings it open as one tabbed viewer, and compare mode docks it small beside an offer. stage units (640×360)
@@ -8,8 +8,6 @@ import { collectible, drawCollectible } from './collectibles.ts'
 import { drawText, measure, richSize, richText, wrapText, type TextStyle } from './font.ts'
 import { insertFace } from './placeholders.ts'
 import { handsColumn, howColumn } from './rules.ts'
-import { lang, setLang } from './lang.ts'
-import { setTips, tipsOn } from './tips.ts'
 import { SUITS, SUIT_GLYPH, cardValue, rankLabel, type Card } from '../engine/cards.ts'
 import { deckDelta } from '../engine/compare.ts'
 import { getDef } from '../engine/collectibles.ts'
@@ -917,27 +915,9 @@ function vitrine(g: CanvasRenderingContext2D, v: SeatView): void {
 
 // ---------- carnet ----------
 
-// the game's switches live at the foot of the rules page, not on the table: the volume, the language and the tips.
-// M mutes anywhere
-const LEVELS: [string, number][] = [['Off', 0], ['Low', 0.35], ['Mid', 0.65], ['High', 1]]
+// the switches moved to the pause menu: the foot of the rules page says where
 function settings(g: CanvasRenderingContext2D, y: number): void {
-  let x = R.x
-  const now = getSettings()
-  for (const [label, key] of [['Sound', 'master'], ['Music', 'music']] as const) {
-    text(g, label, x, y - 14, { font: 'tiny', color: FADED })
-    x += measure(label, 'tiny') + 6
-    const at = LEVELS.reduce((a, b) => (Math.abs(b[1] - now[key]) < Math.abs(a[1] - now[key]) ? b : a))
-    for (const [name, level] of LEVELS) x += chip(g, name, x, y - 16, at[1] === level, () => setSetting(key, level)) + 3
-    x += 12
-  }
-  x = R.x
-  text(g, 'Language', x, y + 2, { font: 'tiny', color: FADED })
-  x += measure('Language', 'tiny') + 6
-  for (const [id, label] of [['en', 'EN'], ['fr', 'FR']] as const) x += chip(g, label, x, y, lang() === id, () => setLang(id)) + 3
-  x += 12
-  text(g, 'Tips', x, y + 2, { font: 'tiny', color: FADED })
-  x += measure('Tips', 'tiny') + 6
-  for (const on of [true, false]) x += chip(g, on ? 'On' : 'Off', x, y, tipsOn() === on, () => setTips(on)) + 3
+  text(g, 'Volume, speed, language and the rest: Esc, the pause menu.', R.x, y + 2, { font: 'tiny', color: FADED })
 }
 
 const GLOSS_KIND: Record<Kind, string> = {

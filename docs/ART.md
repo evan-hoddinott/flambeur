@@ -447,9 +447,14 @@ Every panel is a **real piece of paper from the casino and the tabac**: betting 
 
 ## 15. Accessibility (from day one)
 
-- **Reduce motion:** no screen shake, no swirl movement, no camera drift, shorter flips. Fire and shimmer still render, but calmer.
-- **Post strength slider:** 0–100% for grain, smoke, vignette and light leaks.
+All of these are switches in the pause menu (UX.md §2b).
+
+- **Reduce motion:** no screen shake, no swirl movement, no camera drift, shorter flips. Fire and shimmer still render, but calmer. Auto follows the system setting.
+- **Post strength slider:** 0–100% for grain, smoke, vignette and light leaks (Atmosphere).
+- **Screen shake:** off, low or full, on its own as well.
+- **Calm flashes:** the god pull, the Grail bloom, the lamp flare and light leaks at about a third.
 - **Four-color suits** (see Color).
+- **High contrast** text and a **Large Fiche** at 2×.
 - Color is never the only signal: Value, Hype and Grade numbers always come with their label or icon.
 
 ---

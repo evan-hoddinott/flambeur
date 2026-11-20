@@ -1,10 +1,11 @@
 // the last pick can open the shop in the same step. finish the deal above the scene change.
 import { canvas, cardCanvas, ctx2d } from './art.ts'
 import type { SeatView } from '../engine/match.ts'
+import { still } from './prefs.ts'
 
 export function spoilPicked(before: SeatView, id: number | null, last: boolean): void {
   const spoils = before.spoils
-  if (!spoils || !document.querySelector('canvas.stage') || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  if (!spoils || !document.querySelector('canvas.stage') || still.matches) return
   const cards = spoils.cards.map((card, i) => ({ card, x: 260 + i * 60 }))
   const surface = canvas(640, 360)
   surface.className = 'spoil-flight'

@@ -5,18 +5,20 @@ import type { Entry, Kind } from '../engine/glossary.ts'
 import { sprite, tinted, specialInk } from './art.ts'
 import { modifierInk, starInk } from './ink.ts'
 import { drawText, measure, wrapText, richText, richSize, plainText } from './font.ts'
+import { pref, still } from './prefs.ts'
 
 type Rect = { x: number; y: number; w: number; h: number }
 export type Side = 'right' | 'left' | 'above' | 'below'
 type Shown = { e: Entry; key: string; anchor: Rect; side: Side }
 
-const W = 640
-const H = 360
+// the stage, or half of it while the Large Fiche draws everything at 2x
+let W = 640
+let H = 360
 const BODY_W = 150 // rule text wraps here
 const SUB_W = 112 // keyword sub-boxes are narrower
 const PAD = 6
 const GAP = 4 // anchor to box
-const DELAY = 120
+const DELAY = { instant: 0, short: 120, slow: 450 } // the pause menu's Fiche on hover
 const GRACE = 150 // hid this recently: the next one shows with no delay, so sliding along the hand doesn't stutter
 const HOLD = 400
 const INK = '#2e2320'
@@ -226,7 +228,6 @@ function place(w: number, h: number, a: Rect, side: Side): { x: number; y: numbe
   return { x: clamp(Math.round(right ? rightX : leftX), 2, W - 2 - w), y: clamp(Math.round(a.y), 2, H - 2 - h), right }
 }
 
-const still = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
 
 // draws a fiche next to the anchor right now, no hover timing
 function paintFiche(g: CanvasRenderingContext2D, e: Entry, anchor: Rect, o: { age?: number; pinned?: boolean; side?: Side } = {}): void {
@@ -236,7 +237,7 @@ function paintFiche(g: CanvasRenderingContext2D, e: Entry, anchor: Rect, o: { ag
   const at = place(size.w, size.h, anchor, side)
   // a 3px drop as it lands, like paper slapped on the table
   const age = o.age ?? Infinity
-  const drop = still?.matches || age >= 90 ? 0 : Math.round(3 * (1 - age / 90) ** 2)
+  const drop = still.matches || age >= 90 ? 0 : Math.round(3 * (1 - age / 90) ** 2)
   drawBox(g, r, at.x, at.y - drop, size.w, size.h, false)
   if (o.pinned) {
     const pin = sprite('fiche/pin')
@@ -290,6 +291,8 @@ export function pinFiche(): void {
   pinnedAt = performance.now()
 }
 
+export const fichePinned = () => pinned !== null
+
 export function clearFiche(): void {
   pinned = null
   shown = null
@@ -308,15 +311,25 @@ export function drawFiche(g: CanvasRenderingContext2D): void {
     shown = want
     shownAt = t
   } else if (waiting?.key !== want.key) waiting = { key: want.key, since: t }
-  else if (t - waiting.since >= DELAY) {
+  else if (t - waiting.since >= DELAY[pref('fiche')]) {
     shown = want
     shownAt = t
     waiting = null
   }
   want = null
   if (shown) lastKey = shown.key
-  if (pinned) paintFiche(g, pinned.e, pinned.anchor, { age: t - pinnedAt, pinned: true, side: pinned.side })
-  if (shown && shown.key !== pinned?.key) paintFiche(g, shown.e, shown.anchor, { age: t - shownAt, side: shown.side })
+  // Large Fiche: draw on a half-size stage at 2x, so it still fits and still clears its anchor
+  const k = pref('bigFiche') ? 2 : 1
+  const at = (a: Rect) => ({ x: a.x / k, y: a.y / k, w: a.w / k, h: a.h / k })
+  W = 640 / k
+  H = 360 / k
+  g.save()
+  g.scale(k, k)
+  if (pinned) paintFiche(g, pinned.e, at(pinned.anchor), { age: t - pinnedAt, pinned: true, side: pinned.side })
+  if (shown && shown.key !== pinned?.key) paintFiche(g, shown.e, at(shown.anchor), { age: t - shownAt, side: shown.side })
+  g.restore()
+  W = 640
+  H = 360
 }
 
 // the scene's one call: right-click pins, a 400 ms finger hold pins (and eats the tap it ends with).

@@ -9,6 +9,9 @@ import { canvas, ctx2d, sprite, tinted } from './art.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
 import * as sfx from './sound.ts'
 import { LANG_TAB, langTab } from './frame.ts'
+import { PAUSE_TAB, pauseTabW, drawPause, openPause, pauseClick, pauseHoverAt, pauseOpen, pauseTab } from './pause.ts'
+import { frameGate, stageScale } from './prefs.ts'
+import { cursorFor } from './cursor.ts'
 import { toggleLang } from './lang.ts'
 import { INTRO_FRAMES, IDLE_FRAMES, LOGO_H, LOGO_W, firelight, frameMs, logoFrame } from './logo.ts'
 
@@ -192,9 +195,9 @@ function layout(): void {
   const dpr = window.devicePixelRatio || 1
   cv.width = Math.round(innerWidth * dpr)
   cv.height = Math.round(innerHeight * dpr)
-  k = Math.min(cv.width / W, cv.height / H)
-  ox = (cv.width - W * k) / 2
-  oy = (cv.height - H * k) / 2
+  k = stageScale(cv.width, cv.height, W, H)
+  ox = Math.round((cv.width - W * k) / 2)
+  oy = Math.round((cv.height - H * k) / 2)
   g.imageSmoothingEnabled = false
 }
 
@@ -257,6 +260,7 @@ function toStage(e: { clientX: number; clientY: number }): { x: number; y: numbe
 function bindPointer(): void {
   cv.addEventListener('wheel', e => {
     e.preventDefault()
+    if (pauseOpen()) return
     if (!lastWheel) gestureFrom = nearestSnap(camTarget)
     camTarget = clampCam(camTarget + e.deltaY * (e.deltaMode === 1 ? 16 : 1) * 0.6)
     lastWheel = now
@@ -276,6 +280,7 @@ function bindPointer(): void {
   cv.addEventListener('pointerleave', () => { mouse = { x: -1, y: -1 } })
   cv.addEventListener('pointerdown', e => {
     mouse = toStage(e)
+    if (pauseOpen()) return
     drag = { y: e.clientY, cam: camTarget, moved: false, vy: 0, t: now }
     gestureFrom = nearestSnap(camTarget)
     cv.setPointerCapture(e.pointerId)
@@ -293,6 +298,13 @@ function bindPointer(): void {
 }
 
 function click(p: { x: number; y: number }): void {
+  if (pauseOpen()) {
+    const mark = sfx.played()
+    const on = pauseHoverAt(p) !== null
+    pauseClick(p)
+    if (on) sfx.quietSince(mark)
+    return
+  }
   const wy = p.y + Math.round(cam)
   for (let i = hits.length - 1; i >= 0; i--) {
     const h = hits[i]
@@ -306,6 +318,8 @@ function click(p: { x: number; y: number }): void {
 }
 
 // ---------- the loop ----------
+
+const gate = frameGate()
 
 function tick(t: number): void {
   if (!root?.isConnected || !state) {
@@ -332,8 +346,15 @@ function tick(t: number): void {
   const damp = 2 * Math.sqrt(stiff) * 0.9
   camVel += (stiff * (camTarget - cam) - damp * camVel) * dt
   cam += camVel * dt
-  draw(t / 1000, state)
   requestAnimationFrame(tick)
+  if (!gate(t)) return
+  // under the pause menu the street doesn't see the mouse
+  const real = mouse
+  if (pauseOpen()) mouse = { x: -1, y: -1 }
+  draw(t / 1000, state)
+  mouse = real
+  drawPause(g, mouse)
+  if (pauseOpen()) cv.style.cursor = cursorFor(pauseHoverAt(mouse) ? 'pointer' : 'default')
 }
 
 function draw(t: number, st: TitleState): void {
@@ -362,7 +383,7 @@ function draw(t: number, st: TitleState): void {
     const h = hits[i]
     if (mouse.x >= h.x && mouse.x <= h.x + h.w && wy >= h.y && wy <= h.y + h.h) over = h
   }
-  cv.style.cursor = drag?.moved ? 'grabbing' : over ? (over.field ? 'text' : 'pointer') : 'default'
+  cv.style.cursor = cursorFor(drag?.moved ? 'grabbing' : over ? (over.field ? 'text' : 'pointer') : 'default')
   if (focused) placeInput()
 }
 
@@ -716,6 +737,10 @@ function street(t: number): void {
 
   // FR · EN, top right of the street
   langTab(g, hit('lang', W - LANG_TAB.w - 6, 0, LANG_TAB.w, LANG_TAB.h, toggleLang), W - LANG_TAB.w - 6)
+  // the settings, beside it
+  const sw = pauseTabW('Settings')
+  const sx = W - LANG_TAB.w - sw - 12
+  pauseTab(g, hit('settings', sx, 0, sw, PAUSE_TAB.h, openPause), sx, 'Settings')
   // the casino's marquee: CASINO and a chase of bulbs
   text('CASINO', W / 2, SIDEWALK - 92, { font: 'chalk', color: '#e8c260', align: 'center', bold: true })
   for (let i = 0; i < 16; i++) {

@@ -30,6 +30,9 @@ import { closeDrawer, deckCounts, drawDrawer, drawerHoverAt, drawerKey, drawerOp
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
 import { drawTips, tip, tipShowing } from './tips.ts'
 import { KEYWORDS, cardEntry, entry, type Entry } from '../engine/glossary.ts'
+import { still as stillCards, frameGate, shake as shakeAmount, flash, stageScale, pref, pace } from './prefs.ts'
+import { PAUSE_TAB, drawPause, openPause, pauseClick, pauseHoverAt, pauseOpen, pauseTab } from './pause.ts'
+import { cursorFor } from './cursor.ts'
 
 export type Kind = 'lock' | 'max' | 'min' | 'forge' | 'discard' | 'insert' | 'skip' | 'continue'
 // primary = the one "move on" action that pulses. never a bet choice. stamp = the ink slam sprite when it's pressed
@@ -314,7 +317,7 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
     detachFiche = ficheInput(cv, toStage)
     cv.onpointerdown = e => {
       suppressClick = false
-      if (!e.isPrimary || e.button !== 0 || calling() || drawerOpen() || overDrawer || panelOpen()) return
+      if (!e.isPrimary || e.button !== 0 || calling() || drawerOpen() || overDrawer || panelOpen() || pauseOpen()) return
       const p = toStage(e)
       const cuff = cuffHits.find(h => Math.abs(p.x - h.x) <= h.w / 2 && Math.abs(p.y - h.y) <= h.h / 2)
       if (!cuff) return
@@ -393,9 +396,9 @@ function resize(): void {
   const dpr = window.devicePixelRatio || 1
   cv.width = Math.round(innerWidth * dpr)
   cv.height = Math.round(innerHeight * dpr)
-  k = Math.min(cv.width / W, cv.height / H)
-  ox = (cv.width - W * k) / 2
-  oy = (cv.height - H * k) / 2
+  k = stageScale(cv.width, cv.height, W, H)
+  ox = Math.round((cv.width - W * k) / 2)
+  oy = Math.round((cv.height - H * k) / 2)
   g.imageSmoothingEnabled = false
 }
 
@@ -411,6 +414,11 @@ function click(p: { x: number; y: number }): void {
 }
 
 function clicked(p: { x: number; y: number }): boolean {
+  if (pauseOpen()) {
+    const on = pauseHoverAt(p) !== null
+    pauseClick(p)
+    return on
+  }
   if (drawerPointer(p.x, p.y, true)) return drawerHoverAt() !== null
   if (panelOpen()) {
     const on = panelHoverAt(p) !== null
@@ -450,11 +458,14 @@ function cardUnder(p: { x: number; y: number }, list = cardHits): CardHit | null
   return null
 }
 
+const gate = frameGate()
+
 function frame(t: number): void {
   if (!cv || !cv.isConnected || !state) {
     running = false
     return
   }
+  if (!gate(t)) return void requestAnimationFrame(frame)
   const dt = Math.min(0.05, (t - now) / 1000 || 0)
   now = t
   stepSprings(dt)
@@ -473,8 +484,9 @@ function frame(t: number): void {
   // whichever of them has the mouse, the scene doesn't see it
   const real = mouse
   const off = { x: -1, y: -1 }
-  const covered = overDrawer || drawerOpen()
-  if (covered || panelOpen()) mouse = off
+  const paused = pauseOpen()
+  const covered = !paused && (overDrawer || drawerOpen())
+  if (paused || covered || panelOpen()) mouse = off
   spoilsShown = false
   draw(state)
   mouse = real
@@ -483,11 +495,17 @@ function frame(t: number): void {
     setCompareHover(null)
   }
   drawBand(g, now)
-  drawPanel(g, now, covered ? off : mouse)
+  drawPanel(g, now, covered || paused ? off : mouse)
   drawDrawer(g, state.view, now)
-  drawTips(g, drawerOpen())
+  drawTips(g, drawerOpen() || paused)
   drawFiche(g)
-  cv.style.cursor = (covered ? overDrawer : panelOpen() ? panelHover(mouse) : hoverable()) ? 'pointer' : 'default'
+  drawPause(g, mouse)
+  if (paused) {
+    const key = pauseHoverAt(mouse)
+    cv.style.cursor = cursorFor(key ? 'pointer' : 'default')
+    return sfx.hover(key)
+  }
+  cv.style.cursor = cursorFor((covered ? overDrawer : panelOpen() ? panelHover(mouse) : hoverable()) ? 'pointer' : 'default')
   const layer = covered ? drawerHoverAt() : panelOpen() ? panelHoverAt(mouse) : undefined
   if (layer !== undefined) sfx.hover(layer?.key ?? null, layer?.card, layer?.x)
   else sceneHover()
@@ -663,7 +681,7 @@ let roomLayer: HTMLCanvasElement | null = null
 let feltLayer: HTMLCanvasElement | null = null
 
 function layers(table: number, tournament: boolean): void {
-  const key = `${table}|${tournament}|${lang()}`
+  const key = `${table}|${tournament}|${lang()}|${pref('post')}`
   if (key === roomKey) return
   roomKey = key
   roomLayer = buildRoom()
@@ -680,7 +698,7 @@ function buildRoom(): HTMLCanvasElement {
   for (let y = 0; y < 151; y++) {
     for (let x = 0; x < W; x++) {
       const i = (y * W + x) * 4
-      const dark = 96 * Math.abs((x - 319.5) / 320) ** 1.8 / 255
+      const dark = 96 * pref('post') * Math.abs((x - 319.5) / 320) ** 1.8 / 255
       img.data[i] = img.data[i] * (1 - dark) + 9 * dark
       img.data[i + 1] = img.data[i + 1] * (1 - dark) + 3 * dark
       img.data[i + 2] = img.data[i + 2] * (1 - dark) + 10 * dark
@@ -875,14 +893,15 @@ function draw(st: DuelState): void {
   const t = now / 1000
 
   // world layers drift a little, the hud stays put
-  const drift = { x: Math.sin(t / 6 * Math.PI * 2) * 2, y: Math.cos(t / 7.3 * Math.PI * 2) * 1, r: Math.sin(t / 9 * Math.PI * 2) * 0.003 }
+  const sway = stillCards.matches ? 0 : 1
+  const drift = { x: Math.sin(t / 6 * Math.PI * 2) * 2 * sway, y: Math.cos(t / 7.3 * Math.PI * 2) * sway, r: Math.sin(t / 9 * Math.PI * 2) * 0.003 * sway }
   g.setTransform(k, 0, 0, k, ox, oy)
   g.save()
   g.beginPath()
   g.rect(0, 0, W, H)
   g.clip()
-  const forgeShake=forgeFx?.result?.tier===3 && now-forgeFx.at>=540 ? 4*(1-progress(now-forgeFx.at-540,450)) : 0
-  const impact = !stillCards.matches && calling() ? Math.max(0, 1 - (now - callout!.t) / 200) : 0
+  const forgeShake=forgeFx?.result?.tier===3 && now-forgeFx.at>=540 ? 4*shakeAmount()*(1-progress(now-forgeFx.at-540,450)) : 0
+  const impact = calling() ? shakeAmount() * Math.max(0, 1 - (now - callout!.t) / 200) : 0
   g.translate(320 + drift.x + forgeShake*Math.sin(now*.08) + impact * Math.sin(now * 0.12) * 2, 180 + drift.y - impact * 2)
   g.rotate(drift.r)
   const age = now-reelAt
@@ -891,7 +910,7 @@ function draw(st: DuelState): void {
   g.translate(-320, -180)
 
   room(st, tournament, t)
-  lamp(tournament, t, st.bare ? 0 : Math.max(turnFlare(st),push*36))
+  lamp(tournament, t, st.bare ? 0 : flash(Math.max(turnFlare(st),push*36)))
   if (st.bare) {
     g.drawImage(feltLayer!, 0, 0)
     you(st, t)
@@ -918,7 +937,7 @@ function draw(st: DuelState): void {
     if(age>=540) {
       const u=progress(age-540,430)
       pin(`mask/${st.rival.mask}/front`,mix(RIVAL_X,327,u),mix(59,202,u)-75*Math.sin(Math.PI*u),{r:u*2.8,sy:1-u*.57})
-      if(age<1130) pin('fx/leak',-160+800*progress(age-540,600),0,{alpha:.33})
+      if(age<1130) pin('fx/leak',-160+800*progress(age-540,600),0,{alpha:flash(.33*pref('post'))})
     }
   }
   // bet tickets sit on top of face-down cards, but under the cards once they're face up and scoring
@@ -1062,7 +1081,7 @@ function rival(st: DuelState, t: number): void {
   // their fan of backs, face-up for any card you're allowed to see
   if (st.settled && view.showdown) {
     if (won && t % 3 < 1.6) {
-      pin('rival/hand/smoke', RIVAL_X + 14, 88, { s: 0.72 })
+      pin('rival/hand/smoke', RIVAL_X + 14, 88, { s: 0.72, alpha: pref('post') })
       pin('rival/holder', RIVAL_X + 20, 92, { s: 0.75, r: -0.3 })
     } else pin('rival/hand/tap/' + (1 + Math.floor(t * 5) % 3), RIVAL_X + 11, 106 + slump, { s: 0.72 })
     return
@@ -1312,7 +1331,6 @@ function rowOf(cards: Card[], row: typeof NEAR_ROW, a: Appraisal, side: string, 
   })
 }
 
-const stillCards = matchMedia('(prefers-reduced-motion: reduce)')
 function drawCard(c: Card, x: number, y: number, scale: number, angle: number, dim = false, castsShadow = false) {
   const img = cardCanvas(c)
   scale *= stockScale(c)
@@ -1549,7 +1567,7 @@ function hand(st: DuelState, t: number): void {
 // ONBOARDING.md #1), then the locked hand through the bet. the showdown's count-up is the felt tag's
 const READOUT = { x: 8 + 76, y: 144 + 7, w: MY_PLATE_W - 76 - 7, h: 44 }
 // out of the deal and the bet the plate folds back to name and money
-const readoutUp = (st: DuelState) => !st.settled && !st.view.me.forge && (st.view.phase === 'deal' || st.view.phase === 'bet')
+const readoutUp = (st: DuelState) => pref('preview') && !st.settled && !st.view.me.forge && (st.view.phase === 'deal' || st.view.phase === 'bet')
 function handReadout(st: DuelState): void {
   const me = st.view.me
   if (!readoutUp(st)) return
@@ -1694,6 +1712,7 @@ function hud(st: DuelState, t: number): void {
 function frameZones(st: DuelState): void {
   const view = st.view
   const twist = runStrip(g, view, st.settled && view.last ? view.last.round : view.round, !!view.twist)
+  pauseTab(g, hit(PAUSE_TAB.x, PAUSE_TAB.y, PAUSE_TAB.w, PAUSE_TAB.h, openPause))
   look(STRIP.x, STRIP.y, STRIP.w, 16, rule('round'))
   const tw = view.twist ?? view.nextTwist?.twist
   if (twist && tw) look(twist.x, twist.y, twist.w, twist.h, () => entry('twist', tw.id, tw))
@@ -2175,7 +2194,8 @@ function tally(st: DuelState): number {
   const at = spring('tally', { x, y, r: 0, s: 1 }, { x: W + 20, y, r: 0, s: 1 })
   if(!Number.isFinite(tallyAt)) tallyAt=now
   const age=stillCards.matches?Infinity:now-tallyAt
-  const lines=Math.min(rows.length,Math.floor(age/120))
+  const beat = 120 / pace()
+  const lines=Math.min(rows.length,Math.floor(age/beat))
   if(lines>tallyLine) {
     tallyLine=lines
     if (lines === rows.length) sfx.register()
@@ -2199,7 +2219,7 @@ function tally(st: DuelState): number {
   g.fillStyle = '#bfa77e'
   g.fillRect(at.x + 6, ty - 2, w - 12, 1)
   text('This round', at.x + 8, ty + 1, { font: 'sans', bold: true })
-  text(`${total >= 0 ? '+' : '−'}$${Math.round(Math.abs(total)*progress(age-lines*120,270))}`, at.x + w - 8, ty + 1, { font: 'sans', bold: true, align: 'right', color: total >= 0 ? '#3a8040' : BURGUNDY })
+  text(`${total >= 0 ? '+' : '−'}$${Math.round(Math.abs(total)*progress(age-lines*beat,270/pace()))}`, at.x + w - 8, ty + 1, { font: 'sans', bold: true, align: 'right', color: total >= 0 ? '#3a8040' : BURGUNDY })
   noteLines.forEach((line, i) => text(line, at.x + 6, ty + 12 + i * 10, { font: 'sans', color: '#5c4a36' }))
   return y - 8
 }
@@ -2255,7 +2275,8 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 export async function countUp(sd: ShowdownView): Promise<void> {
   const fresh = (): Live => ({ v: 0, h: 0, g: 0, label: '', step: '' })
   live = [fresh(), fresh()]
-  await sleep(500) // let the cards land on their spots
+  const skip = pref('countUp') === 'skip' // straight to the totals: one note, no waits
+  await sleep(500 / pace()) // let the cards land on their spots
   // a thrown hand has nothing to count
   const sides = [sd.mine, sd.theirs]
   const cards = [...sd.myCards, ...sd.theirCards]
@@ -2282,7 +2303,7 @@ export async function countUp(sd: ShowdownView): Promise<void> {
       if (st.slot !== null && n === 0) {
         l.step = st.label
         caseFired(st.slot, st)
-        sfx.caseClink()
+        if (!skip) sfx.caseClink()
       }
       if (card) {
         pop(`card${card.id}`)
@@ -2298,11 +2319,11 @@ export async function countUp(sd: ShowdownView): Promise<void> {
         }
       }
     })
-    sfx.countStep(i, loud, x)
+    if (!skip || i === steps - 1) sfx.countStep(i, loud, x)
     // the music's hype layer climbs with your running appraisal
     const mine = live![0]
     if (sd.mine && state) music.heat(Math.floor(mine.v * Math.max(1, mine.h) * 2 ** mine.g) / REF_SCORE[Math.min(state.view.round, REF_SCORE.length) - 1])
-    await sleep(Math.max(130, 340 - i * 14))
+    if (!skip) await sleep(Math.max(130, 340 - i * 14) / pace())
   }
   sides.forEach((a, n) => {
     const l = live![n]
@@ -2310,9 +2331,9 @@ export async function countUp(sd: ShowdownView): Promise<void> {
   })
   reelAt = performance.now()
   if (sd.mine) sfx.reelSpin()
-  if(!stillCards.matches && sides.some(Boolean)) {
+  if(!stillCards.matches && !skip && sides.some(Boolean)) {
     const digits = Math.max(...sides.map(a=>fmt(a?.total ?? 0).length))
-    await sleep(300+digits*95)
+    await sleep((300+digits*95) / pace())
   }
   live = null
   music.cool()

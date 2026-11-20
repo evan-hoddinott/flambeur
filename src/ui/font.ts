@@ -5,6 +5,7 @@ import fontsJson from '../../art/fonts/fonts.json'
 import { canvas, ctx2d } from './art.ts'
 import { say, segments } from './lang.ts'
 import { GRADE, HYPE, LOSS, MONEY, VALUE } from './ink.ts'
+import { pref, still } from './prefs.ts'
 
 export type FontName = 'sans' | 'tiny' | 'didone' | 'chalk'
 
@@ -78,7 +79,17 @@ export type TextStyle = { font?: FontName; color?: string; align?: 'left' | 'cen
 
 // s is written in french: lang.ts swaps it to english when that's on, and french runs glint
 export function drawText(g: CanvasRenderingContext2D, s: string, x: number, y: number, o: TextStyle = {}): void {
-  drawRuns(g, segments(s), x, y, o, true)
+  drawRuns(g, segments(s), x, y, pref('contrast') ? contrast(o) : o, true)
+}
+
+// High contrast (the pause menu): faded ink goes dark on paper and cream on the felt, light text gets an outline
+const FADED = new Set(['#8c7656', '#5c4a36', '#a08a68', '#bfa77e', '#6b5a44', '#7a6e68', '#a69a90'])
+const LIGHT = new Set(['#f6ecd2', '#e3d2a8', '#fff0b0'])
+function contrast(o: TextStyle): TextStyle {
+  const c = o.color?.toLowerCase() ?? ''
+  if (FADED.has(c)) return { ...o, color: o.outline ? '#f6ecd2' : '#2e2320' }
+  if (LIGHT.has(c) && !o.outline) return { ...o, outline: '#0e0b0a' }
+  return o
 }
 
 function drawRuns(g: CanvasRenderingContext2D, runs: { s: string; french: boolean }[], x: number, y: number, o: TextStyle, glints: boolean): void {
@@ -120,13 +131,12 @@ function drawRuns(g: CanvasRenderingContext2D, runs: { s: string; french: boolea
 const GLINT_MS = 4200
 const GLINT_SWEEP = 0.7 // of each cycle the band is crossing, the rest is a pause
 const GLINT_W = 20 // half-width of the band, stage px
-const glintStill = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
 const lit = new Map<string, string[]>()
 
 // where the band is in this context's x, or null between sweeps. it crosses the on-screen canvas, a bit past both edges.
 // text drawn into an offscreen canvas never glints: a cached glint would stay lit forever
 function glintAt(g: CanvasRenderingContext2D): number | null {
-  if (glintStill?.matches || !(g.canvas instanceof HTMLCanvasElement) || !g.canvas.isConnected) return null
+  if (still.matches || !pref('glint') || !(g.canvas instanceof HTMLCanvasElement) || !g.canvas.isConnected) return null
   const k = (performance.now() % GLINT_MS) / GLINT_MS
   if (k > GLINT_SWEEP) return null
   const w = g.canvas.width

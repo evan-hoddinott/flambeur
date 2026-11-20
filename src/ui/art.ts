@@ -10,6 +10,7 @@ import shopPng from '../../art/shop/shop.png'
 import shopJson from '../../art/shop/shop.json'
 import { rankLabel, traitName, type Card, type Suit } from '../engine/cards.ts'
 import type { StarterId } from '../engine/starters.ts'
+import { onPref, pref } from './prefs.ts'
 
 export type Sprite = {
   img: HTMLImageElement | HTMLCanvasElement
@@ -149,7 +150,9 @@ const COL_X: Record<string, number> = { L: 20, C: 32, R: 44 }
 
 export const INK = { dark: '#1c1513', red: '#a82a38', brass: '#c99a3a' }
 
+// four-color suits (ART.md §15, the pause menu): ♦ brass and ♣ felt green, so a flush reads at a glance
 export function suitInk(suit: Suit): string {
+  if (pref('fourColor')) return { S: INK.dark, H: INK.red, D: INK.brass, C: '#2d7a5c' }[suit]
   return suit === 'S' || suit === 'C' ? INK.dark : INK.red
 }
 
@@ -242,6 +245,13 @@ function silhouette(source: HTMLCanvasElement, color: string): HTMLCanvasElement
 }
 
 const cards = new Map<string, HTMLCanvasElement>()
+// the suit inks changed: every printed face redraws
+onPref(key => {
+  if (key !== 'fourColor') return
+  prints.clear()
+  faces.clear()
+  cards.clear()
+})
 export function cardCanvas(card: Card): HTMLCanvasElement {
   const { rank, suit, variant, finish, stamp, tier, traits, knockoff } = card
   const joker = card.joker === 'crayon' ? 'joker/crayon' : card.joker ? 'joker' : null
