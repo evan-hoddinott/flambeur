@@ -37,25 +37,28 @@ export type TitleState = {
 
 const W = 640
 const H = 360
-const SIDEWALK = 318
-const ROAD = 326
+const ROAD = 331 // the cobbles, under the pavement and curb
 const SOIL = 348 // street surface ends, the cross-section starts
 const CELLAR = 410 // beam top
 const CELLAR_WALL = 422
 const CELLAR_FLOOR = 736
 const STONE = 748
 const SEWER = 812
-const WALK = 1118
 const WATER = 1128
 const WORLD_H = 1180
 const SNAPS = [0, 404, WORLD_H - H] // street, cellar, sewers
 const LOGO = { x: (W - LOGO_W) / 2, y: 2 }
-const LAMP_X = 112
-const CAROTTE = { x: 482, y: 206 }
+// street lights, matching art/title/street.py
+const LAMP = { x: 140, y: 210 } // the lantern
+const CAROTTE = { x: 497, y: 224 } // top middle
+const HOTEL = { x: 622, y: 92 } // the blade sign's top left
+const DOOR = 320 // the casino's door, middle
+const CAT = { x: 98, y: 204 } // the cat on a sill
 const HATCH_X = 566
 const LADDER_X = 600
 const BULBS = [200, 440]
 const OUTLET = { x: 36, y: 1050 }
+const LANTERN = { x: 560, y: 900 } // the sewer's one light, art/title/under.py
 
 const INK = '#2e2320'
 const CREAM = '#f6ecd2'
@@ -400,67 +403,12 @@ function buildWorld(): HTMLCanvasElement {
     w.drawImage(p.img, p.x, p.y, p.w, p.h, -p.px, -p.py, p.w, p.h)
     w.restore()
   }
-  const tile = (name: string, x0: number, y0: number, x1: number, y1: number) => {
-    const p = part(name)
-    for (let y = y0; y < y1; y += p.h) {
-      for (let x = x0; x < x1; x += p.w) {
-        const tw = Math.min(p.w, x1 - x)
-        const th = Math.min(p.h, y1 - y)
-        w.drawImage(p.img, p.x, p.y, tw, th, x, y, tw, th)
-      }
-    }
-  }
-  const scatter = (names: string[], x0: number, y0: number, x1: number, y1: number, n: number, seed: number) => {
-    let s = seed
-    const r = () => ((s = (s * 16807) % 2147483647) / 2147483647)
-    for (let i = 0; i < n; i++) pin(names[Math.floor(r() * names.length)], x0 + r() * (x1 - x0), y0 + r() * (y1 - y0))
-  }
+  // street: sky and far roofs, then the buildings, pavement and cobbles (art/title/street.py)
+  pin('street/back', 0, 0)
+  pin('street/front', 0, 0)
 
-  // street: sky, far roofs, the casino between two blocks, a lamp, the tabac's carotte, curb and cobbles
-  tile('street/sky', 0, 0, W, 200)
-  w.fillStyle = '#1a3256'
-  w.fillRect(0, 200, W, SIDEWALK - 200)
-  tile('street/skyline', 0, 150, W, 222)
-  pin('street/casino', W / 2, SIDEWALK)
-  pin('street/house', 0, SIDEWALK)
-  pin('street/tabac', 490, SIDEWALK)
-  w.fillStyle = '#1c1513'
-  w.fillRect(CAROTTE.x, CAROTTE.y - 2, 490 - CAROTTE.x, 2) // the carotte's bracket
-  pin('street/carotte', CAROTTE.x, CAROTTE.y)
-  pin('street/lamp', LAMP_X, SIDEWALK)
-  tile('street/curb', 0, SIDEWALK, W, ROAD)
-  tile('street/road', 0, ROAD, W, SOIL)
-  pin('street/grate', W / 2, ROAD + 14)
-
-  // the cross-section under the street: asphalt, dirt, a pipe, rocks
-  tile('soil/asphalt', 0, SOIL, W, SOIL + 8)
-  tile('soil/dirt', 0, SOIL + 8, W, CELLAR)
-  tile('soil/pipe', 0, 380, 236, 390)
-  tile('soil/pipe', 420, 384, W, 394)
-  scatter(['soil/rock/1', 'soil/rock/2', 'soil/rock/3'], 10, SOIL + 16, W - 10, CELLAR - 8, 16, 11)
-
-  // the cellar: brick, a beam ceiling, boards, a wine rack and barrels on the left, the hatch down on the right
-  tile('cellar/brick', 0, CELLAR_WALL, W, CELLAR_FLOOR)
-  tile('cellar/beam', 0, CELLAR, W, CELLAR_WALL)
-  tile('cellar/floor', 0, CELLAR_FLOOR, W, STONE)
-  pin('cellar/rack', 20, CELLAR_FLOOR)
-  pin('cellar/barrel', 110, CELLAR_FLOOR)
-  pin('cellar/crate', 110, CELLAR_FLOOR - 40)
-  pin('cellar/barrel', 146, CELLAR_FLOOR)
-  pin('cellar/hatch', HATCH_X, CELLAR_FLOOR)
-
-  // stone under the cellar, the ladder runs down it
-  tile('soil/stone', 0, STONE, W, SEWER)
-  scatter(['soil/rock/1', 'soil/rock/3'], 10, STONE + 8, W - 10, SEWER - 6, 8, 29)
-
-  // the sewer: an arched tunnel, a walkway, the channel, an outlet pipe
-  tile('sewer/stone', 0, SEWER, W, WALK)
-  pin('sewer/corner', 0, SEWER)
-  pin('sewer/corner', W, SEWER, true)
-  tile('cellar/ladder', LADDER_X, STONE, LADDER_X + 28, WALK)
-  tile('sewer/walk', 0, WALK, W, WATER)
-  tile('sewer/water', 0, WATER, W, WORLD_H)
-  pin('sewer/outlet', OUTLET.x, OUTLET.y)
+  // under it: the cut through the road, the cellar, the stone and the sewer (art/title/under.py)
+  pin('under', 0, SOIL)
   return c
 }
 
@@ -717,23 +665,29 @@ function street(t: number): void {
     const a = (t / period + i * 0.37) - cycle
     if (a > 0.3) continue
     const x = ((cycle * 7919 + i * 131) % 620) + 10
-    const y = ROAD + 3 + ((cycle * 31 + i * 17) % 18)
+    const y = ROAD + 2 + ((cycle * 31 + i * 17) % 14)
     const r = 1 + Math.floor(a * 8)
     g.fillRect(x - r, y, 1, 1)
     g.fillRect(x + r, y, 1, 1)
     if (a < 0.1) g.fillRect(x, y - 1, 1, 1)
   }
 
-  // lights: the lamp, the carotte, the door, the tabac window, and their streaks on the wet road
+  // lights: the lamp, the carotte, the door, the shop windows, and their streaks on the wet road
   const flick = 0.92 + 0.08 * Math.sin(t * 13) * Math.sin(t * 7.3)
-  glow(LAMP_X, SIDEWALK - 120, 46, `rgba(255,224,138,${0.32 * flick})`)
-  glow(CAROTTE.x + 9, CAROTTE.y + 18, 30, `rgba(208,74,78,${0.3 + 0.08 * Math.sin(t * 2)})`)
-  glow(W / 2, SIDEWALK - 30, 60, 'rgba(255,176,58,0.16)')
-  glow(555, SIDEWALK - 20, 50, 'rgba(255,176,58,0.14)')
-  reflection(LAMP_X, 'rgba(255,224,138,', 8, t)
-  reflection(W / 2, 'rgba(255,176,58,', 22, t)
-  reflection(CAROTTE.x + 9, 'rgba(208,74,78,', 8, t)
-  reflection(552, 'rgba(255,176,58,', 40, t)
+  glow(LAMP.x, LAMP.y, 50, `rgba(255,224,138,${0.34 * flick})`)
+  glow(LAMP.x, LAMP.y, 10, `rgba(255,251,232,${0.5 * flick})`)
+  glow(CAROTTE.x, CAROTTE.y + 17, 30, `rgba(208,74,78,${0.3 + 0.08 * Math.sin(t * 2)})`)
+  glow(DOOR, 290, 64, 'rgba(255,176,58,0.18)')
+  glow(542, 292, 56, 'rgba(255,176,58,0.14)')
+  glow(60, 296, 56, 'rgba(255,176,58,0.12)')
+  reflection(LAMP.x, 'rgba(255,224,138,', 8, t)
+  reflection(DOOR, 'rgba(255,176,58,', 24, t)
+  reflection(CAROTTE.x, 'rgba(208,74,78,', 8, t)
+  reflection(542, 'rgba(255,176,58,', 40, t)
+  reflection(60, 'rgba(255,176,58,', 40, t)
+  windows(t)
+  smoke(t)
+  catTail(t)
 
   // FR · EN, top right of the street
   langTab(g, hit('lang', W - LANG_TAB.w - 6, 0, LANG_TAB.w, LANG_TAB.h, toggleLang), W - LANG_TAB.w - 6)
@@ -741,21 +695,12 @@ function street(t: number): void {
   const sw = pauseTabW('Settings')
   const sx = W - LANG_TAB.w - sw - 12
   pauseTab(g, hit('settings', sx, 0, sw, PAUSE_TAB.h, openPause), sx, 'Settings')
-  // the casino's marquee: CASINO and a chase of bulbs
-  text('CASINO', W / 2, SIDEWALK - 92, { font: 'chalk', color: '#e8c260', align: 'center', bold: true })
-  for (let i = 0; i < 16; i++) {
-    const x = 140 + i * 8
-    for (const y of [SIDEWALK - 94, SIDEWALK - 80]) {
-      const on = (i + Math.floor(t * 6)) % 3 !== 0
-      g.fillStyle = on ? '#fffbe8' : '#9c7028'
-      g.fillRect(x, y, 1, 1)
-    }
-  }
-  text('TABAC', 565, SIDEWALK - 54, { font: 'chalk', color: '#fff0b0', align: 'center', bold: true })
+  signs(t)
 
   // the logo burns on the casino's roof, and lights the wall behind it
   const light = firelight(frame)
   if (light > 0) glow(W / 2, LOGO.y + 112, 250, `rgba(255,150,40,${0.3 * light})`)
+  floodlights()
   const logo = logoFrame(frame)
   const s = shadow ??= canvas(LOGO_W, LOGO_H)
   const sg = ctx2d(s)
@@ -773,15 +718,16 @@ function street(t: number): void {
   const bob = Math.round(Math.sin(t * 3) * 1.5)
   const label = 'JOUER'
   const lw = measure(label, 'chalk', true)
-  const over = hit('cue:street', W / 2 - lw / 2 - 26, ROAD - 2, lw + 52, 24, () => panTo(1))
-  text(label, W / 2, ROAD + 1, { font: 'chalk', color: over ? CREAM : CHALK, align: 'center', bold: true, outline: OUTLINE })
+  const over = hit('cue:street', W / 2 - lw / 2 - 26, ROAD - 2, lw + 52, 20, () => panTo(1))
+  text(label, W / 2, ROAD, { font: 'chalk', color: over ? CREAM : CHALK, align: 'center', bold: true, outline: OUTLINE })
   chevron(W / 2 - lw / 2 - 12, ROAD + 3 + bob, true)
   chevron(W / 2 + lw / 2 + 12, ROAD + 3 + bob, true)
+  // the lid drips into the dirt below
   g.fillStyle = '#3e66a0'
   for (let i = 0; i < 4; i++) {
     const a = ((t * 0.8 + i * 0.27) % 1)
-    const x = W / 2 - 12 + i * 8
-    g.fillRect(x, ROAD + 22 + Math.round(a * a * (CELLAR - ROAD - 24)), 1, 2)
+    const x = W / 2 - 9 + i * 6
+    g.fillRect(x, SOIL - 1 + Math.round(a * a * (CELLAR - SOIL)), 1, 2)
   }
 }
 
@@ -796,11 +742,96 @@ function reflection(x: number, rgba: string, w: number, t: number): void {
   }
 }
 
+// the shop and casino signs: lettering on their boards, the marquee's bulb chase (one bulb's dead), the hotel's neon
+function signs(t: number): void {
+  text('CAFÉ', 58, 260, { font: 'chalk', color: '#e8c260', align: 'center', bold: true })
+  text('TABAC', 560, 250, { font: 'chalk', color: '#fff0b0', align: 'center', bold: true })
+  glow(DOOR, 236, 40, 'rgba(232,194,96,0.16)')
+  text('CASINO', DOOR, 231, { font: 'chalk', color: '#e8c260', align: 'center', bold: true })
+  const step = Math.floor(t * 6)
+  const bulb = (x: number, y: number, i: number, dead = false) => {
+    const on = !dead && (i + step) % 3 !== 0
+    g.fillStyle = on ? '#fffbe8' : '#6b4a1a'
+    g.fillRect(x, y, 1, 1)
+    if (on) {
+      g.fillStyle = 'rgba(255,224,138,0.35)'
+      g.fillRect(x - 1, y, 3, 1)
+      g.fillRect(x, y - 1, 1, 3)
+    }
+  }
+  for (let i = 0; i < 17; i++) {
+    bulb(DOOR - 32 + i * 4, 227, i, i === 11)
+    bulb(DOOR + 32 - i * 4, 245, i + 17)
+  }
+  for (let i = 0; i < 23; i++) bulb(DOOR - 44 + i * 4, 275, i)
+  // HÔTEL down the blade sign in red neon. the E stutters now and then
+  const sputter = Math.sin(t * 0.7) > 0.8 && Math.sin(t * 31) > 0
+  ;['H', 'Ô', 'T', 'E', 'L'].forEach((ch, i) => {
+    const off = ch === 'E' && sputter
+    const y = HOTEL.y + 8 + i * 15
+    if (!off) glow(HOTEL.x + 7, y + 5, 12, 'rgba(208,74,78,0.35)')
+    text(ch, HOTEL.x + 7, y, { font: 'chalk', color: off ? '#4e1020' : '#ffb03a', align: 'center', bold: true, outline: off ? undefined : '#a82a38' })
+  })
+}
+
+// the floodlights on the casino's parapet throw faint beams up the sign's rig
+function floodlights(): void {
+  for (const x of [196, 284, 356, 444]) {
+    const grad = g.createLinearGradient(0, 186, 0, 90)
+    grad.addColorStop(0, 'rgba(255,224,138,0.16)')
+    grad.addColorStop(1, 'rgba(255,224,138,0)')
+    g.fillStyle = grad
+    g.beginPath()
+    g.moveTo(x - 2, 186)
+    g.lineTo(x + 3, 186)
+    g.lineTo(x + 18, 90)
+    g.lineTo(x - 17, 90)
+    g.fill()
+  }
+}
+
+// life in the windows: a tv flickering, a light that goes off and on again
+function windows(t: number): void {
+  const tv = 0.18 + 0.12 * Math.sin(t * 9) * Math.sin(t * 2.3) + (Math.sin(t * 23) > 0.7 ? 0.1 : 0)
+  g.fillStyle = `rgba(62,102,160,${tv})`
+  g.fillRect(50, 142, 12, 24)
+  g.fillRect(596, 162, 12, 24)
+  // someone's up late on the café block's top floor: the light goes out for a while every 14 s
+  if ((t % 14) > 9) {
+    g.fillStyle = 'rgba(14,11,10,0.82)'
+    g.fillRect(138, 104, 12, 22)
+  }
+}
+
+// chimney smoke drifting off to the right
+function smoke(t: number): void {
+  for (const [x, y, seed] of [[34, 36, 0], [574, 14, 3], [122, 42, 7]] as const) {
+    for (let i = 0; i < 7; i++) {
+      const a = (t * 0.09 + i / 7 + seed * 0.13) % 1
+      const r = 3 + a * 9
+      g.fillStyle = `rgba(140,118,86,${0.16 * (1 - a)})`
+      g.beginPath()
+      g.arc(x + a * 34 + Math.sin(t + i) * 2, y - a * 30, r, 0, Math.PI * 2)
+      g.fill()
+    }
+  }
+}
+
+// the cat's tail hangs off the sill and swishes
+function catTail(t: number): void {
+  const swish = Math.sin(t * 1.6) * (Math.sin(t * 0.4) > 0 ? 1 : 0.3)
+  g.fillStyle = OUTLINE
+  for (let i = 0; i < 9; i++) {
+    const x = CAT.x + 8 + Math.round(swish * (i / 8) * (i / 8) * 4)
+    g.fillRect(x, CAT.y + i - 1, 1, 1)
+  }
+}
+
 // ---------- the cellar: solo play ----------
 
 function cellar(t: number, st: TitleState): void {
   // two bare bulbs on swaying cords, the room dark toward its corners
-  vignette(CELLAR_WALL, CELLAR_FLOOR, W / 2, 560, 380, 0.75)
+  vignette(CELLAR_WALL, CELLAR_FLOOR, W / 2, 560, 380, 0.4)
   BULBS.forEach((x, i) => {
     const sway = Math.sin(t * 0.9 + i * 2) * 0.05
     const len = 24
@@ -817,6 +848,10 @@ function cellar(t: number, st: TitleState): void {
     glow(bx, by + 8, 150, `rgba(255,190,110,${0.2 * f})`)
     glow(bx, by + 8, 14, `rgba(255,240,200,${0.5 * f})`)
   })
+
+  // the candle stuck on the barrels
+  const c = 0.8 + 0.2 * Math.sin(t * 11) * Math.sin(t * 4.3)
+  glow(131, 654, 26, `rgba(255,176,58,${0.3 * c})`)
 
   // heading on the duel's chalkboard
   const bx = W / 2 - 48
@@ -884,9 +919,15 @@ function sewers(t: number, st: TitleState): void {
     g.fillRect(-18, -18, 36, 36)
     g.restore()
   }
-  vignette(SEWER, WORLD_H, W / 2, 980, 400, 0.7)
+  vignette(SEWER, WORLD_H, W / 2, 980, 400, 0.4)
+  // the lantern on its hook and the candle in a bottle on the crate
+  const fl = 0.85 + 0.15 * Math.sin(t * 9) * Math.sin(t * 3.7)
+  glow(LANTERN.x, LANTERN.y, 70, `rgba(255,176,58,${0.22 * fl})`)
+  glow(LANTERN.x, LANTERN.y, 10, `rgba(255,251,232,${0.4 * fl})`)
+  glow(91, 1082, 20, `rgba(255,176,58,${0.3 * fl})`)
   glow(W / 2, 960, 260, 'rgba(111,207,111,0.06)')
 
+  text('RUE DU FLAMBEUR', 62, 846, { font: 'tiny', color: CREAM, align: 'center' }) // on the enamel plaque
   text('EN LIGNE', W / 2, 826, { font: 'didone', color: CREAM, align: 'center', outline: OUTLINE })
   // back up to the street
   const up = hit('cue:sewer', LADDER_X - 50, SEWER + 6, 76, 24, () => panTo(0))

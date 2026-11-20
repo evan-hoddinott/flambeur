@@ -5,7 +5,7 @@
         "x": 0,
         "y": 0,
         "w": 1024,
-        "h": 277
+        "h": 1530
       },
       "rotated": false,
       "trimmed": false,
@@ -13,11 +13,11 @@
         "x": 0,
         "y": 0,
         "w": 1024,
-        "h": 277
+        "h": 1530
       },
       "sourceSize": {
         "w": 1024,
-        "h": 277
+        "h": 1530
       },
       "duration": 100
     }
@@ -29,56 +29,20 @@
     "format": "RGBA8888",
     "size": {
       "w": 1024,
-      "h": 277
+      "h": 1530
     },
     "scale": "1",
     "slices": [
       {
-        "name": "street/house",
+        "name": "under",
         "keys": [
           {
             "frame": 0,
             "bounds": {
               "x": 0,
               "y": 0,
-              "w": 150,
-              "h": 236
-            },
-            "pivot": {
-              "x": 0,
-              "y": 236
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/tabac",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 151,
-              "y": 0,
-              "w": 150,
-              "h": 220
-            },
-            "pivot": {
-              "x": 0,
-              "y": 220
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/sky",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 302,
-              "y": 0,
-              "w": 8,
-              "h": 200
+              "w": 640,
+              "h": 832
             },
             "pivot": {
               "x": 0,
@@ -88,69 +52,15 @@
         ]
       },
       {
-        "name": "street/lamp",
+        "name": "street/back",
         "keys": [
           {
             "frame": 0,
             "bounds": {
-              "x": 311,
-              "y": 0,
-              "w": 20,
-              "h": 132
-            },
-            "pivot": {
-              "x": 10,
-              "y": 132
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/casino",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 332,
-              "y": 0,
-              "w": 400,
-              "h": 122
-            },
-            "pivot": {
-              "x": 200,
-              "y": 122
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/rack",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 733,
-              "y": 0,
-              "w": 64,
-              "h": 84
-            },
-            "pivot": {
               "x": 0,
-              "y": 84
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/skyline",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 798,
-              "y": 0,
-              "w": 160,
-              "h": 72
+              "y": 833,
+              "w": 640,
+              "h": 348
             },
             "pivot": {
               "x": 0,
@@ -160,267 +70,15 @@
         ]
       },
       {
-        "name": "sewer/corner",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 959,
-              "y": 0,
-              "w": 64,
-              "h": 64
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/barrel",
+        "name": "street/front",
         "keys": [
           {
             "frame": 0,
             "bounds": {
               "x": 0,
-              "y": 237,
-              "w": 34,
-              "h": 40
-            },
-            "pivot": {
-              "x": 17,
-              "y": 40
-            }
-          }
-        ]
-      },
-      {
-        "name": "sewer/outlet",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 35,
-              "y": 237,
-              "w": 40,
-              "h": 40
-            },
-            "pivot": {
-              "x": 20,
-              "y": 20
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/carotte",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 76,
-              "y": 237,
-              "w": 18,
-              "h": 34
-            },
-            "pivot": {
-              "x": 9,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/road",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 95,
-              "y": 237,
-              "w": 32,
-              "h": 32
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "soil/dirt",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 128,
-              "y": 237,
-              "w": 32,
-              "h": 32
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "soil/stone",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 161,
-              "y": 237,
-              "w": 32,
-              "h": 32
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/brick",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 194,
-              "y": 237,
-              "w": 32,
-              "h": 32
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "sewer/stone",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 227,
-              "y": 237,
-              "w": 32,
-              "h": 32
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/crate",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 260,
-              "y": 237,
-              "w": 34,
-              "h": 26
-            },
-            "pivot": {
-              "x": 17,
-              "y": 26
-            }
-          }
-        ]
-      },
-      {
-        "name": "sewer/water",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 295,
-              "y": 237,
-              "w": 32,
-              "h": 24
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/ladder",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 328,
-              "y": 237,
-              "w": 28,
-              "h": 16
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "soil/rock/2",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 357,
-              "y": 237,
-              "w": 22,
-              "h": 13
-            },
-            "pivot": {
-              "x": 11,
-              "y": 6
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/beam",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 380,
-              "y": 237,
-              "w": 32,
-              "h": 12
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/floor",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 413,
-              "y": 237,
-              "w": 32,
-              "h": 12
+              "y": 1182,
+              "w": 640,
+              "h": 348
             },
             "pivot": {
               "x": 0,
@@ -435,158 +93,14 @@
           {
             "frame": 0,
             "bounds": {
-              "x": 446,
-              "y": 237,
+              "x": 641,
+              "y": 1182,
               "w": 8,
               "h": 12
             },
             "pivot": {
               "x": 4,
               "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "cellar/hatch",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 455,
-              "y": 237,
-              "w": 72,
-              "h": 12
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "soil/pipe",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 528,
-              "y": 237,
-              "w": 32,
-              "h": 10
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "sewer/walk",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 561,
-              "y": 237,
-              "w": 32,
-              "h": 10
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "soil/rock/1",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 594,
-              "y": 237,
-              "w": 14,
-              "h": 9
-            },
-            "pivot": {
-              "x": 7,
-              "y": 4
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/curb",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 609,
-              "y": 237,
-              "w": 32,
-              "h": 8
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "street/grate",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 642,
-              "y": 237,
-              "w": 40,
-              "h": 8
-            },
-            "pivot": {
-              "x": 20,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "soil/asphalt",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 683,
-              "y": 237,
-              "w": 32,
-              "h": 8
-            },
-            "pivot": {
-              "x": 0,
-              "y": 0
-            }
-          }
-        ]
-      },
-      {
-        "name": "soil/rock/3",
-        "keys": [
-          {
-            "frame": 0,
-            "bounds": {
-              "x": 716,
-              "y": 237,
-              "w": 9,
-              "h": 6
-            },
-            "pivot": {
-              "x": 4,
-              "y": 3
             }
           }
         ]
