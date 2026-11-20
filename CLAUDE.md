@@ -73,7 +73,7 @@ The Nudox track judges **codebase quality**: the code, the repo on GitHub, and t
 
 ```
 src/engine/      pure, deterministic game logic. no DOM. this is the part that lasts
-  rng.ts           seeded rng (mulberry32), pick/shuffled/chance. never Math.random in the engine
+  rng.ts           seeded rng (sfc32 seeded by a cyrb128 hash of the stream name), pick/shuffled/chance. never Math.random in the engine
   cards.ts         Card (rank, suit, finish, stamp, tier, traits, grind...), trait helpers
   hands.ts         evaluateHand: primary hand + bonus hands from flambéed traits
   scoring.ts       appraise(): Value × Hype × 2^Grade, plus a Step list the UI animates
