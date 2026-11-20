@@ -1828,17 +1828,28 @@ function insertGhost(st: DuelState, t: number): void {
 }
 
 // balatro's sort buttons, right of the hand under the discard (the drawer owns the left edge). only while you hold a hand
+// one chip right of the hand: by rank (A K) or by suit (♠ ♥), the lit half is how the hand fans. click or R flips it
+const SORT = { x: 452, y: 262, w: 48, h: 18 }
+
 function sortTabs(st: DuelState): void {
   if (st.settled || !st.view.me.hand.length) return
-  const x = 460
-  text('Sort', x + 17, 253, { font: 'tiny', color: '#bfa77e', align: 'center', outline: OUTLINE })
+  const { x, w, h } = SORT
+  const over = hit(x, SORT.y - 2, w, h + 12, () => flipSort(st))
+  const y = SORT.y - (over ? 1 : 0)
+  nine('hud/plate/frame', x - 2, y - 2, w + 4, h + 4)
   for (const [i, by] of (['rank', 'suit'] as const).entries()) {
-    const y = 262 + i * 18
     const on = st.sort === by
-    const over = hit(x, y, 34, 15, () => { if (!on) { sfx.fan(); st.onSort(by) } })
-    nine('hud/plate/paper', x, y - (over && !on ? 1 : 0), 34, 15, on ? GOLD : over ? undefined : '#b8a888')
-    text(by === 'rank' ? 'Rank' : 'Suit', x + 17, y + 2 - (over && !on ? 1 : 0), { font: 'sans', color: INK, align: 'center', bold: on })
+    const hx = x + i * (w / 2)
+    nine('hud/plate/paper', hx, y, w / 2, h, on ? GOLD : over ? '#d8c8a0' : '#9c8c6c')
+    const label = by === 'rank' ? 'A K' : '♠ ♥'
+    text(label, hx + w / 4, y + 4, { font: 'sans', color: on ? INK : '#5c4a36', align: 'center', bold: on })
   }
+  text('Sort · R', x + w / 2, y + h + 3, { font: 'tiny', color: over ? CREAM : '#bfa77e', align: 'center', outline: OUTLINE })
+}
+
+function flipSort(st: DuelState): void {
+  sfx.fan()
+  st.onSort(st.sort === 'rank' ? 'suit' : 'rank')
 }
 
 let bandTop = COL.bottom
@@ -2236,7 +2247,8 @@ window.addEventListener('keydown', e => {
     return endCallout()
   }
   const n = Number(e.key)
-  if (n >= 1 && n <= presses.length) presses[n - 1]()
+  if ((e.key === 'r' || e.key === 'R') && !state.settled && state.view.me.hand.length) flipSort(state)
+  else if (n >= 1 && n <= presses.length) presses[n - 1]()
   else if (e.key === ' ' || e.key === 'Enter') {
     const i = state.slips.findIndex(s => s.primary && s.enabled)
     if (i < 0) return
