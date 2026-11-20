@@ -1,5 +1,7 @@
 # Shop fixes (Nov 20)
 
+**Status:** all 7 built in `23449bc`.
+
 Things Evan hit in the tabac and around it, what causes each one in the code, and the fix. Where this file and SHOP.md / UX.md / TUTORIAL.md disagree, this file wins, and the change that builds it updates those docs to match.
 
 | # | Problem | Fix in one line |

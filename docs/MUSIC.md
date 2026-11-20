@@ -19,7 +19,7 @@ Nov 19 2026, from Evan's ask: Balatro's jam and vibe, a play on a French song, t
 
 ## 1. What we're taking from Balatro
 
-From Evan's research (`~/dev/school/Senior Design/research_notes/Riff driven game music design/balatro_louisf.md`, `.../Game soundtrack production tools/balatro.md`) and his lab's reference study (`~/dev/personal-projects/music-lab/refs/STUDY.md`). We take the **method and the feel**, never its notes, riffs, samples or files. Balatro's audio lives in `~/Music/refs` for listening and measuring only. Nothing from it is rendered, sampled or shipped.
+From Evan's research notes on Balatro's soundtrack and his music lab's reference study (both outside this repo). We take the **method and the feel**, never its notes, riffs, samples or files. Balatro's audio is kept outside the repo for listening and measuring only. Nothing from it is rendered, sampled or shipped.
 
 | Balatro does | Why it works | We do |
 |---|---|---|

@@ -1,5 +1,7 @@
 # Flambeur multiplayer architecture
 
+> This is the multiplayer plan as of Nov 17. The engine sections (section 2 and the rule examples elsewhere) predate the v2 rules: `src/engine/match.ts` is the source of truth for the engine, and DESIGN.md for the rules.
+
 How Flambeur goes multiplayer-first: friends live this week, online dailies with a shared leaderboard, then the 10-player battle royale, without painting us into a corner if it ever gets big.
 
 This is a recommendation and a plan, not a survey. It was checked against a deep research pass on 2026-11-17 (6 research tracks plus local benchmarks), and the "Why not the alternatives" section near the end says what that changed. Every section is a pick and the reason for it. Things I couldn't verify about the cluster are marked **unverified** with the command that settles them.
@@ -11,7 +13,7 @@ Everything below is decided. Evan said to make the remaining calls from what he'
 - **Build order: engine core first.** The server is thin glue around `step` / `view` / `legal`, and the hard-to-reverse items (rng, card ids, `engineVersion`) all live in the engine. Day one, the main session lands the `Action` / `SeatView` / `Match` types first (a few hours), then the server can be built in parallel against those types while `match.ts` fills in. Two writers never share files: the engine session owns `src/engine/` and `main.ts`, the server work owns `server/`, `deploy/`, `src/net.ts`.
 - **Work on the laptop, not on the server.** The repo, `pnpm test`, the Vite preview and docker are here. The cluster is one `ssh precision01 kubectl ...` away, so cluster credentials never get copied to the laptop. A Claude session on precision01 is only worth it for long cluster-side jobs.
 - **Deploys:** agents may create and change anything inside the `flambeur` namespace and import images on precision02 without asking (**Evan**). Nothing outside that namespace gets touched.
-- **Tunnel:** built by the agent with the Cloudflare API token already on precision01 (`~/.config/codex/secrets/cloudflare-api-token`, checked 2026-11-17: active, sees the `example.com` zone, lists the account's 11 tunnels and the DNS records). A new tunnel `flambeur`, hostname `flambeur.example.com` (free today). Whether the token can *create* tunnels and DNS records is untested; if it can't, the agent writes Evan a short handoff with the dashboard clicks (**Evan**).
+- **Tunnel:** built by the agent with the Cloudflare API token already on the control-plane node (checked 2026-11-17: active, sees the `example.com` zone, lists the account's 11 tunnels and the DNS records). A new tunnel `flambeur`, hostname `flambeur.example.com` (free today). Whether the token can *create* tunnels and DNS records is untested; if it can't, the agent writes Evan a short handoff with the dashboard clicks (**Evan**).
 - **1v1 friend duel is bust only** (**Evan**). A duel doesn't stop at round 12. Proposed rule for the main session, since rounds past 12 aren't defined yet: every round after 12 is a sudden-death round, a forced showdown like a boss round with the ante doubling each round, so a duel always ends within a few rounds. Battle royale is bust only too, same rule.
 - **Dailies: unlimited replays, best score counts** (**Evan**), with a first-try board next to it (section 4).
 - **AWS later is a move, not a rewrite.** Nothing here is homelab-specific except the precision02 pins and `local-path`. Moving means: the same manifests on EKS (or plain EC2 running k3s), RDS for Postgres via `pg_dump` / restore, ECR for images, EBS volumes instead of `local-path`, and Cloudflare stays in front (or an ALB). The match directory and lease (section 6, Phase 3) are what let it run on many pods there. Cloudflare Durable Objects is the other big-scale path; keeping the engine free of Node-only APIs keeps that open too.
@@ -299,14 +301,14 @@ daily_best (
 | Thing | What's there |
 |---|---|
 | Distro | k3s v1.36.4, control plane on `precision01` |
-| Nodes | `precision01`-`04` (amd64, Ubuntu 22.04), `desktopmsi` (amd64, Ubuntu 24.04), `pi5evanhoddinott` (**arm64**) |
+| Nodes | `precision01`-`04` (amd64, Ubuntu 22.04), a desktop (amd64, Ubuntu 24.04), a Raspberry Pi 5 (**arm64**) |
 | Storage | `local-path` is the default StorageClass. Volumes live on whichever node the pod lands on first |
 | Ingress | Traefik (k3s default), LoadBalancer on the precision nodes' LAN IPs. No Ingress objects yet |
 | Tunnels | cloudflared runs **on the hosts**, not in the cluster: a systemd unit on precision01 (Pterodactyl, token file) and a process on precision03 (probably Life Dial) |
 | Registry | none (no `registries.yaml`, no registry pod) |
 | Metrics | `metrics-server` only. No Prometheus or Grafana |
 | Other apps | namespace `hermes`, otherwise empty |
-| kubectl | on precision01 (works as `evanh`), not on the laptop. Laptop has docker |
+| kubectl | on precision01, not on the laptop. Laptop has docker |
 
 Free memory isn't an issue: the precision nodes sit at 23-50% memory and ~1-3% CPU.
 
@@ -349,7 +351,7 @@ Plain YAML, applied with `kubectl apply -f deploy/k8s/`. No Helm chart for one a
 **Images**
 - Built on the laptop with `docker build --platform linux/amd64`, tagged `flambeur:<git short sha>`.
 - **No registry for Phases 0-1.** The image is piped straight into precision02's containerd, and the Deployment uses `imagePullPolicy: Never` plus the precision02 pin. No registry to run, no pull secret. Phase 2 (CI) moves to GHCR, because CI can't pipe into a node.
-- Not tested yet: `sudo k3s ctr images import` on precision02 (sudo works without a password on precision01; precision02 is unchecked).
+- Not tested yet: `sudo k3s ctr images import` on precision02.
 
 ### Deploy
 
@@ -388,7 +390,7 @@ The new engine core (`match.ts`, section 2) is the critical path. The server can
 
 ### Built so far (2026-11-17)
 
-- **Live at https://flambeur.example.com.** The `flambeur` namespace on k3s has the app and Postgres pinned to precision02, 2 cloudflared replicas, and the nightly backup CronJob on precision03. The tunnel, its route, the DNS record and the secrets were created by script; the secrets never left the cluster.
+- **Live** (the `flambeur.example.com` hostname in this doc is a placeholder, not the real one). The `flambeur` namespace on k3s has the app and Postgres pinned to precision02, 2 cloudflared replicas, and the nightly backup CronJob on precision03. The tunnel, its route, the DNS record and the secrets were created by script; the secrets never left the cluster.
 - **Server:** `server/` (`app.ts` http + ws, `actor.ts` match actor, `lobby.ts` rooms/queue/daily/recovery, `auth.ts`, `db.ts`, `migrations/`). Client: `src/net.ts`. Postgres went in from the start instead of an in-memory Phase 0, since the engine wasn't playable yet anyway.
 - **Checked:**
   - `pnpm test:server` passes 8/8 against a real Postgres with a toy engine: 401 without a session, a room-code duel with per-seat views and a rejected illegal move, the log on disk, daily best/first/attempts, an AFK timeout playing the default, restart recovery from the log, the same login error for a wrong name or password, no future-day board, and a foreign Origin refused.
@@ -493,7 +495,7 @@ The rules behind that table:
 
 ## Why not the alternatives
 
-From the 2026-11-17 research pass. The full report with sources is outside the repo at `scratchpad/reports/Flambeur multiplayer engine scaling.md` (not committed, ask me for it).
+From the 2026-11-17 research pass. The full report with sources is a research note, not in the repo.
 
 | Option | Why not, for now |
 |---|---|

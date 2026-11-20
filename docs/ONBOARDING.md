@@ -1,6 +1,6 @@
 # Onboarding: make the game readable to a Balatro player in one run
 
-Sources: `reports/Roguelike first run onboarding.md` (research) and BronnonY's playtest (Nov 18, Discord). This doc is the build list. It wins over UX.md §7 on teaching.
+Sources: first-run onboarding research (a research note, not in the repo) and BronnonY's playtest (Nov 18, Discord). This doc is the build list. It wins over UX.md §7 on teaching.
 
 ## What the playtest actually said
 

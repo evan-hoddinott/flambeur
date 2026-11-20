@@ -556,7 +556,7 @@ Calls the spec didn't make, all the simplest option that fit its intent:
 
 ## Open problems
 
-- **Shop share is ~47% of the greedy bot's actions, target ≤ 40%.** Battle actions went from ~2 to 6.6 a round, but a greedy shop visit is ~6.3 actions (2.4 buys, 1.1 restocks, 0.6 sells, 0.5 ships, 0.5 sorts, 0.5 bulk bins, leave). Lowering it means a lazier shopping bot, which only games the number. Worth a look with real players: if the shop feels long, batch-sell from the binder (one action) and auto-sort packs.
+- **Shop share is ~47% of the greedy bot's actions, target ≤ 40%.** Battle actions went from ~2 to 6.6 a round, but a greedy shop visit is ~6.3 actions (2.4 buys, 1.1 restocks, 0.6 sells, 0.5 ships, 0.5 sorts, 0.5 Ashtray empties (`binBulk`), leave). Lowering it means a lazier shopping bot, which only games the number. Worth a look with real players: if the shop feels long, batch-sell from the binder (one action) and auto-sort packs.
 - **High Roller is a wall:** greedy wins 5.5% vs Hard, 56.8% vs Medium, 90% vs Easy. Dropping Hard's starting rare barely moves it (5% → 7%); it's the build step and the `sharp` betting. Hard isn't a §0 target, but the ladder wants a middle rung.
 - **Deuces Wild** (optional twist) isn't built.
-- **The Album, cosmetics and near-miss pack reveals** (V2.md §17) come after the targets.
+- **Cosmetics** (V2.md §17) aren't built. The Album (`src/ui/album.ts`), the near-miss margin and the god pull are.

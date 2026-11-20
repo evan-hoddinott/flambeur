@@ -1,6 +1,6 @@
 # Flambeur: UX frame, drawers and the Fiche
 
-How the game keeps things in the same place, and how it explains itself. Decided by Evan on Nov 18 2026, after a four-reviewer UX pass covering inventory, the description box, scene flow, and props plus onboarding. **Not built yet.** Where this doc disagrees with ART.md §13, DUEL.md or SHOP.md about where UI lives, this doc wins. READABILITY.md still owns button colors and plinths.
+How the game keeps things in the same place, and how it explains itself. Decided by Evan on Nov 18 2026, after a four-reviewer UX pass covering inventory, the description box, scene flow, and props plus onboarding. **Built (Nov 18).** Where this doc disagrees with ART.md §13, DUEL.md or SHOP.md about where UI lives, this doc wins. READABILITY.md still owns button colors and plinths.
 
 Coordinates are art px on the 640×360 stage (×2.5 = screen px).
 

@@ -1,6 +1,6 @@
 # Flambeur: sleeve art spec
 
-How sleeves look: on the shop shelf, when you buy one, and once you own it. This doc is for the art agent and whoever wires the sprites in. Rules and prices live in DESIGN.md, "Sleeves (run-wide upgrades)", and `src/engine/sleeves.ts`. Style, palette and motion come from `docs/ART.md`. Shelf layout comes from `docs/SHOP.md` §2. Hover cues come from `docs/READABILITY.md`.
+How sleeves look: on the shop shelf, when you buy one, and once you own it. This doc is for the art agent and whoever wires the sprites in. Rules and prices live in DESIGN.md, "Pochettes (run-wide upgrades)" (in v2 the game calls them Pochettes, code ids still say `sleeve`), and `src/engine/sleeves.ts`. Style, palette and motion come from `docs/ART.md`. Shelf layout comes from `docs/SHOP.md` §2. Hover cues come from `docs/READABILITY.md`.
 
 Written Nov 18 2026 by Claude from Evan's existing notes. Nothing in here has been picked by Evan yet. Change §1 if a call is wrong.
 

@@ -2,7 +2,7 @@
 
 Everything an art agent needs to draw the cards without asking. Style, palette and mood come from `docs/ART.md`, so read that first. This doc covers **what to draw, at what size, where it sits, and how it's cut up**. The game data behind it is `src/engine/cards.ts`.
 
-Nov 17 2026. Base paper, indices, pips, courts and backs are drawn. Every special card part (§0.5, §4.1 and §4.5–4.10) is still a code stand-in in `src/ui/art.ts`.
+Nov 17 2026. Base paper, indices, pips, courts and backs are drawn. Since Nov 18 the special card parts (§0.5, §4.1 and §4.5–4.10) are drawn too, as pixel layers in `art/cards/specials.py` that `art/cards/build.py` puts in the atlas.
 
 ---
 
