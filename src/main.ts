@@ -484,7 +484,14 @@ async function loadTitleBoard(): Promise<void> {
   if (!match && !online) renderTitle()
 }
 
+// the first run of a visit goes fullscreen (a click started it, so the browser allows it). leave it and it stays left
+let wentFullscreen = false
+
 function startRun(seed: string, autoplay = false): void {
+  if (!wentFullscreen && !QUICK && !autoplay && !document.fullscreenElement) {
+    wentFullscreen = true
+    void document.documentElement.requestFullscreen?.().catch(() => {})
+  }
   run++
   armed = null
   announced = new Set()

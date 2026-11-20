@@ -37,7 +37,7 @@ export type Prefs = {
 const DEFAULTS: Prefs = {
   master: 0.9, music: 0.7, sfx: 1, ambience: 1, muted: false, bgMute: true, blips: true,
   speed: 1, countUp: 'watch', confirm: 'both', sort: 'rank', preview: true, tips: true, fiche: 'short', lang: 'en', glint: true,
-  scale: 'crisp', post: 1, shake: 'full', fps: 60, cursor: true,
+  scale: 'fill', post: 1, shake: 'full', fps: 60, cursor: true,
   motion: 'auto', calmFlash: false, fourColor: false, contrast: false, bigFiche: false,
 }
 
@@ -104,10 +104,12 @@ export const shake = () => (still.matches ? 0 : { off: 0, low: 0.4, full: 1 }[pr
 // a bright overlay's strength, softened when flashes are calmed
 export const flash = (alpha: number) => (prefs.calmFlash ? alpha * 0.35 : alpha)
 
-// the stage's device-pixel scale. crisp keeps every stage pixel the same whole number of screen pixels
+// the stage's device-pixel scale. crisp keeps every stage pixel the same whole number of screen pixels,
+// unless that would throw away more than a tenth of the screen (1366×768 at ×2 is a thick border all round)
 export function stageScale(cw: number, ch: number, w: number, h: number): number {
   const k = Math.min(cw / w, ch / h)
-  return prefs.scale === 'crisp' && k >= 1 ? Math.floor(k) : k
+  const whole = Math.floor(k)
+  return prefs.scale === 'crisp' && whole >= 1 && whole / k >= 0.9 ? whole : k
 }
 
 // ---------- the frame rate cap ----------
