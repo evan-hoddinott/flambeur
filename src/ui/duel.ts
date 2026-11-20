@@ -2142,7 +2142,9 @@ function colText(st: DuelState, bottom: number): number {
   let y = bottom
   // the rival's turn: their name big and a "deciding" line with ticking dots, not a grey log line
   const them = st.view.others[0]
-  if (!st.settled && st.view.bet?.toAct === them.seat) {
+  const v = st.view
+  const deciding = v.bet?.toAct === them.seat || v.spoils?.toPick === them.seat || (v.phase === 'deal' && v.me.locked && !them.done)
+  if (!st.settled && deciding) {
     const dots = '.'.repeat(1 + Math.floor(now / 350) % 3)
     text(`is deciding${dots}`, COL.x + 2, y - 10, { font: 'sans', color: CREAM, outline: OUTLINE })
     const name = st.rival.name

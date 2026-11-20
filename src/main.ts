@@ -162,6 +162,18 @@ window.addEventListener('keydown', e => {
   if (e.key === ' ' || e.key === 'Enter') skipBeat?.()
 })
 
+// how long the rival sits on a decision, so it plays like a person across the table. a bet they open
+// waits longer, so "Scaramouche bets first" has time to read. the shop and the draft stay instant
+const THINK: Partial<Record<Action['type'], [number, number]>> = {
+  play: [900, 1800], flamber: [1300, 2100], discard: [700, 1300], spoils: [800, 1500],
+}
+
+function thinkTime(action: Action, answering: boolean): number {
+  if (action.type === 'bet') return (answering ? 700 : 1200) + Math.random() * 400
+  const range = THINK[action.type]
+  return range ? range[0] + Math.random() * (range[1] - range[0]) : 0
+}
+
 async function runBots(): Promise<void> {
   const id = run
   for (;;) {
@@ -172,10 +184,10 @@ async function runBots(): Promise<void> {
     if (bot === undefined || (pending(m).includes(ME) && m.phase !== 'bet')) return
     const action = botAction(m, bot)
     const betting = m.phase === 'bet' && action.type === 'bet'
-    if (betting) {
+    const think = thinkTime(action, !!v().bet?.choices.length)
+    if (think) {
       render()
-      // the rival thinks. longer when they open, so "Scaramouche bets first" has time to read
-      await beat(v().bet?.choices.length ? 700 : 1200)
+      await beat(think)
       if (id !== run) return // abandoned while the rival thought
     }
     const dealing = m.phase === 'shop'
