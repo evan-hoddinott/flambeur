@@ -67,15 +67,21 @@ Brightness check (relative luminance): brass .36 > flame .23 > tan .19 > green .
 
 ## 5. The ticket button
 
-One sprite, tinted per action in code, the same way card pips work (CARDS.md §2).
+One renderer (`src/ui/ticket.ts`, `drawTicket`) draws every ticket: the duel's action stack and felt bets, panels, the shop and the title. The art is pieces from `art/tickets/build.py` (`python art/tickets/build.py` rebuilds `tickets.png/json` and `review.png`).
 
-- **Sprite** `hud/ticket/face`: a 9-slice ticket face drawn in the **5-step tint greyscale** (`#ffffff` `#d0d0d0` `#a0a0a0` `#686868` `#303030`), where white is the main ink. It has a perforated left edge (a column of punched holes), a 1px printed inner border, and a slight highlight along the top edge. Code multiplies it by the action color.
-- **Sprite** `hud/ticket/plinth`: a 9-slice solid shape the same outline as the face, also greyscale, tinted with the plinth color.
+- **Pieces**, drawn in 5 grey levels (48, 104, 160, 208, 255):
+  - `ticket/stub` (22 px): a half-moon notch in the short edge, a recessed panel for the icon, a scored perforation line with punched holes lit on their lower lip.
+  - `ticket/small` (11 px): the same end with no icon panel, for tickets without an icon or under 72 px.
+  - `ticket/body` (12 px tile, repeated, never stretched): the outline, a top glint, a printed double rule top and bottom, and an engraved guilloche chain through the middle.
+  - `ticket/end` (11 px): the rules turn the corner with a lozenge, and the end has its own notch.
+- **Ink:** each grey level maps onto the face color's **palette ramp** (two darker, one darker, the face, one lighter, the glint), so every color gets real light and shade and stays on the palette. A face that's on no ramp takes the nearest palette color that is. Past a ramp's top the glint is cream.
+- **Plinth and hover rim:** the ticket's own silhouette filled flat with the plinth color, and with cream at four 1 px offsets for the hover outline.
+- **Icons:** `ticket/icon/<kind>`, 11×11 white masks hand-placed in the build script (play, max, min, forge, discard, insert, skip, continue, back), inked cream with a 1 px ink outline on the stub's panel.
 - **Size:** 126×24 face plus a 3 px plinth, 30 apart, in the duel. Never under 96×22. Hit area = the full face plus the plinth plus the 4 px hover lift.
-- **Source sprites:** 32×24, the 9-slice center is x 9–27 across the full height, so only the middle stretches sideways and the punched holes never stretch. The face is drawn at its source height.
-- **Label:** the **chalk** font (cap 9) in faux bold, cream with a 1px ink outline (ink with no outline on brass). Chunkier than the sans. It sits after the perforation at x 11.
-- **Top highlight:** a runtime 1px white line at 30%, so the tinted face stays the exact action color.
+- **Label:** the **chalk** font (cap 9) in faux bold, cream with a 1px ink outline (ink with no outline on light faces). It starts at x 24 after an icon stub, x 13 after the small end. The guilloche stops behind it.
+- **Fit:** label and price chip sit side by side. When they don't fit, the chip drops to the tiny font, then the icon goes.
 - **Price chip:** a small cream paper chip on the right end of the face (`hud/ticket/chip`, 9-slice, full palette color) with ink text: `$6`, `−$2`, `hand −1`.
+- **Primary:** a slanted glint sweeps across the face every 2.6 s, on top of the brass glow and the breathing scale.
 - **Stack:** bottom-right, x 524–632, 4 px apart. The stack sits on the calm band (§7).
 
 ### States and motion
@@ -86,7 +92,7 @@ One sprite, tinted per action in code, the same way card pips work (CARDS.md §2
 | Primary idle (progress only) | same, plus a soft brass glow behind it | scale 1.00 → 1.03 → 1.00 over 1.2 s, glow breathes with it |
 | Hover | face lifts to 4 px above the plinth, 1px cream outline | `juiceUp` 0.12 the moment hover starts, a ±2° wobble that settles in 0.25 s |
 | Press | face drops onto the plinth (0 px gap) | 60 ms down, the ink stamp (`hud/stamp/<choice>`) slams on at 2× → 1×, coin sfx, then the ticket slides away |
-| Disabled | flat `#2e2320` face, no plinth, strike line through the label, the reason in the price chip's spot (§10) | none, no hover |
+| Disabled | the ticket in the `#43342e` ramp, no plinth, a dim icon, strike line through the label, the reason in the price chip's spot (§10) | none, no hover |
 | Appearing | slides in from the right with spring overshoot, staggered 40 ms per ticket | |
 
 ## 6. Other interactables

@@ -7,6 +7,7 @@ import { collectible, drawCollectible, opaque } from './collectibles.ts'
 import { cardCanvas, sprite, ctx2d, blit, canvas, nineSlice } from './art.ts'
 import { MONEY as CASH } from './ink.ts'
 import { drawText, measure, plainText, wrapText, type TextStyle } from './font.ts'
+import { drawTicket as raffle, type TicketIcon } from './ticket.ts'
 import { rankLabel, SUIT_GLYPH, type Card } from '../engine/cards.ts'
 import { getKeeper, INSERTS, type Insert } from '../engine/shop.ts'
 import { insertFace, insertMark } from './placeholders.ts'
@@ -1027,7 +1028,7 @@ function drawerEntry(thing: DrawerThing): Entry {
 
 // ---------- bottom bar: the service tickets, sortir. the plate is zone B, the deck and binder live in the bifold ----------
 
-type Ticket = { key: string; label: string; price?: string; face: string; plinth: string; ink: string; enabled: boolean; primary?: boolean; onClick: () => void; fiche?: string }
+type Ticket = { key: string; label: string; price?: string; icon?: TicketIcon; face: string; plinth: string; ink: string; enabled: boolean; primary?: boolean; onClick: () => void; fiche?: string }
 
 function bottomBar(st: ShopState): void {
   const v = st.view
@@ -1052,7 +1053,7 @@ function bottomBar(st: ShopState): void {
     tickets.push([tx, w, t])
     tx += w + 6
   }
-  tickets.push([538, 96, { key: 'leave', label: 'Sortir', face: BRASS, plinth: '#3d2a10', ink: INK, enabled: true, primary: true, onClick: st.onLeave }])
+  tickets.push([538, 96, { key: 'leave', label: 'Sortir', icon: 'continue', face: BRASS, plinth: '#3d2a10', ink: INK, enabled: true, primary: true, onClick: st.onLeave }])
   for (const [x, w, t] of tickets) {
     ticket(t, x, 326, w)
     const id = t.fiche
@@ -1099,18 +1100,7 @@ function ticket(t: Ticket, x: number, y: number, w: number): void {
   })
   g.save()
   g.translate(x, y)
-  if (!t.enabled) {
-    nine('hud/ticket/face', 0, 3, w, 24, GREY)
-    text(t.label, 11, 8, { font: 'chalk', color: TAN, bold: true })
-    // a long price next to a long label drops to the tiny so the two don't run into each other
-    const room = w - 22 - measure(t.label, 'chalk', true)
-    if (t.price) text(t.price, w - 8, 9, { font: measure(t.price, 'sans') <= room ? 'sans' : 'tiny', color: TAN, align: 'right' })
-    g.fillStyle = TAN
-    g.fillRect(8, 14, w - 14, 1)
-    g.restore()
-    return
-  }
-  if (t.primary && !isOver) {
+  if (t.enabled && t.primary && !isOver) {
     const s = 1 + 0.03 * breath()
     g.translate(w / 2, 13)
     g.scale(s, s)
@@ -1118,18 +1108,7 @@ function ticket(t: Ticket, x: number, y: number, w: number): void {
     glow(w / 2, 14, 60, `rgba(232,194,96,${0.18 + 0.14 * breath()})`)
   }
   const down = pressed?.key === t.key && now - pressed.t < 90
-  const fy = 3 - (down ? 0 : isOver ? 4 : 3)
-  nine('hud/ticket/plinth', 0, 3, w, 24, t.plinth)
-  if (isOver) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) nine('hud/ticket/plinth', dx, fy + dy, w, 24, CREAM)
-  nine('hud/ticket/face', 0, fy, w, 24, t.face)
-  g.fillStyle = 'rgba(255,255,255,0.3)'
-  g.fillRect(1, fy + 1, w - 2, 1)
-  text(t.label, 11, fy + 5, { font: 'chalk', color: t.ink, bold: true, outline: t.ink === INK ? undefined : INK0 })
-  if (t.price) {
-    const pw = measure(t.price, 'sans') + 8
-    nine('hud/ticket/chip', w - pw - 5, fy + 5, pw, 13)
-    text(t.price, w - 5 - pw / 2, fy + 6, { color: INK, align: 'center' })
-  }
+  raffle(g, 0, 0, w, { label: t.label, price: t.price, icon: t.icon, face: t.face, plinth: t.plinth, ink: t.ink, enabled: t.enabled, over: isOver, gap: down ? 0 : isOver ? 4 : 3, shine: t.primary }, now)
   g.restore()
 }
 

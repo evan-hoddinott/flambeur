@@ -7,6 +7,7 @@ import titlePng from '../../art/title/title.png'
 import titleJson from '../../art/title/title.json'
 import { canvas, ctx2d, sprite, tinted } from './art.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
+import { drawTicket } from './ticket.ts'
 import * as sfx from './sound.ts'
 import { LANG_TAB, langTab } from './frame.ts'
 import { PAUSE_TAB, pauseTabW, drawPause, openPause, pauseClick, pauseHoverAt, pauseOpen, pauseTab } from './pause.ts'
@@ -514,17 +515,7 @@ const ticketW = (label: string) => Math.max(96, measure(label, 'chalk', true) + 
 function ticket(key: string, label: string, x: number, y: number, w: number, kind: Kind, act: () => void,
   o: { primary?: boolean; enabled?: boolean } = {}): void {
   const enabled = o.enabled ?? true
-  if (!enabled) {
-    g.save()
-    g.translate(x, y)
-    nine('hud/ticket/face', 0, 3, w, 24, '#43342e')
-    text(label, 11, 8, { font: 'chalk', color: '#8c7656', bold: true })
-    g.fillStyle = '#8c7656'
-    g.fillRect(8, 14, w - 14, 1)
-    g.restore()
-    return
-  }
-  const over = hit(key, x, y - 4, w, 31, () => {
+  const over = enabled && hit(key, x, y - 4, w, 31, () => {
     pressed = { key, t: now }
     sfx.stamp()
     inp.blur()
@@ -534,20 +525,14 @@ function ticket(key: string, label: string, x: number, y: number, w: number, kin
   const down = pressed?.key === key && now - pressed.t < 90
   const gap = down ? 0 : kind === 'picked' ? 1 : over ? 4 : 3
   const j = juiced(key)
-  const pulse = o.primary && !over ? 1 + 0.03 * breath() : 1
+  const pulse = enabled && o.primary && !over ? 1 + 0.03 * breath() : 1
   g.save()
   g.translate(x + w / 2, y + 13)
   g.scale(j.s * pulse, j.s * pulse)
   g.rotate(j.r * 0.35)
   g.translate(-w / 2, -13)
-  if (o.primary) glow(w / 2, 14, 74, `rgba(232,194,96,${0.22 + 0.16 * breath()})`)
-  nine('hud/ticket/plinth', 0, 3, w, 24, c.plinth)
-  const fy = 3 - gap
-  if (over) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) nine('hud/ticket/plinth', dx, fy + dy, w, 24, CREAM)
-  nine('hud/ticket/face', 0, fy, w, 24, c.face)
-  g.fillStyle = 'rgba(255,255,255,0.3)'
-  g.fillRect(1, fy + 1, w - 2, 1)
-  text(label, 11, fy + 5, { font: 'chalk', color: c.label, bold: true, outline: c.label === KIND.progress.label ? undefined : OUTLINE })
+  if (enabled && o.primary) glow(w / 2, 14, 74, `rgba(232,194,96,${0.22 + 0.16 * breath()})`)
+  drawTicket(g, 0, 0, w, { label, face: c.face, plinth: c.plinth, ink: c.label, enabled, over, gap, shine: o.primary }, now)
   g.restore()
 }
 

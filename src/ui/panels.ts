@@ -6,6 +6,7 @@ import { backCanvas, cardCanvas, nineSlice, sprite } from './art.ts'
 import { fiche } from './fiche.ts'
 import * as sfx from './sound.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
+import { drawTicket, type TicketIcon } from './ticket.ts'
 import type { Card } from '../engine/cards.ts'
 import { cardEntry, type Entry } from '../engine/glossary.ts'
 import type { StarterId } from '../engine/starters.ts'
@@ -217,28 +218,13 @@ function drawCard(g: CanvasRenderingContext2D, hit: Ui['hit'], c: Card, x: numbe
   return over
 }
 
-// the raffle-ticket button, same look as the duel's
+// the raffle-ticket button, same look as the duel's (src/ui/ticket.ts)
+const ICON: Partial<Record<Btn['kind'], TicketIcon>> = { go: 'continue', back: 'back', use: 'insert' }
+
 function ticket(g: CanvasRenderingContext2D, hit: Ui['hit'], b: Btn, x: number, y: number, w: number): boolean {
   const over = b.enabled && hit(x, y - 4, w, PITCH, () => { sfx.stamp(); b.onClick() })
-  if (!b.enabled) {
-    nineSlice(g, 'hud/ticket/face', x, y + 3, w, 24, '#43342e')
-    drawText(g, b.label, x + 11, y + 8, { font: 'chalk', color: '#8c7656', bold: true })
-    g.fillStyle = '#8c7656'
-    g.fillRect(x + 8, y + 13, measure(b.label, 'chalk', true) + 6, 1)
-    if (b.price) drawText(g, b.price, x + w - 7, y + 9, { font: 'sans', color: PAPER, align: 'right' })
-    return false
-  }
   const c = COLORS[b.kind]
-  nineSlice(g, 'hud/ticket/plinth', x, y + 3, w, 24, c.plinth)
-  const fy = y + (over ? -1 : 0)
-  if (over) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) nineSlice(g, 'hud/ticket/plinth', x + dx, fy + dy, w, 24, CREAM)
-  nineSlice(g, 'hud/ticket/face', x, fy, w, 24, c.face)
-  drawText(g, b.label, x + 11, fy + 5, { font: 'chalk', color: c.label, bold: true, outline: c.label === CREAM ? OUTLINE : undefined })
-  if (b.price) {
-    const pw = measure(b.price, 'sans') + 8
-    nineSlice(g, 'hud/ticket/chip', x + w - pw - 5, fy + 5, pw, 13)
-    drawText(g, b.price, x + w - pw / 2 - 5, fy + 6, { font: 'sans', color: INK, align: 'center' })
-  }
+  drawTicket(g, x, y, w, { label: b.label, price: b.price, icon: ICON[b.kind], face: c.face, plinth: c.plinth, ink: c.label, enabled: b.enabled, over, gap: over ? 4 : 3 }, performance.now())
   return over
 }
 

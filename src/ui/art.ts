@@ -1,4 +1,4 @@
-// the atlases (duel + cards from aseprite, shop from art/shop/counter.py), sprite lookup by slice name, and the card compositor.
+// the atlases (duel + cards from aseprite, shop from art/shop/counter.py, tickets from art/tickets/build.py), sprite lookup by slice name, and the card compositor.
 // card faces are assembled at runtime from parts, the same recipe as art/cards/build.py
 import collectiblePng from '../../art/collectibles/collectibles.png'
 import collectibleJson from '../../art/collectibles/collectibles.json'
@@ -8,6 +8,8 @@ import cardsPng from '../../art/cards/cards.png'
 import cardsJson from '../../art/cards/cards.json'
 import shopPng from '../../art/shop/shop.png'
 import shopJson from '../../art/shop/shop.json'
+import ticketsPng from '../../art/tickets/tickets.png'
+import ticketsJson from '../../art/tickets/tickets.json'
 import { rankLabel, traitName, type Card, type Suit } from '../engine/cards.ts'
 import type { StarterId } from '../engine/starters.ts'
 import { onPref, pref } from './prefs.ts'
@@ -36,8 +38,8 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 export async function loadArt(): Promise<void> {
-  const [duel, cards, shop, collectibles] = await Promise.all([loadImage(duelPng), loadImage(cardsPng), loadImage(shopPng), loadImage(collectiblePng)])
-  for (const [img, data] of [[duel, duelJson], [cards, cardsJson], [shop, shopJson], [collectibles, collectibleJson]] as const) {
+  const [duel, cards, shop, collectibles, tickets] = await Promise.all([loadImage(duelPng), loadImage(cardsPng), loadImage(shopPng), loadImage(collectiblePng), loadImage(ticketsPng)])
+  for (const [img, data] of [[duel, duelJson], [cards, cardsJson], [shop, shopJson], [collectibles, collectibleJson], [tickets, ticketsJson]] as const) {
     for (const s of (data.meta.slices as SliceJson[])) {
       const k = s.keys[0]
       sprites.set(s.name, { img, ...k.bounds, px: k.pivot?.x ?? 0, py: k.pivot?.y ?? 0, center: k.center ?? null })

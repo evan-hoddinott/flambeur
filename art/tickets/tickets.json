@@ -1,0 +1,245 @@
+{
+  "meta": {
+    "image": "tickets.png",
+    "size": {
+      "w": 128,
+      "h": 36
+    },
+    "slices": [
+      {
+        "name": "ticket/stub",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "w": 22,
+              "h": 24
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/small",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 23,
+              "y": 0,
+              "w": 11,
+              "h": 24
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/body",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 35,
+              "y": 0,
+              "w": 12,
+              "h": 24
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/end",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 48,
+              "y": 0,
+              "w": 11,
+              "h": 24
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/play",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 60,
+              "y": 0,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/max",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 72,
+              "y": 0,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/min",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 84,
+              "y": 0,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/forge",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 96,
+              "y": 0,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/discard",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 108,
+              "y": 0,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/insert",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 0,
+              "y": 25,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/skip",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 12,
+              "y": 25,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/continue",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 24,
+              "y": 25,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "ticket/icon/back",
+        "keys": [
+          {
+            "frame": 0,
+            "bounds": {
+              "x": 36,
+              "y": 25,
+              "w": 11,
+              "h": 11
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

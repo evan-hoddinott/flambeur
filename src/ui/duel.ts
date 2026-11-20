@@ -22,6 +22,7 @@ import type { Appraisal } from '../engine/scoring.ts'
 import type { StarterId } from '../engine/starters.ts'
 import * as sfx from './sound.ts'
 import * as music from './music.ts'
+import { drawTicket, type TicketIcon } from './ticket.ts'
 import { announce, drawBand, runStrip, skipBand } from './frame.ts'
 import { lang } from './lang.ts'
 import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } from './panels.ts'
@@ -2086,7 +2087,7 @@ const TICKET: Record<Kind, { face: string; plinth: string; label: string }> = {
   min: { face: '#3a8040', plinth: '#1e4a24', label: CREAM },
   forge: { face: '#e8501a', plinth: '#5a1206', label: CREAM },
   discard: { face: '#7a4ab0', plinth: '#2a1440', label: CREAM },
-  insert: { face: '#2e7a78', plinth: '#0f2a2a', label: CREAM },
+  insert: { face: '#2d7a5c', plinth: '#0f2a20', label: CREAM },
   skip: { face: '#8c7656', plinth: '#2a2010', label: CREAM },
   continue: { face: '#c99a3a', plinth: '#3d2a10', label: '#1c1513' },
 }
@@ -2168,38 +2169,15 @@ function slipRule(s: Slip): string | null {
 // 0 → 1 → 0 over 1.2s, the primary ticket's breathing
 const breath = () => 0.5 - 0.5 * Math.cos((now / 1200) * Math.PI * 2)
 
-// one raffle ticket at 0,0: plinth, face lifted by gap, label, price chip
+// one raffle ticket at 0,0 (src/ui/ticket.ts). an off one is struck through, and the price chip's spot says why
+const ICON: Record<Kind, TicketIcon> = {
+  lock: 'play', max: 'max', min: 'min', forge: 'forge', discard: 'discard', insert: 'insert', skip: 'skip', continue: 'continue',
+}
+
 function ticket(s: Slip, gap: number, over: boolean, tw = TW): void {
   const c = TICKET[s.kind]
-  if (!s.enabled) {
-    // struck through the label only, and the price chip's spot says why it's off ("needs a pair")
-    nine('hud/ticket/face', 0, 3, tw, 24, '#43342e')
-    text(s.label, 11, 8, { font: 'chalk', color: '#8c7656', bold: true })
-    const lw = measure(s.label, 'chalk', true)
-    g.fillStyle = '#8c7656'
-    g.fillRect(8, 13, lw + 6, 1)
-    if (s.price) {
-      const room = tw - lw - 26
-      if (measure(s.price, 'sans') <= room) text(s.price, tw - 7, 9, { font: 'sans', color: '#e3d2a8', align: 'right' })
-      else wrap(s.price, room, 'tiny').slice(0, 2).forEach((line, i, all) => text(line, tw - 7, (all.length > 1 ? 7 : 11) + i * 8, { font: 'tiny', color: '#e3d2a8', align: 'right' }))
-    }
-    return
-  }
-  if (s.primary) glow(tw / 2, 14, 74, `rgba(232,194,96,${0.22 + 0.16 * breath()})`)
-  nine('hud/ticket/plinth', 0, 3, tw, 24, c.plinth)
-  const fy = 3 - gap
-  if (over) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) nine('hud/ticket/plinth', dx, fy + dy, tw, 24, CREAM)
-  nine('hud/ticket/face', 0, fy, tw, 24, c.face)
-  g.fillStyle = 'rgba(255,255,255,0.3)'
-  g.fillRect(1, fy + 1, tw - 2, 1)
-  const dark = c.label !== CREAM
-  text(s.label, 11, fy + 5, { font: 'chalk', color: c.label, bold: true, outline: dark ? undefined : OUTLINE })
-  if (s.price) {
-    const pw = measure(s.price, 'sans') + 8
-    const px = tw - pw - 5
-    nine('hud/ticket/chip', px, fy + 5, pw, 13)
-    text(s.price, px + pw / 2, fy + 6, { font: 'sans', color: INK, align: 'center' })
-  }
+  if (s.enabled && s.primary) glow(tw / 2, 14, 74, `rgba(232,194,96,${0.22 + 0.16 * breath()})`)
+  drawTicket(g, 0, 0, tw, { label: s.label, price: s.price, icon: ICON[s.kind], face: c.face, plinth: c.plinth, ink: c.label, enabled: s.enabled, over, gap, shine: s.primary }, now)
 }
 
 const TOAST_MS = 5000
