@@ -1,7 +1,9 @@
 // betting for one pair of seats over a round. positions 0/1 are the pair's two seats (match.ts maps them to seat ids).
 // no fold. both seats ante the min into the pot, the round's winner takes it. after locking hand 1 each seat picks
 // min or max: max bets (max − min) more on yourself. win the round and the house pays it, lose and your rival takes it.
-// after locking hand 3 anyone still on min may push to max. the richer seat picks first, the other sees it
+// after locking hand 3 anyone still on min may push to max. the richer seat picks first, the other sees it.
+// a seat that flambéd the hand just locked sits the stage out: when its turn comes it stays on min, logged like a
+// chosen min, so the other seat can't tell
 export type Pos = 0 | 1
 export type BetAction = 'min' | 'max'
 export type BetStage = 'open' | 'push'
@@ -15,6 +17,7 @@ export type Betting = {
   stage: BetStage | null // null = not betting right now
   toAct: Pos | null
   acted: [boolean, boolean] // this stage
+  sitting: [boolean, boolean] // this stage: flambéd, not asked
   log: { pos: Pos; action: BetAction; stage: BetStage }[]
 }
 
@@ -36,7 +39,7 @@ export function startBetting(first: Pos, ante: number, max: number, bankrolls: [
   return {
     first, stake, extra, canMax,
     onMax: allMax ? [canMax[0], canMax[1]] : [false, false],
-    stage: null, toAct: null, acted: [false, false], log: [],
+    stage: null, toAct: null, acted: [false, false], sitting: [false, false], log: [],
   }
 }
 
@@ -50,12 +53,19 @@ function nextToAct(b: Betting): Pos | null {
   return null
 }
 
-// opens a betting stage. returns the betting unchanged (stage null) if nobody has a choice to make
-export function openStage(b: Betting, stage: BetStage): Betting {
-  const next: Betting = { ...b, acted: [false, false], stage }
+// opens a betting stage. returns the betting with stage null if nobody has a choice to make.
+// sitting = the seats that flambéd: they're passed over on min
+export function openStage(b: Betting, stage: BetStage, sitting: [boolean, boolean] = [false, false]): Betting {
+  const next: Betting = { ...b, acted: [false, false], sitting, stage }
   next.toAct = nextToAct(next)
   if (next.toAct === null) next.stage = null
-  return next
+  return sitOut(next)
+}
+
+// a sitting seat's turn: min, in its place in the order
+function sitOut(b: Betting): Betting {
+  while (b.toAct !== null && b.sitting[b.toAct]) b = choose(b, 'min')
+  return b
 }
 
 export function legalActions(b: Betting): BetAction[] {
@@ -64,6 +74,11 @@ export function legalActions(b: Betting): BetAction[] {
 }
 
 export function act(b: Betting, action: BetAction): Betting {
+  if (b.toAct !== null && b.sitting[b.toAct]) throw new Error('a seat that flambéd has no bet to make')
+  return sitOut(choose(b, action))
+}
+
+function choose(b: Betting, action: BetAction): Betting {
   if (b.toAct === null || b.stage === null) throw new Error('nobody is betting')
   if (!legalActions(b).includes(action)) throw new Error(`illegal bet ${action}`)
   const pos = b.toAct

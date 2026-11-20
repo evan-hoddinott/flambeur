@@ -200,6 +200,8 @@ export type SeatView = {
     draft: { offer: StarterId[]; rows: DraftRow[] | null } | null
     shop: ShopView | null
     forge: ForgePlan | null // a flambé waiting on forgeKeep
+    keep: Trait[] | null // a locked flambé's picked traits, so the ui can show the ★ card before the reveal makes it
+    grind: number | null // a locked no-pair flambé: the card that gets +1 Value
     marker: { due: number; table: number } | null // le patron's next payment, collected after this table
     done: boolean
   }
@@ -1212,16 +1214,18 @@ function enterRound(m: Match, emit: Emit): void {
   }
 }
 
-// everyone at an open table has locked. hand 1 opens the betting, hand 3 gets the last push
+// everyone at an open table has locked. hand 1 opens the betting, hand 3 gets the last push.
+// a seat that flambéd the hand it just locked isn't asked: it stays where it is
 function afterLocks(m: Match, emit: Emit): void {
   for (const pair of m.pairs) {
     if (pair.done) continue
+    const sitting = pair.seats.map(s => seat(m, s).lockKind === 'flamber') as [boolean, boolean]
     if (m.hand === 1) {
       const bankrolls = pair.seats.map(s => seat(m, s).bankroll) as [number, number]
       const { ante, max } = pairBlinds(m, pair.seats)
-      pair.betting = openStage(startBetting(firstToAct(bankrolls, m.round), ante, max, bankrolls, twistFor(m)?.id === 'highstakes'), 'open')
+      pair.betting = openStage(startBetting(firstToAct(bankrolls, m.round), ante, max, bankrolls, twistFor(m)?.id === 'highstakes'), 'open', sitting)
     } else if (m.hand === HANDS_PER_ROUND) {
-      pair.betting = openStage(pair.betting!, 'push')
+      pair.betting = openStage(pair.betting!, 'push', sitting)
     }
   }
   if (m.pairs.some(pr => !pr.done && pr.betting?.toAct !== null)) m.phase = 'bet'
@@ -1311,7 +1315,6 @@ function flamberOut(m: Match, p: Player, locked: Card[]): void {
   if (plan) {
     if (!p.forge?.keep) throw new Error(`seat ${p.seat} flambé has no traits picked`)
     const { forged, bulk } = buildForged(plan, p.forge.keep, m.round, m)
-    if (locked.some(c => c.joker === 'catalyst')) forged.tier = Math.min(MAX_TIER, forged.tier + 1)
     const merged = plan.merged.map(c => c.id)
     removeFromHand(p, merged)
     toDiscard(p, locked.filter(c => !merged.includes(c.id)).map(c => c.id))
@@ -1771,6 +1774,8 @@ export function view(m: Match, s: SeatId): SeatView {
         open: shop.open,
       } : null,
       forge: plan,
+      keep: p.forge?.keep ?? null,
+      grind: p.grind,
       marker: due !== null ? { due, table: markerTable } : null,
       done: !pending(m).includes(s),
     },

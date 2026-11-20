@@ -13,6 +13,7 @@ export type ForgePlan = {
   tier: number
   grind: number
   candidates: Trait[] // everything it could keep. if more than `tier`, the player picks
+  catalyst: boolean // a Catalyst joker was in the hand: the new card comes out one ★ higher (traits still cap at `tier`)
 }
 
 // other = the second rank in two pair / full house (whichever isn't the new card's rank)
@@ -71,7 +72,8 @@ export function forgePlan(played: Card[]): ForgePlan | null {
   const candidates = mergeTraits([...inherited, ...fresh], rank)
   const tier = Math.min(MAX_TIER, Math.max(0, ...merged.map(c => c.tier)) + 1)
   const grind = merged.reduce((n, c) => n + c.grind, 0)
-  return { merged, hand: hand.type, rank, suit, tier, grind, candidates }
+  const catalyst = played.some(c => c.joker === 'catalyst')
+  return { merged, hand: hand.type, rank, suit, tier, grind, candidates, catalyst }
 }
 
 // bots (and the ui default) keep the strongest traits when over the cap
@@ -93,7 +95,7 @@ export function buildForged(plan: ForgePlan, keep: Trait[], round: number, ids: 
   const offered = new Set(plan.candidates.map(t => JSON.stringify(t)))
   for (const t of keep) if (!offered.has(JSON.stringify(t))) throw new Error('keeping a trait the plan never offered')
   const forged = newCard(ids, plan.rank, plan.suit, {
-    tier: plan.tier,
+    tier: plan.catalyst ? Math.min(MAX_TIER, plan.tier + 1) : plan.tier,
     traits: keep,
     grind: plan.grind,
     finish: bestFinish(plan.merged),

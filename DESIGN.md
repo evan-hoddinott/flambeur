@@ -33,16 +33,16 @@ Code: `match.ts` (`enterRound`, `afterLocks`, `revealHand`, `resolveHand`, `sett
    - **Discard**: toss 1–5 cards and draw that many. **3 discards per round** in total (Classic 4). Cold Deck: none.
    - **Use inserts** from the Sleeve on your cards.
    Then lock 1–5 cards as **Play** or **Flamber**. Both seats lock at once, and neither sees the other's.
-3. **The opening bet.** The ante goes in, then Min or Max (see Betting).
+3. **The opening bet.** The ante goes in, then Min or Max (see Betting). A seat that flambéd hand 1 isn't asked.
 4. **Reveal hand 1.** Both appraisals count up side by side (skippable). The higher one takes the hand. A tie goes to nobody.
 5. **Refill** back to your hand size from the pile. If the pile runs out, you play with what you have.
 6. **Hand 2**: discard, inserts, lock, reveal.
 7. If someone has 2 hands, or a knockout happened, the round is over.
-8. **Hand 3**: lock, then **the last push**, then reveal.
+8. **Hand 3**: lock, then **the last push** (not for a seat that flambéd hand 3), then reveal.
 9. **Who wins the round:** a knockout, then more hands won, then the higher total appraisal across the round's hands (thrown hands count 0; Lowball: lower). Still tied: a tie round, bets come back, nobody gets the winner's House bonus.
 10. **Payout** and the round-end tally (see Money).
 11. **Spoils.**
-12. **Cleanup:** everything goes back into the deck (played, discarded, unplayed, new ★ cards and Bulk). Then a shop, unless the run is over.
+12. **Cleanup:** everything goes back into the deck (played, discarded, unplayed, new ★ cards and Ash). Then a shop, unless the run is over.
 
 - A hand you can't play because you have no cards counts as a thrown hand.
 - **The rival sees** your card count, discards used and how many inserts are in your Sleeve. Never what you locked, or which inserts. Marked knockoffs still show face up once locked.
@@ -64,6 +64,7 @@ Code: `betting.ts`. No fold, anywhere. The rule on the button:
 - You can only pick Max if you can cover it. Under the ante you're all-in for what you have.
 - Acting second is the underdog's only perk. Peek is cut.
 - High Stakes twist: everyone is on Max for the round, nobody is asked.
+- **A flambé doesn't bet** (Nov 20, docs/FLAMBER.md §1b). If the hand you just locked is a Flamber, you aren't asked for that stage: you stay where you are (Min, or Max if you already chose it). When your turn in the order comes, you're logged on Min like a chosen Min, so the rival sees the same thing either way and nothing gives the flambé away. Flambé hand 1 and play hand 3: the last push still asks you. Both flambé hand 1: no betting at all. Code: `openStage(b, stage, sitting)`.
 
 ## Flamber
 
@@ -71,10 +72,11 @@ Code: `forge.ts` (`forgePlan`, `buildForged`), `flamberOut` in match.ts. One lin
 
 > **Flamber: throw this hand. A pair or better merges into a ★ card. Otherwise, one card you pick gets +1 Value.**
 
-- **Pair or better:** the locked cards that score merge into one ★ card. It goes **straight into your cards** for the next hand and stays in your deck for good. Every card eaten beyond the first leaves a **Bulk** card in this round's discard, which joins the deck at cleanup.
-- **No pair:** you pick one locked card (if only one can be ground, it's that one). It comes back to your cards with **+1 Value forever** (the old fold grind; Participation Trophy makes it +10). The other locked cards go to the discard. Bulk can't be ground.
+- **Pair or better:** the locked cards that score merge into one ★ card. It goes **straight into your cards** for the next hand and stays in your deck for good. Every card eaten beyond the first leaves an **Ash** card in this round's discard, which joins the deck at cleanup.
+- **No pair:** you pick one locked card (if only one can be ground, it's that one). It comes back to your cards with **+1 Value forever** (the old fold grind; Participation Trophy makes it +10). The other locked cards go to the discard. Ash can't be ground.
 - **The hand is thrown:** it scores 0, loses to any played hand, ties another thrown hand, and **can't be knocked out**.
-- No money cost. The price is one of your three hands.
+- No money cost. The price is one of your three hands. It doesn't bet either (see Betting).
+- **On screen it burns at the lock** (FLAMBER.md §1b, §2): the cards go to the middle and burn into the ★ card and Ash, the ★ card waits beside your hand, and at the reveal the rival's hand plays out alone against your empty spots. The engine still merges at the reveal (`resolveHand`), so both seats lock blind. The UI previews the ★ card with `buildForged` on a scratch id counter; Catalyst's extra ★ lives in `buildForged` (`plan.catalyst`) so there's one place that sets the tier.
 - Over the trait cap you pick which traits the ★ card keeps (`forgeKeep`; the timeout default is `autoKeep`).
 
 | Flambé a… | Trait | The flambéed card… |
@@ -94,11 +96,11 @@ Code: `forge.ts` (`forgePlan`, `buildForged`), `flamberOut` in match.ts. One lin
 - Stamps and 1st Edition growth don't carry through a flambé; the best Finish does. Knockoffs don't carry.
 - **Bonus hands:** primary hand = best hand with flambéed traits. Hands from the other families (rank, straight, flush) stack as bonus hands only if a flambéed trait made them happen. Plain cards never combo.
 
-### Bulk
+### Ash
 
-- A weak stone card: no rank, no suit, never part of a poker hand. When played it scores **+5 Value**. It can't be flambéed or ground, sells for $0.
-- Getting rid of it: the **Bulk bin** service in the shop, $2, then $3, $4… for the rest of the run (Bulk Deal pochette: always $1).
-- No deck floor. Bulk Bin (+2 Hype each) and Le Ferrailleur (×1.5 Hype each) make it a lane.
+- The burnt card a flambé leaves behind (it was called Bulk until Nov 20): no rank, no suit, never part of a poker hand. When played it scores **+5 Value**. It can't be flambéed or ground, sells for $0.
+- Getting rid of it: the **Ashtray** service in the shop, $2, then $3, $4… for the rest of the run (Ash Deal pochette: always $1).
+- No deck floor. Ash Bucket (+2 Hype each) and Le Ferrailleur (×1.5 Hype each) make it a lane.
 
 ## Knockout
 
@@ -135,7 +137,7 @@ Code: `shop.ts` (`stockShop`, `newShop`), `enterShop` / `nextShop` in match.ts. 
 | Packs | 2, random from Off-Brand / Repack / Collector | 3 |
 | Collectibles | 1 | 3, one always a payoff (×Hype rare) |
 | Register | 1 scratcher | 2 scratchers |
-| Service | the grading desk at a Table's 1st small shop, the Bulk bin at its 2nd | the grading desk and the Bulk bin |
+| Service | the grading desk at a Table's 1st small shop, the Ashtray at its 2nd | the grading desk and the Ashtray |
 | Pochette | | one offered, $10 |
 | Always | restock ($1, $2… per shop), sell from the binder | same |
 
@@ -154,7 +156,7 @@ Code: `shop.ts` (`stockShop`, `newShop`), `enterShop` / `nextShop` in match.ts. 
 | Scratcher | $3 | |
 | Pochette | $10 | |
 | Restock | $1, $2, $3… (resets each shop) | |
-| Bulk bin | $2, $3, $4… for the run | |
+| Ashtray | $2, $3, $4… for the run | |
 | Grading | La Poste $2 / Chronopost $4 / Fourgon blindé $7 | |
 | Binder card | | $1, Finish $2, graded grade ÷ 2, Chase $10, × STONKS |
 
@@ -175,7 +177,7 @@ Code: `KEEPER` / `keeperFor` in shop.ts. A posted sign of **3 traits seeded per 
 
 ### Grading
 
-Once per shop visit that has the desk, ship one deck or binder card. It's away until the next shop and comes back graded. Grade = 1d10 + freshness (+3 pulled this round, +2 last round, +1 two rounds ago), cap 10. Bulk and already graded cards can't go.
+Once per shop visit that has the desk, ship one deck or binder card. It's away until the next shop and comes back graded. Grade = 1d10 + freshness (+3 pulled this round, +2 last round, +1 two rounds ago), cap 10. Ash and already graded cards can't go.
 
 - **La Poste** $2: a 1–3 comes back damaged in shipping (−1 Hype when scored).
 - **Chronopost** $4: same roll, never damaged (at least a 4).
@@ -194,13 +196,13 @@ Your **Sleeve** holds **2 inserts**, drawn as 2 face-down cards by your hand. Sc
 | Checklist | in hand | Up to 2 cards become a suit you pick | 11 |
 | Stylo | in hand | Up to 2 cards go up one rank (an Ace stays an Ace) | 11 |
 | Broyeuse | in hand | Shred up to 2 cards for good | 9 |
-| Photocopie | in hand | Pick 2: the first becomes a copy of the second (rank, suit, finish, stamp slot). Not Jokers or Bulk; a beer stain doesn't copy | 8 |
+| Photocopie | in hand | Pick 2: the first becomes a copy of the second (rank, suit, finish, stamp slot). Not Jokers or Ash; a beer stain doesn't copy | 8 |
 | Reprint | in hand | A copy of 1 card goes into your deck (this round's discard) | 7 |
 | Foil wrap | in hand | 1 card becomes Foil | 7 |
 | Holo wrap | in hand | 1 card becomes Holo | 7 |
 | Prism wrap | in hand | 1 card becomes Prism | 2 |
 | Tampon | in hand | 1 card gets a random stamp: 1st Edition, Signed or Gold Border | 6 |
-| Allumettes | in hand | Merge 2 same-rank cards in your hand into a ★ card now, without throwing a hand. The ★ card stays in your hand, 1 Bulk goes to the discard | 6 |
+| Allumettes | in hand | Merge 2 same-rank cards in your hand into a ★ card now, without throwing a hand. The ★ card stays in your hand, 1 Ash goes to the discard | 6 |
 | Wishlist | in the shop | 1 binder card shuffles into your deck (the Joker cap still applies) | 5 |
 | Grail | on the spot | A free rare collectible (half its price if the case is full) or a Joker | 3 |
 
@@ -239,7 +241,7 @@ Code: `rivals.ts` (the roster as data, `buildRival`), `sitRival` in match.ts.
 | Queen of Hearts | ♥ flushes | Hearts, Holo | Color-Sorted Binder → Sommelier → Playmat (♥) |
 | King of Spades | Flambé | ★ cards | Chalumeau → Flamme Bleue → Chef's Apron |
 | Owl | Grade | Graded cards, Prism | PSA 10 Slab → Le Commissaire-priseur → Thin Binder |
-| Scaramouche | Junk | Bulk and knockoffs | Bulk Bin → Le Ferrailleur → Participation Trophy |
+| Scaramouche | Junk | Ash and knockoffs | Ash Bucket → Le Ferrailleur → Participation Trophy |
 | Fox | Jokers | 2 Jokers, Signed cards | Specialist → Bis ! → Combo Platter |
 
 - **Betting styles** as the Fiche says them (`glossary.ts`): Hare and Crimson Domino as above, every other mask "bets Max when its hand is strong, sometimes bluffs" (its difficulty's style).
@@ -300,9 +302,9 @@ Appraisal = Value × Hype × 2^Grade
 - **Value**: card values 2–10 face, J/Q/K = 10, A = 11, plus hand base and bonuses.
 - **Hype**: starts at the hand base. Can be fractional (one decimal shown); the total rounds down at the end.
 - **Grade**: each +1 doubles the appraisal. Rare, from Gem Mint, Prism, rares.
-- Only the cards that make the poker hand score (kickers don't). Bulk is the exception: +5 Value.
+- Only the cards that make the poker hand score (kickers don't). Ash is the exception: +5 Value.
 
-**Order matters, like Balatro.** The display case triggers left to right, and a × multiplies whatever Hype has built up so far. So a + to the left of a × gets multiplied, and a + to the right doesn't. Scoring order: hand base → each scored card in play order (Value, finish, stamps, tier, grade, then each collectible's per-card effect, left to right) → Bulk → each collectible's per-hand effect, left to right.
+**Order matters, like Balatro.** The display case triggers left to right, and a × multiplies whatever Hype has built up so far. So a + to the left of a × gets multiplied, and a + to the right doesn't. Scoring order: hand base → each scored card in play order (Value, finish, stamps, tier, grade, then each collectible's per-card effect, left to right) → Ash → each collectible's per-hand effect, left to right.
 
 | Hand | Base Value | Base Hype |
 |---|---|---|
@@ -384,7 +386,7 @@ Code: `sleeves.ts` (ids say `sleeve`). One is offered in each big shop, $10, out
 | Hot Market | STONKS sells at +1× |
 | Display Riser | +1 display case slot |
 | Deep Pockets | Interest caps at +$4 instead of +$2 |
-| Bulk Deal | Binning a Bulk card always costs $1 |
+| Ash Deal | Emptying an Ash card always costs $1 |
 | Pochette Archive | Damaged cards never tear, and grading never comes back damaged |
 
 ## Display case (collectibles)
@@ -400,13 +402,13 @@ A **lane** is a build. Cheap collectibles add; one rare **payoff** per lane mult
 | Flamme Bleue | Flambé | Each scored flambéed card: ×1.5 Hype |
 | L'Écrin | Finishes | ×1 Hype per different Finish scored (id `vitrine`, renamed so it doesn't clash with the display case) |
 | Petite Monnaie | Low cards | Each scored 2–6: ×1.25 Hype |
-| Le Ferrailleur | Bulk | Each Bulk played: ×1.5 Hype |
+| Le Ferrailleur | Ash | Each Ash played: ×1.5 Hype |
 | Le Flambeur | Money | ×Hype = 1 + 1 per $20 you hold |
 | Bis ! | Retrigger | Signed cards score 3 times, not 2 |
 | Ligne Droite | Straights | Straight (or a straight bonus hand): ×2.5 Hype |
 | Le Commissaire-priseur | Grade | Each scored graded card: ×1.5 Hype |
 
-Feeders and filler: the rest of the pool in `collectibles.ts` (Rubber Band, Low Ball, Straight Edge, Price Sticker, Black Light, Color-Sorted Binder, Chalumeau, PSA 10 Slab, Bulk Bin, Specialist, …).
+Feeders and filler: the rest of the pool in `collectibles.ts` (Rubber Band, Low Ball, Straight Edge, Price Sticker, Black Light, Color-Sorted Binder, Chalumeau, PSA 10 Slab, Ash Bucket, Specialist, …).
 
 ## Boss twists
 
@@ -524,16 +526,24 @@ Calls the spec didn't make, all the simplest option that fit its intent:
 - **Fixes from the engine review:** Gold Border is once per round (it was per card), Double or Nothing doubles the House lines too, a blanked card's finish no longer counts for Vitrine or Sommelier, Sticky Fingers sends a Joker past the cap to the binder, and a collectible sells for half its *current* price so Closing Down can't make a $1-buy/$2-sell loop. `ENGINE_VERSION` 2.0.1.
 - **Le Patron at exactly $0:** paying that leaves you at $0 counts as a miss. You need $1 to sit at the table, same as the shop's $1 rule.
 - **No spoils after a bust:** a round where someone busts has no spoils draft (the Table or the run ends there).
-- **Allumettes:** the new ★ card stays in your hand for this hand, the Bulk goes to the discard.
-- **Photocopie:** a beer stain doesn't copy (it's stuck to one card), Jokers and Bulk can't be either card.
+- **Allumettes:** the new ★ card stays in your hand for this hand, the Ash goes to the discard.
+- **Photocopie:** a beer stain doesn't copy (it's stuck to one card), Jokers and Ash can't be either card.
 - **Code rolls its hand when scratched**, so the Sleeve shows which hand it levels.
 - **Sleeve overflow:** a third insert waits in a slot of its own, and the shop is blocked until you use or toss one.
-- **Small shop services:** a Table's 1st small shop has the grading desk, its 2nd the Bulk bin, as V2.md §8 says; with a rival bust the Table skips straight to the big shop, which has both.
+- **Small shop services:** a Table's 1st small shop has the grading desk, its 2nd the Ashtray, as V2.md §8 says; with a rival bust the Table skips straight to the big shop, which has both.
 - **Spoils "best card" for bots and timeouts** is value plus a bonus for anything special (`spoilsWorth`), no hate-drafting yet.
 - **UI, Flamber with no pair:** with one groundable card it grinds that one; with more, the bar asks you to click the card that gets +1 Value.
 - **UI, inserts in a hand:** click a Sleeve card to pick it up, select its cards (Photocopie reads click order: first becomes second), then Use. Checklist shows 4 suit tickets. Wishlist says "use it in the shop".
 - **UI, the shop's Sleeve:** click it on the zinc for an overlay: use a Code or Wishlist, or toss.
-- **Dev flags:** `/?quick&big` stops at the first big shop, `/?quick&auto` plays your seat with the `house` bot through the real UI to the end of the run (the browser smoke test).
+- **Dev flags:** `/?quick&big` stops at the first big shop, `/?quick&auto` plays your seat with the `house` bot through the real UI to the end of the run (the browser smoke test), `&burn` makes it flambé every pair. `/flambe.html` loops the flambé beat.
+- **A flambé doesn't bet (Nov 20).** Sim before → after, 1000 runs vs Medium, seed `sim` (win rate · decisions per round):
+
+  | Starter | greedy | cautious | random |
+  |---|---|---|---|
+  | Classic | 59.7% → 59.6% · 6.70 → 6.58 | 3.7% → 3.8% · 6.34 → 6.34 | 45.4% → 45.4% · 6.20 → 6.14 |
+  | Forge | 78.2% → 78.8% · 6.43 → 6.39 | 18.7% → 18.4% · 5.87 → 5.87 | 67.5% → 67.9% · 6.01 → 5.99 |
+
+  All within noise: it only saves a decision (about 0.1 a round) and the bots rarely Max a flambé anyway. Rival p50 moved by under 1%, so `REF_SCORE` stays. Cautious never flambés; its tiny shift is the rival's own flambés no longer betting.
 
 - **UX content pass (UX.md §10, 2.0.2):**
   - **Crayon** reads "Counts as any rank, 0 Value." Hand eval already did that; what didn't match was its printed rank still firing Low Ball, Odd Lot, Even Stack, Face Binder, PSA 10 Slab and Face Cards Don't Score (Petite Monnaie already skipped it). Now they all skip it, and a lone Crayon is an ace for the high card.

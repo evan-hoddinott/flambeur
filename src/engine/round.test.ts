@@ -175,6 +175,55 @@ test('flamber with no pair: the picked 9 comes back with +1 Value, the 2 goes to
   assert.ok(me.discard.some(c => c.id === two.id))
 })
 
+// a flambé locks blind but skips the bet: the seat stays where it is, and the other seat sees a min like any other
+const flambe = (m: Match, s: SeatId, spec: Spec): Match => step(m, s, { type: 'flamber', cardIds: ids(setHand(m, s, spec)), grind: null }).match
+const play = (m: Match, s: SeatId, spec: Spec): Match => step(m, s, { type: 'play', cardIds: ids(setHand(m, s, spec)) }).match
+const choices = (m: Match, s: SeatId) => view(m, s).bet!.choices.map(c => `${c.seat}:${c.stage}:${c.choice}`)
+
+test('flambé hand 1: you aren\'t asked, you sit on min, and the rival sees your min before its own pick', () => {
+  let m = start('sit1') // equal bankrolls in round 1: seat 0 acts first
+  m = flambe(m, 0, KK)
+  m = play(m, 1, NINES)
+  assert.equal(m.phase, 'bet')
+  assert.deepEqual(pending(m), [1])
+  assert.deepEqual(choices(m, 1), ['0:open:min'])
+  m = step(m, 1, { type: 'bet', choice: 'max' }).match
+  assert.deepEqual(m.pairs[0].betting!.onMax, [false, true])
+})
+
+test('flambé hand 1, play hand 3: the last push still asks you', () => {
+  let m = start('sit13')
+  m = flambe(m, 0, KK)
+  m = play(m, 1, NINES)
+  m = step(m, 1, { type: 'bet', choice: 'min' }).match
+  m = hand(m, KK, NINES) // 1–1
+  m = play(m, 0, KK)
+  m = play(m, 1, QQ)
+  assert.equal(m.phase, 'bet')
+  assert.deepEqual(pending(m), [0])
+})
+
+test('flambé hand 3: no push for you, the rival still gets one and sees your min', () => {
+  let m = start('sit3')
+  m = hand(m, KK, NINES)
+  m = hand(m, NINES, KK) // 1–1
+  m = flambe(m, 0, KK)
+  m = play(m, 1, QQ)
+  assert.equal(m.phase, 'bet')
+  assert.deepEqual(pending(m), [1])
+  assert.deepEqual(choices(m, 1).slice(-1), ['0:push:min'])
+})
+
+test('both flambé hand 1: no betting at all, straight to the reveal and hand 2, both on min', () => {
+  let m = start('sitboth')
+  m = flambe(m, 0, KK)
+  m = flambe(m, 1, QQ)
+  assert.equal(m.phase, 'deal')
+  assert.equal(m.hand, 2)
+  assert.deepEqual(m.pairs[0].betting!.onMax, [false, false])
+  assert.deepEqual(m.pairs[0].betting!.log.map(l => l.action), ['min', 'min'])
+})
+
 test('discards: toss 2, draw 2 (pile 10 → 8 → 6 → 4 → 2). classic has 4 a round, the 5th is refused. cold deck refuses the first', () => {
   let m = start('bdisc')
   const p = m.players[0]
@@ -342,7 +391,7 @@ test('tampon: a random 1st Edition, Signed or Gold Border, and the knockoff is g
   assert.equal(held(next, hand[0]).knockoff, null)
 })
 
-test('allumettes: K♠ K♥ merge into one K★ Twin in your hand now, 1 Bulk to the discard, no hand thrown', () => {
+test('allumettes: K♠ K♥ merge into one K★ Twin in your hand now, 1 Ash to the discard, no hand thrown', () => {
   const { m } = useOn('i-match', 'allumettes', [[13, 'S'], [13, 'H'], [4, 'D']], [0, 1])
   const me = m.players[0]
   assert.equal(me.hand.length, 2)
