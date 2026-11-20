@@ -18,7 +18,7 @@ export const HOW_LINES: { name: string; text: string }[] = [
   { name: 'Best of 3', text: 'A round is up to 3 hands. Win 2 hands and the round and its pot are yours.' },
   { name: 'Play', text: 'Lock 1–5 cards. Your best poker hand in them is what scores.' },
   { name: 'Discard', text: 'Toss 1–5 cards and draw as many. The Discard button shows how many are left.' },
-  { name: 'Flamber', text: 'Throw this hand. A pair or better merges into a ★ card, otherwise one card gets +1 Value for good.' },
+  { name: 'Flamber', text: 'Throw this hand, no bet. A pair or better burns into a ★ card and Ash, otherwise one card gets +1 Value for good.' },
   { name: 'Min / Max', text: 'Max bets more on yourself: win and the House pays it, lose and your rival takes it.' },
   { name: 'Appraisal', text: 'Value × Hype × 2^Grade. The higher appraisal takes the hand.' },
   { name: 'K.O.', text: 'Win a hand by K× or more and the round ends right there, a win for you.' },

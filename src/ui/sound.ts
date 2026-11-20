@@ -415,10 +415,10 @@ export function spoils(n: number): void {
 export function select(up: boolean, x?: number): void {
   play('card-snap', { gain: up ? 0.6 : 0.35, rate: up ? 1.15 : 0.9, x })
 }
-
+// cards slapped face down on the felt. flamber: the cards slide off to the middle to burn
 // cards slapped face down on the felt. flamber: a match strike and the flame catching instead
 export function lock(n: number, flamber: boolean): void {
-  if (flamber) return strike()
+  if (flamber) return shove() // the cards lift to the middle. the flambé beat strikes the match itself
   for (let i = 0; i < Math.max(1, n); i++) play('card-place', { gain: 0.6, delay: i * 45, cap: 6 })
   accordion(41, 300, 0.12, { reeds: 3, attack: 60 })
   accordion(48, 300, 0.1, { reeds: 3, attack: 60 })
@@ -462,14 +462,45 @@ export function stars(n: number): void {
 }
 
 // no pair: a grindstone, then a ting
+// the grind beat's heat: a grindstone while the card glows
 export function grind(): void {
   for (let i = 0; i < 6; i++) noise(55, 0.12, { freq: 900 + i * 60, q: 2, delay: i * 50 })
-  tone(hz(84), 300, 0.08, { type: 'sine', delay: 330 })
 }
 
-export function bulk(): void {
-  play('slam', { gain: 0.5, rate: 0.85 })
-  play('tok', { gain: 0.4, rate: 0.6 })
+// the flambé's own beats (docs/FLAMBER.md §7). a card catches: a soft fwoomp, a step higher each card
+export function ignite(i: number): void {
+  noise(180, 0.2, { freq: 380 + i * 70, sweep: 1600, q: 0.7 })
+  play('fire', { gain: 0.22, rate: 1 + i * 0.06 })
+}
+
+// one pop of the fire. level 0..1.5
+export function crackle(level: number): void {
+  noise(14 + Math.random() * 22, 0.04 + 0.07 * Math.min(1, level), { type: 'highpass', freq: 1800 + Math.random() * 3000, q: 2 })
+}
+
+// the fire's body under the pops: overlapping swells of low filtered noise, louder as it grows. level 0..1.5
+export function roar(level: number): void {
+  const l = Math.min(1, level)
+  noise(700, 0.03 + 0.09 * l, { type: 'lowpass', freq: 260 + 380 * l, q: 0.6, attack: 260 })
+  noise(500, 0.02 + 0.04 * l, { freq: 900 + 500 * Math.random(), q: 0.4, attack: 180 })
+}
+
+// a card's flame pours into the ★ card
+export function whump(): void {
+  tone(78, 260, 0.32, { type: 'sine', glide: 42 })
+  noise(220, 0.16, { freq: 420, sweep: 160, q: 0.8 })
+}
+
+// an Ash card lands: paper ash, no thud
+export function ash(): void {
+  noise(320, 0.13, { freq: 1300, sweep: 420, q: 0.6 })
+  play('card-snap', { gain: 0.12, rate: 0.55 })
+}
+
+// the ground card quenched: steam, then the ting of the +1
+export function quench(): void {
+  noise(620, 0.2, { type: 'highpass', freq: 3800, sweep: 2200, q: 0.5 })
+  tone(hz(84), 300, 0.08, { type: 'sine', delay: 260 })
 }
 
 // ---------- chips and money ----------
@@ -518,10 +549,12 @@ export function slamBox(): void {
   play('box', { gain: 0.4, delay: 20 })
 }
 
-// Bulk dropped in the shop's bin: stone on metal
+// Ash emptied into the shop's ashtray
 export function bin(): void {
-  play('metal', { gain: 0.6, rate: 0.8 })
-  play('slam', { gain: 0.4, rate: 0.7, delay: 30 })
+  // ash tapped into the brass tray: two light taps on metal, a puff of ash
+  play('metal', { gain: 0.3, rate: 1.5 })
+  play('metal', { gain: 0.22, rate: 1.6, delay: 120 })
+  noise(260, 0.1, { freq: 1100, sweep: 380, q: 0.6, delay: 140 })
 }
 
 // the card goes off to grading: La Poste stamps it and rings a bicycle bell, Chronopost beeps its scooter,
@@ -713,12 +746,12 @@ export function scratch(speed: number): void {
 export type Voice = 'buraliste' | 'croupier' | 'patron' | 'fee' | 'hare' | 'pierrot' | 'domino' | 'domino_red' | 'arlequin'
   | 'queen_hearts' | 'king_spades' | 'owl' | 'scaramouche' | 'fox'
 
-type Speaker = { wave: OscillatorType | 'reed'; base: number; every: number; ms: number; filter?: number; spread: number }
+type Speaker = { wave: OscillatorType | 'reed' | 'glass'; base: number; every: number; ms: number; filter?: number; spread: number }
 const VOICES: Record<Voice, Speaker> = {
   buraliste: { wave: 'reed', base: 45, every: 3, ms: 60, spread: 1 },
   croupier: { wave: 'square', base: 60, every: 2, ms: 45, filter: 900, spread: 1 },
   patron: { wave: 'reed', base: 36, every: 3, ms: 80, filter: 600, spread: 1 },
-  fee: { wave: 'sine', base: 84, every: 2, ms: 90, spread: 2 },
+  fee: { wave: 'glass', base: 84, every: 2, ms: 160, spread: 3 },
   hare: { wave: 'triangle', base: 79, every: 1, ms: 30, spread: 2 },
   pierrot: { wave: 'sine', base: 67, every: 2, ms: 70, spread: 1 },
   domino: { wave: 'square', base: 55, every: 2, ms: 55, filter: 700, spread: 1 },
@@ -761,11 +794,21 @@ function say(v: Speaker, m: number, masked: boolean, bend: boolean): void {
   plays++
   if (!ctx || silent()) return
   if (v.wave === 'reed') return accordion(m, v.ms, 0.16, { attack: 4, glide: bend ? 3 : undefined })
+  if (v.wave === 'glass') return glass(m, v.ms, bend)
   const f = ctx.createBiquadFilter()
   f.type = 'lowpass'
   f.frequency.value = Math.min(v.filter ?? 6000, masked ? 2500 : 20000)
   f.connect(sfxBus!)
   tone(hz(m), v.ms, 0.08, { type: v.wave, attack: 3, dest: f, glide: bend ? hz(m + 3) : undefined })
+}
+
+// la fée verte's voice: a spoon on an absinthe glass. the note, a quiet twelfth over it and a bell partial that dies
+// fast, so each letter rings and fades instead of buzzing
+function glass(m: number, ms: number, bend: boolean): void {
+  const f = hz(m)
+  tone(f, ms, 0.06, { type: 'sine', attack: 2, glide: bend ? hz(m + 3) : undefined })
+  tone(hz(m + 19), ms * 0.6, 0.018, { type: 'sine', attack: 2 })
+  tone(f * 2.76, ms * 0.25, 0.01, { type: 'sine', attack: 1 })
 }
 
 // ---------- ambience (docs/SOUND.md §7) ----------

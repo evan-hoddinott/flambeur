@@ -103,7 +103,7 @@ The score has its own colors, used everywhere: counters, floating numbers, parti
 
 | Meaning | Felt / paper | Why | Wears it |
 |---|---|---|---|
-| **Value** | blue `#8ec5ff` / `#2f5d9a` | Balatro's chips are blue. Cream (the old Value color) was every label's color, so Value never stood out | Foil, Bulk, Rookie, Jumbo, grind, the Value chip in rules text |
+| **Value** | blue `#8ec5ff` / `#2f5d9a` | Balatro's chips are blue. Cream (the old Value color) was every label's color, so Value never stood out | Foil, Ash, Rookie, Jumbo, grind, the Value chip in rules text |
 | **Hype** | flame `#ff7a24` / `#e8501a` | Hype is heat | Holo, Misprint, 1st Edition, Beer-stained, ★ tiers, Flamber (it makes ★ cards, and ★ adds Hype) |
 | **Grade** | gold `#e8c260` / `#9c7028` | Grading slabs, gold standard. **Only Grade**: callouts, names and titles are cream, not gold | Prism, Damaged, graded cards |
 | **Money** ($, bankroll, pot) | green `#6fcf6f` / `#3a8040` | Banknotes. Both seats' bankrolls are green; the plate's position says whose it is | Gold Border, Chase, STONKS, prices |
@@ -240,9 +240,16 @@ Covered in Camera. A few more details:
 - A card **comes back** in a **grading slab** (a clear case with a gold Grade label). The Grade number counts up on the label with a stamp.
 
 ### 7.8 Flamber (formerly "Forge")
-- The screen is about **fire**, because the merge is a flambé. The chosen cards lift and overlap, then **a flame runs across them** (`burn` shader, but the fire stays). They melt into one card that rises out of the flame, glowing with its ★ heat.
-- Leftover **Bulk** cards drop to the felt as stone-grey slabs with a dull thunk. They have no flame and no finish, and they look heavy.
-- A new trait slot lights up on the card with a small spark and the trait name in a tooltip.
+Built Nov 20: `src/ui/flambe.ts` (the beat) on `src/ui/fire.ts` (the fire). Full spec and timings in docs/FLAMBER.md §2–3; tune it at `/flambe.html` (dev).
+- **It burns at the lock**, not the reveal. Your spots stay empty and the rival's hand counts up alone at the reveal, with a `FLAMBÉ` tag on your side.
+- **The fire is the title logo's fire**, live: a heat field stepped at 15 fps in the logo ramp, behind the cards (tall) and over their bottoms (short licks), so the cards sit *in* the fire. The felt dims behind it and the lamp flares with it.
+- **Every burning card has its result underneath.** A match runs along the bottoms and lights each card; burn fronts eat each face (scorch → char → glowing edge → gone) and reveal what's below: the ★ card under the survivor, **Ash** under the rest. The index corner burns last, so you can read the card to the end. The Ash cards' flames pour into the survivor, it pops with rays and its stars, the caption changes from `Flambé · Pair of 5s` to `2 cards → 1 ★ card + 1 Ash`.
+- **Settle:** the ★ card flies to its waiting spot beside your hand (`next hand`), the Ash flutters to your discard. A click skips to here.
+- **Grind (no pair):** nothing burns. The card heats orange, is quenched in steam, `+1 Value` stamps on it, and it goes back beside your hand.
+- **Rival flambé:** a short fire on their thrown stack at the reveal.
+- **Hover preview:** hovering the Flamber ticket puts a small flame on each card that would burn and dims the kickers (a grind's card glows). The Fiche says what it makes.
+- ★3 shakes the camera and flares white. Reduced motion: no fire, the results cross-fade in place.
+- Not built yet: a new trait slot lights up on the ★ card with a small spark and the trait name in a tooltip.
 
 ### 7.9 Run end
 - **Win:** the rival takes off their mask and throws it on the table, a light leak, and the camera holds on the mask. The score slip prints out like a receipt.
@@ -291,7 +298,7 @@ Four mask families, all **unlockable through play, never bought**:
 - **Pips:** a traditional layout, drawn crisp, with a slight letterpress feel (a 1 px darker inner edge).
 - **Courts:** the **Paris pattern**, double-headed and mirrored, with the **named figures** (shown in the tooltip and collection view, not printed on the card, since text that small doesn't read). Kings: Charles, David, César, Alexandre. Queens: Judith, Rachel, Argine, Pallas. Jacks: La Hire, Hector, Ogier, Lancelot. Reuse the logo's court drawings where possible.
 - **Joker cards:** a jester in a commedia mask. The word "Joker" hides somewhere in each one's art (the Balatro tradition, and a wink).
-- **Bulk:** a grey stone slab the size of a card, with no rank or suit, a chiselled "+5", and moss in one corner.
+- **Ash:** a burnt card, with no rank or suit: charred bitten edges, a grey ash body, a few embers, a "+5" pressed into the middle (docs/FLAMBER.md §4).
 
 ### Wear shows Grade
 - Condition is visible **once a card is graded** (ungraded cards are clean). A **low grade** has soft corners, a crease, a scuff and yellowed edges. **Mid** has slight edge wear. **Gem mint** is pristine, with a faint gloss sweep on hover.
@@ -397,7 +404,7 @@ Heat thresholds are relative to the round's expected score (from `REF_SCORE`), s
 See Pack opening: the last card is held face-down, light rays, a fée verte flash, a light leak, the shopkeeper drops his cigarette, and the callout.
 
 ### 12.3 Flamber
-See the Flamber scene: a flame runs across the hand and one card rises out of it. A ★3 result gets the full white-hot treatment and a big shake.
+See §7.8: your cards burn at the lock, each down to the ★ card or Ash underneath it. A ★3 result gets the full white-hot treatment and a big shake.
 
 ### 12.4 Busting the rival
 The rival's last chips slide over, their mask cracks, then they tear it off and throw it on the felt. A big light leak, the swirl goes full-room for a moment, then calm, and the receipt prints.
@@ -464,7 +471,7 @@ All of these are switches in the pause menu (UX.md §2b).
 Get the duel scene readable first, then the payoffs, then the shop.
 
 1. **Renderer core:** sprite batcher, springs, `juiceUp`, nearest sampling, the 640×360 stage. Plus the `sprite` (tilt), `post` and `floor` shaders.
-2. **Cards:** the 64×88 frame, pips, indices, 12 Paris courts, 1 card back, Bulk.
+2. **Cards:** the 64×88 frame, pips, indices, 12 Paris courts, 1 card back, Ash.
 3. **The duel scene:** felt plane (4 colors), lamp, room backdrop, the player from behind (1 mask), the rival (3 masks for the 3 difficulties), jetons and plaques, the HUD plates, the betting-slip buttons.
 4. **Showdown Appraisal:** counters, slot-reel numbers, flambé fire, the callouts, the camera push.
 5. **Finishes and heat:** `foil`, `holo`, `embers`, `heat`, `burn`.

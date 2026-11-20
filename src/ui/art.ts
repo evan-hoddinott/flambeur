@@ -12,7 +12,7 @@ import ticketsPng from '../../art/tickets/tickets.png'
 import ticketsJson from '../../art/tickets/tickets.json'
 import { rankLabel, traitName, type Card, type Suit } from '../engine/cards.ts'
 import type { StarterId } from '../engine/starters.ts'
-import { onPref, pref } from './prefs.ts'
+import { onPref, pref, still } from './prefs.ts'
 
 export type Sprite = {
   img: HTMLImageElement | HTMLCanvasElement
@@ -135,6 +135,28 @@ export function partCanvas(name: string): HTMLCanvasElement {
 }
 
 // ---------- cards ----------
+
+// Ash still smoulders: two frames with the embers' yellow and orange swapped, a few times a second (FLAMBER.md §4)
+let ashFrames: HTMLCanvasElement[] = []
+function ashCanvas(): HTMLCanvasElement {
+  if (!ashFrames.length) {
+    const lit = partCanvas('base/bulk')
+    const g = ctx2d(lit)
+    const img = g.getImageData(0, 0, lit.width, lit.height)
+    const d = img.data
+    for (let i = 0; i < d.length; i += 4) {
+      const hex = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]
+      const to = hex === 0xffe45e ? 0xf77a1c : hex === 0xf77a1c ? 0xffe45e : hex === 0x9c1f26 ? 0xdc3e1a : -1
+      if (to < 0 || !d[i + 3]) continue
+      d[i] = to >> 16
+      d[i + 1] = (to >> 8) & 255
+      d[i + 2] = to & 255
+    }
+    g.putImageData(img, 0, 0)
+    ashFrames = [partCanvas('base/bulk'), lit]
+  }
+  return still.matches ? ashFrames[0] : ashFrames[Math.floor(performance.now() / 340) % 2]
+}
 
 // pip centers on the 64x88 stock, each row lists its columns
 const PIP_ROWS: Record<number, [number, string][]> = {
@@ -263,11 +285,7 @@ export function cardCanvas(card: Card): HTMLCanvasElement {
     knockoff?.kind === 'wrongsuit' && knockoff.suit, tier, ...icons].join('|')
   const hit = cards.get(key)
   if (hit) return hit
-  if (card.bulk) {
-    const slab = partCanvas('base/bulk')
-    cards.set(key, slab)
-    return slab
-  }
+  if (card.bulk) return ashCanvas()
   if (!card.grade && !card.grind && !card.bonusHype && !variant && !joker && !tier && !finish && !stamp && !knockoff) return faceCanvas(rank, suit)
   const stock = partCanvas('base/paper')
   const g = ctx2d(stock)

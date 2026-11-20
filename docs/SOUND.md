@@ -39,7 +39,7 @@ Nov 19 2026, from Evan's ask: French, an accordion count-up like Balatro's, cris
 |---|---|---|---|
 | [Kenney Casino Audio](https://kenney.nl/assets/casino-audio) | CC0 | **The cards and chips**: ~23 card, ~19 chip, ~12 dice sounds | Grab this first. It's the backbone of the duel |
 | Freesound, CC0 only | CC0 | More card takes (flick, snap, riffle, slide on felt), a foil bag tear for the pack rip, a scratch ticket, coins on metal | Search "playing card", "card flick", "foil", "scratch card". Pick by ear for a sharp transient and no room echo |
-| Kenney Impact Sounds, Interface Sounds, UI Audio | CC0 | Wood/plate thuds (stamps, box slam, Bulk stone), small clicks as raw material | Kenney asks for credit but doesn't require it. We credit anyway |
+| Kenney Impact Sounds, Interface Sounds, UI Audio | CC0 | Wood/plate thuds (stamps, box slam), small clicks as raw material | Kenney asks for credit but doesn't require it. We credit anyway |
 | [Sonniss GDC bundles](https://sonniss.com/gameaudiogdc) | royalty free, commercial OK, no attribution, **no AI training** | The pro foley Kenney lacks: paper tear, vintage cash register, shop door bell, match strike, fire whoosh and crackle, ceramic crack, crowd murmur, clock, street | Huge (many GB). Search the archive, don't download all of it. Check each year's license page |
 | [Freesound](https://freesound.org) | per file. **Filter to CC0** | Specific French things: a Paris street, a café room tone, a moped, a Métro door | CC-BY files are fine too, but each needs a credit line |
 | Sound fonts already on this machine | GeneralUser GS (its license is in `~/Music/sf2`), FluidR3 (MIT) | Single notes to borrow: an accordion, a celesta, an organ, a bell | Render one note with fluidsynth when a synth voice can't get there |
@@ -135,7 +135,7 @@ Every event in the game. **S** = sample, **Y** = synth. Existing `sound.ts` func
 | Discard | cards slide off the felt + a small whoosh, then new flicks | S |
 | Insert from the Sleeve | plastic fwip (SLEEVES.md) + card snap | S |
 | **Lock (Play)** | cards slap face down on the felt, and a low accordion bellows "huff". The croupier: "Rien ne va plus." on hand 1 | S+Y |
-| **Lock (Flamber)** | a match strike, then the flame catches (whoosh) | S |
+| **Lock (Flamber)** | the cards slide off to the middle (`shove`); the burn's own sounds follow | S |
 | Ante | two chips clack into the pot | S |
 | À vous (your bet) | `turn`, re-voiced as two accordion reeds | Y |
 | Min | one chip set down | S |
@@ -165,10 +165,11 @@ Every event in the game. **S** = sample, **Y** = synth. Existing `sound.ts` func
 | Take a spoil | card snap | S |
 | Skip a spoil (+$1) | `coin` | Y |
 | The last spoil burns | a match + a quick flame | S |
-| **Flamber: no pair (grind)** | a grindstone scrape, then a +1 ting | S+Y |
-| **Flamber: merge** | a whoosh as the cards fly in, the fire roars, a deep "foomp" as one card rises | S |
+| **Flamber: no pair (grind)** | a grindstone scrape while the card heats (`grind`), then a steam hiss and the +1 ting (`quench`) | S+Y |
+| **Flamber: the burn** (at the lock, `flambe.ts`) | the match strikes (`strike`); each card catches with a soft fwoomp a step higher (`ignite`); under the burn, low swells that follow the fire's size (`roar`) and pops that come faster as it grows (`crackle`); each Ash's flame lands in the ★ card (`whump`); the ★ card comes out (`flambe`) | S |
+| Rival flambé | one `ignite` as their stack catches | S |
 | ★ tier lands | a bell per star: ★1 one, ★2 two rising, ★3 three + the motif | Y |
-| A Bulk card appears | a stone thunk | S |
+| An Ash card appears | a soft papery crumble (`ash`, replaces the old stone `bulk` thud) | S |
 | Boss twist revealed | a timpani hit, an ondes swoop, the music turns to La Fée Verte | S+Y |
 | **Rival busts** | their last chips slide, a ceramic mask crack, the mask clatters on the felt, the motif in full | S+Y |
 | You bust | the lamp buzzes and dims, a long wheeze down | S+Y |
@@ -206,7 +207,7 @@ Every event in the game. **S** = sample, **Y** = synth. Existing `sound.ts` func
 | Ship: Fourgon blindé | a heavy vault door clank | S |
 | Grading back | parcel cardboard, the slab clicks shut, the grade counts up and stamps (`gradeUp`) | S+Y |
 | Buy a Sleeve | plastic fwip | S |
-| Bulk bin | a stone dropped in a metal bin | S |
+| Ashtray | ash tapped into a metal tray | S |
 | Le Patron collects | a heavy coin bag on the counter, a pen scratch on the marker | S |
 | Leave | `doorBell` + whoosh | S |
 

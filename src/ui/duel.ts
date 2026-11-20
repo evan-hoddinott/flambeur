@@ -1,4 +1,4 @@
-import { forgePlan } from '../engine/forge.ts'
+import { autoKeep, buildForged, forgePlan } from '../engine/forge.ts'
 import { REF_SCORE } from '../engine/bot.ts'
 import { progress, land, mix, juiceAt, spring, springs, stepSprings } from './motion.ts'
 // the duel scene: you vs the rival across the table, drawn on one canvas from the atlases.
@@ -11,7 +11,7 @@ import { HAND_NAMES, evaluateHand, handNote } from '../engine/hands.ts'
 import { handBase } from '../engine/scoring.ts'
 import { STARTERS } from '../engine/starters.ts'
 import { tableOf } from '../engine/economy.ts'
-import { JOKERS, VARIANTS, knockoffName, traitName, type Card } from '../engine/cards.ts'
+import { JOKERS, VARIANTS, cardName, knockoffName, rankLabel, traitName, type Card } from '../engine/cards.ts'
 import { twistName, twistText } from '../engine/twists.ts'
 import type { BetChoice, SeatView, ShowdownView } from '../engine/match.ts'
 import { INSERTS, type Insert } from '../engine/shop.ts'
@@ -29,11 +29,13 @@ import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } 
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
 import { closeDrawer, deckCounts, drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, openDrawer, setCompareHover, setDrawerActions, setDrawerHover } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
-import { drawTips, tip, tipShowing } from './tips.ts'
+import { boxShape, drawTips, spotlight, tip, tipClick, tipShowing } from './tips.ts'
 import { KEYWORDS, cardEntry, entry, type Entry } from '../engine/glossary.ts'
 import { still as stillCards, frameGate, shake as shakeAmount, flash, stageScale, pref, pace } from './prefs.ts'
 import { PAUSE_TAB, drawPause, openPause, pauseClick, pauseHoverAt, pauseOpen, pauseTab } from './pause.ts'
 import { cursorFor } from './cursor.ts'
+import { FIRE, STEP_MS, drawFire, feed, makeFire, stepFire, type Fire } from './fire.ts'
+import { drawFlambe, firelight, flambeFocus, flambeShake, skipFlambe, startFlambe, type Flambe, type FlambeSpec } from './flambe.ts'
 
 export type Kind = 'lock' | 'max' | 'min' | 'forge' | 'discard' | 'insert' | 'skip' | 'continue'
 // primary = the one "move on" action that pulses. never a bet choice. stamp = the ink slam sprite when it's pressed
@@ -59,6 +61,7 @@ export type DuelState = {
   onInsert: (slot: number) => void // clicked a Sleeve slot
   onSpoil: (cardId: number) => void // clicked a spoils card (only when it's your pick)
   sort: HandSort // the hand comes in already sorted, this just lights the button
+  lesson?: { id: string; lines: string[]; cards?: number[]; slip?: Kind } | null // the tutorial's forced step: spotlight these
   onSort: (by: HandSort) => void
   bare?: boolean // showBareTable: the room and table as a backdrop for panels, nobody playing
 }
@@ -216,7 +219,12 @@ function insertEffect(): void {
 type Live = { v: number; h: number; g: number; label: string; step: string }
 let live: [Live, Live] | null = null
 
-let forgeFx: { at: number; started: boolean; cards: Card[]; result?: Card; forged: boolean; bulk: number; landed: boolean; rang: boolean } | null = null
+// the flambé beat (flambe.ts). it plays the moment your flambé locks, from a preview of the ★ card the reveal will make
+let forgeFx: { spec: FlambeSpec; fx: Flambe | null } | null = null
+let burnKey = '' // round:hand of the last flambé that burned, so it burns once
+// the ★ card (or the ground card) waiting beside your hand until the reveal puts it there for real
+let waiting: { hand: number; card: Card } | null = null
+const WAIT = { x: 486, y: 300, s: 0.62, r: 0.07 }
 let reelAt = -Infinity
 let pendingBust: number | null = null
 let bustAt = -Infinity
@@ -286,17 +294,19 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
   }
   if (next.counting && !state?.counting) { tallyAt=-Infinity; tallyLine=-1 }
   const sd = next.view.showdown
-  if (next.settled && sd?.myKind === 'flamber' && !stillCards.matches &&
-      (!state?.settled || state.view.showdown?.hand !== sd.hand || state.view.round !== next.view.round)) {
-    const previous = state?.view.me
-    const before = previous ? [...previous.hand, ...(previous.locked ?? []), ...previous.pile, ...previous.discard] : []
-    const known = new Set(before.map(c => c.id))
-    const plan = forgePlan(sd.myCards)
-    const current = [...next.view.me.hand, ...next.view.me.discard, ...next.view.me.pile]
-    // the showdown's cards are already ground, so a grind is found against the cards from before the reveal
-    const result = plan ? current.find(c => c.tier > 0 && !known.has(c.id)) :
-      current.find(c => before.some(old => old.id === c.id && old.grind < c.grind))
-    forgeFx = { at: performance.now(), started: false, cards: sd.myCards, result, forged: !!plan, bulk: plan ? plan.merged.length - 1 : 0, landed: false, rang: false }
+  const me = next.view.me
+  const lockKey = `${next.view.round}:${next.view.hands?.hand ?? 0}`
+  if (me.lockKind === 'flamber' && me.locked && !me.forge && !next.bare && lockKey !== burnKey) {
+    burnKey = lockKey
+    const spec = flambeSpec(me.locked, me, next.view.round)
+    forgeFx = spec ? { spec, fx: null } : null
+    waiting = spec ? { hand: next.view.hands?.hand ?? 0, card: spec.result } : null
+  }
+  // the reveal makes the ★ card for real: it takes over from the waiting one, and slides into the hand from there
+  if (waiting && next.settled && sd?.myKind === 'flamber' && sd.hand === waiting.hand && !state?.settled) {
+    const known = new Set([...(state?.view.me.hand ?? []), ...(state?.view.me.locked ?? [])].map(c => c.id))
+    const real = waiting.card.id >= 0 ? waiting.card : next.view.me.hand.find(c => c.tier > 0 && !known.has(c.id))
+    if (real) springs.set(`card${real.id}`, { at: { ...WAIT }, vel: { x: 0, y: 0, r: 0, s: 0 } })
   }
   listen(state, next)
   state = next
@@ -420,6 +430,8 @@ function clicked(p: { x: number; y: number }): boolean {
     pauseClick(p)
     return on
   }
+  if (tipClick(p)) return true // the fée talking, or her spotlight
+  if (forgeFx?.fx && skipFlambe(forgeFx.fx, now)) return true // a click hurries the flambé to its settle
   if (drawerPointer(p.x, p.y, true)) return drawerHoverAt() !== null
   if (panelOpen()) {
     const on = panelHoverAt(p) !== null
@@ -498,7 +510,7 @@ function frame(t: number): void {
   drawBand(g, now)
   drawPanel(g, now, covered || paused ? off : mouse)
   drawDrawer(g, state.view, now)
-  drawTips(g, drawerOpen() || paused)
+  drawTips(g, paused, drawerOpen())
   drawFiche(g)
   drawPause(g, mouse)
   if (paused) {
@@ -709,6 +721,11 @@ function buildRoom(): HTMLCanvasElement {
   return c
 }
 
+// the room and felt alone, for the dev flambé lab (flambe.html)
+export function tableBackdrop(table: number): { room: HTMLCanvasElement; felt: HTMLCanvasElement; discard: { x: number; y: number }; row: typeof NEAR_ROW; hand: { x: number; y: number } } {
+  return { room: buildRoom(), felt: buildFelt(table, false), discard: MY_DISCARD, row: NEAR_ROW, hand: { x: HAND_C.x, y: 330 } }
+}
+
 // a pile print with its painted word (rows 77-83, between the corner marks) cleared out
 function unworded(name: string): HTMLCanvasElement {
   const s = sprite(name)
@@ -899,7 +916,7 @@ function draw(st: DuelState): void {
   g.beginPath()
   g.rect(0, 0, W, H)
   g.clip()
-  const forgeShake=forgeFx?.started && forgeFx.result?.tier===3 && now-forgeFx.at>=FORGE.burn ? 4*shakeAmount()*(1-progress(now-forgeFx.at-FORGE.burn,450)) : 0
+  const forgeShake = forgeFx?.fx ? 4 * shakeAmount() * flambeShake(forgeFx.fx, now) : 0
   const impact = calling() ? shakeAmount() * Math.max(0, 1 - (now - callout!.t) / 200) : 0
   g.translate(320 + forgeShake*Math.sin(now*.08) + impact * Math.sin(now * 0.12) * 2, 180 - impact * 2)
   const age = now-reelAt
@@ -909,7 +926,7 @@ function draw(st: DuelState): void {
   g.translate(-320, -180)
 
   room(st, tournament, t)
-  lamp(tournament, t, st.bare ? 0 : flash(Math.max(turnFlare(st),push*36)))
+  lamp(tournament, t, st.bare ? 0 : flash(Math.max(turnFlare(st), push * 36, 0.7 * firelight(forgeFx?.fx ?? null))))
   if (st.bare) {
     g.drawImage(feltLayer!, 0, 0)
     you(st, t)
@@ -941,9 +958,11 @@ function draw(st: DuelState): void {
   }
   // bet tickets sit on top of face-down cards, but under the cards once they're face up and scoring
   const showdown = st.settled && !!st.view.showdown
-  if (showdown) feltBets(st)
+  // ...and under a burning flambé
+  const under = showdown || !!forgeFx
+  if (under) feltBets(st)
   playedCards(st)
-  if (!showdown) feltBets(st)
+  if (!under) feltBets(st)
   you(st, t)
   g.restore()
 
@@ -954,6 +973,7 @@ function draw(st: DuelState): void {
   g.clip()
   sleeveCards(st, t)
   hand(st, t)
+  waitingCard(st, t)
   insertGhost(st, t)
   hud(st, t)
   caseShelf(st) // over the hud: during the count-up the shelf is the thing to watch, even over the twist sign
@@ -1174,123 +1194,108 @@ function feltBets(st: DuelState): void {
   })
 }
 
-// played cards on their spots. locked in: yours face down on your spots, theirs a squared stack
-// (never their count). a fold or flambé leaves yours face down. showdown: both flip face up
-// the flambé, as a beat of its own (ART.md §12). the locked cards slide to the middle of the felt (0-350ms) and burn
-// together (350-950). a flash, and the ★ card rises big in the middle with its stars (950-1250), holds (to 1850), then
-// flies down into your hand (to 2250). Bulk drops out of the smoke onto your discard. a grind is the same with the
-// one card coming back +1 Value and going to the discard. it waits for the count-up, so the reveal has the stage first
-const FORGE = { gather: 350, burn: 950, rise: 1250, hold: 1850, end: 2250 }
-const FORGE_C = { x: 320, y: 186 }
+// what the flambé beat needs from the table: which cards burn, which is the ★ card's, where things go. the ★ card is
+// a preview: the same engine function the reveal uses, on a scratch id counter. null = nothing to show (no pair, nothing picked)
+function flambeSpec(locked: Card[], me: SeatView['me'], round: number): FlambeSpec | null {
+  const from = (card: Card) => {
+    const i = locked.findIndex(c => c.id === card.id)
+    return { x: NEAR_ROW.cx + (i - (locked.length - 1) / 2) * NEAR_ROW.gap, y: NEAR_ROW.y, s: NEAR_ROW.w / 64 }
+  }
+  const spots = { from, hand: WAIT, discard: { ...MY_DISCARD, s: 0.5 }, row: 212 }
+  const plan = forgePlan(locked)
+  if (!plan) {
+    const ground = locked.find(c => c.id === me.grind)
+    if (!ground) return null
+    const result = { ...ground, grind: ground.grind + 1 } // it keeps its id: the reveal grinds this very card
+    return { ...spots, burn: [], survivor: 0, result, ground, kickers: locked.filter(c => c !== ground), label: `No pair · ${cardName(ground)}` }
+  }
+  const { forged } = buildForged(plan, me.keep ?? autoKeep(plan), round, { nextCardId: -1 })
+  const merged = new Set(plan.merged.map(c => c.id))
+  const burn = locked.filter(c => merged.has(c.id))
+  const label = ['pair', 'trips', 'quads'].includes(plan.hand) ? `${HAND_NAMES[plan.hand]} of ${rankLabel(plan.rank)}s` : HAND_NAMES[plan.hand]
+  return {
+    ...spots, burn, survivor: Math.max(0, burn.findIndex(c => c.rank === plan.rank && c.suit === plan.suit)), result: forged, ground: null,
+    kickers: locked.filter(c => !merged.has(c.id)), label,
+  }
+}
 
-function forgeReturn(back: HTMLCanvasElement): boolean {
+// a flambé is burning. main.ts holds the rival's turn and the reveal until it's done (and dev auto play waits on it)
+export const flambeBusy = () => forgeFx !== null
+
+// the flambé on the felt. false = nothing burning
+function forgeReturn(): boolean {
   if (!forgeFx) return false
-  if (!forgeFx.started) {
-    if (live) {
-      faceDown(forgeFx.cards, back)
-      return true
-    }
-    forgeFx.started = true
-    forgeFx.at = now
-    if (forgeFx.forged) sfx.flambe()
-    else sfx.grind()
+  forgeFx.fx ??= startFlambe(forgeFx.spec, now)
+  // the table dims so the burn is the only thing on it
+  const focus = flambeFocus(forgeFx.fx, now)
+  if (focus > 0) {
+    g.fillStyle = `rgba(10,7,6,${0.5 * focus})`
+    g.fillRect(0, FAR - 4, W, NEAR - FAR + 4)
   }
-  const age = now - forgeFx.at
-  if (age >= FORGE.end) {
-    forgeFx = null
-    return true
-  }
-  const cards = forgeFx.cards
-  if (age < FORGE.burn) {
-    const gather = land(progress(age, FORGE.gather))
-    cards.forEach((c, i) => {
-      const from = NEAR_ROW.cx + (i - (cards.length - 1) / 2) * NEAR_ROW.gap
-      const x = mix(from, FORGE_C.x + (i - (cards.length - 1) / 2) * 10, gather)
-      const y = mix(NEAR_ROW.y, FORGE_C.y, gather)
-      const art = cardCanvas(c)
-      const melt = progress(age - FORGE.gather - i * 50, FORGE.burn - FORGE.gather - i * 50)
-      const w = 44 * mix(1, 1.15, gather)
-      const full = art.height * (w / art.width)
-      const h = Math.ceil(art.height * (1 - melt))
-      g.save()
-      g.translate(x, y)
-      g.rotate((i - (cards.length - 1) / 2) * 0.08 * gather)
-      if (h) g.drawImage(art, 0, 0, art.width, h, -w / 2, -full / 2, w, h * (w / art.width))
-      // the char line eats down the card, flames riding it
-      if (melt > 0 && h) {
-        const edge = -full / 2 + h * (w / art.width)
-        g.fillStyle = 'rgba(46,35,32,0.85)'
-        g.fillRect(-w / 2, edge - 3, w, 3)
-        for (let f = 0; f < 3; f++) pin('fx/flame/' + ((Math.floor(age / 65 + i + f) % 4) + 1), -w / 2 + 6 + f * (w / 3), edge - 6, { s: 1.2 })
-      }
-      g.restore()
-      if (melt > 0) for (let e = 0; e < 3; e++) pin('fx/ember/' + (((i + e) % 3) + 1), x - 12 + e * 12 + Math.sin(i + e + age / 90) * 6, y - 20 - 50 * progress(age - FORGE.gather - e * 90, 500))
-    })
-    return true
-  }
-  const result = forgeFx.result
-  if (!result) return age < FORGE.rise
-  if (!forgeFx.rang) {
-    forgeFx.rang = true
-    if (result.tier > 0) sfx.stars(result.tier)
-  }
-  // the flash as it comes out of the fire
-  const flashed = 1 - progress(age - FORGE.burn, 260)
-  if (flashed > 0) {
-    g.fillStyle = `rgba(255,251,232,${flash((result.tier === 3 ? 0.6 : 0.35) * flashed)})`
-    g.fillRect(0, 0, W, H)
-  }
-  if (forgeFx.bulk > 0) {
-    if (age >= FORGE.burn + 220 && !forgeFx.landed) {
-      forgeFx.landed = true
-      sfx.bulk()
-    }
-    for (let i = 0; i < forgeFx.bulk; i++) {
-      const drop = land(progress(age - FORGE.burn - i * 60, 420))
-      pin('base/bulk', mix(FORGE_C.x - 20 + i * 14, MY_DISCARD.x, drop), mix(FORGE_C.y, MY_DISCARD.y, drop) - 30 * Math.sin(Math.PI * drop), { s: mix(0.36, 0.28, drop), r: i * 0.09 + drop })
-    }
-  }
-  const rise = land(progress(age - FORGE.burn, FORGE.rise - FORGE.burn))
-  const away = progress(age - FORGE.hold, FORGE.end - FORGE.hold)
-  const fly = away * away
-  const bob = Math.sin((age - FORGE.rise) / 160) * 1.5 * (1 - away)
-  const to = forgeFx.forged ? { x: HAND_C.x, y: 330 } : MY_DISCARD
-  const x = mix(FORGE_C.x, to.x, fly)
-  const y = mix(FORGE_C.y + 20 * (1 - rise), to.y, fly) + bob
-  const scale = mix(mix(0.4, 1.15, rise), 0.6, fly)
-  if (away === 0) {
-    const rays = sprite('fx/rays')
-    const k = 168 / Math.max(rays.w, rays.h)
-    g.save()
-    g.translate(x, y)
-    g.rotate(age / 900)
-    g.globalAlpha = 0.5 * rise
-    g.drawImage(rays.img, rays.x, rays.y, rays.w, rays.h, (-rays.w * k) / 2, (-rays.h * k) / 2, rays.w * k, rays.h * k)
-    g.restore()
-  }
-  drawCard(result, x, y, scale, 0.05 * Math.sin(Math.PI * rise) * (1 - fly))
-  if (away === 0 && rise === 1) {
-    const what = result.tier > 0 ? '★'.repeat(result.tier) : '+1 Value'
-    text(what, x, y + 56, { font: 'chalk', color: result.tier > 0 ? GOLD : '#f6ecd2', align: 'center', bold: true, outline: OUTLINE })
-  }
+  if (!drawFlambe(g, forgeFx.fx, now)) forgeFx = null
   return true
 }
 
+// the rival flambéd: their thrown stack burns for a moment, so you can tell (FLAMBER.md §2)
+let rivalBurn: { key: string; fire: Fire; at: number; steps: number } | null = null
+function rivalFlambe(key: string): void {
+  if (stillCards.matches) return
+  if (rivalBurn?.key !== key) {
+    rivalBurn = { key, fire: { ...makeFire(FAR_ROW.cx - 56, FAR_ROW.y - 70, 112, 84), tall: 1.7 }, at: now, steps: 0 }
+    sfx.ignite(0)
+  }
+  const b = rivalBurn
+  const age = now - b.at
+  if (age > 2200) return
+  const due = Math.min(b.steps + 3, Math.floor(age / STEP_MS))
+  while (b.steps < due) {
+    b.steps++
+    const heat = 1 - 0.6 * progress(b.steps * STEP_MS - 900, 700) - 0.4 * progress(b.steps * STEP_MS - 1500, 300)
+    for (let x = -22; x <= 22; x++) feed(b.fire, FAR_ROW.cx + x, FAR_ROW.y + 8 - Math.abs(x) / 5, heat)
+    stepFire(b.fire, 3)
+  }
+  drawFire(g, b.fire, 1 - progress(age - 1700, 500))
+}
+
+// the ★ card beside your hand, face up, until the reveal deals it in
+function waitingCard(st: DuelState, t: number): void {
+  if (!waiting || forgeFx || st.bare) return
+  const me = st.view.me
+  const sd = st.settled ? st.view.showdown : null
+  const before = me.lockKind === 'flamber' && !!me.locked
+  const at = sd?.myKind === 'flamber' && sd.hand === waiting.hand
+  if (!before && !at) {
+    waiting = null
+    return
+  }
+  const y = WAIT.y + Math.sin(t * 1.6) * 1.2
+  drawCard(waiting.card, WAIT.x, y, WAIT.s, WAIT.r, false, true)
+  text('next hand', WAIT.x, y + 34, { font: 'tiny', color: GOLD, align: 'center', outline: OUTLINE })
+  lookCard(waiting.card, WAIT.x, y, 64 * WAIT.s, 88 * WAIT.s, WAIT.r, true)
+}
+
+// played cards on their spots. locked in: yours face down on your spots, theirs a squared stack (never their count).
+// a flambé burns at the lock and leaves your spots empty. showdown: both flip face up
 function playedCards(st: DuelState): void {
   const view = st.view
   const sd = st.settled ? view.showdown : null
   if (sd) {
     // a thrown hand stays face down: yours shows on your spots, theirs reveals nothing (a squared stack)
     if (sd.theirKind === 'play') rowOf(sd.theirCards, FAR_ROW, sd.theirs!, 'far', backCanvas(st.rival.back))
-    else drawPile(FAR_ROW.cx, FAR_ROW.y + 18, 0.6, st.rival.back, 5)
+    else {
+      drawPile(FAR_ROW.cx, FAR_ROW.y + 18, 0.6, st.rival.back, 5)
+      if (sd.theirKind === 'flamber') rivalFlambe(`${view.round}:${sd.hand}`)
+    }
+    // a flambé already burned at the lock: your spots stay empty and the rival's hand plays out alone
     if (sd.myKind === 'play') rowOf(sd.myCards, NEAR_ROW, sd.mine!, 'near', backCanvas(view.me.starter))
-    else if (!forgeReturn(backCanvas(view.me.starter)) && sd.myKind !== 'flamber') faceDown(sd.myCards, backCanvas(view.me.starter))
+    else if (!forgeReturn() && sd.myKind !== 'flamber') faceDown(sd.myCards, backCanvas(view.me.starter))
     scoreTag(st, sd, false)
-    scoreTag(st, sd, true)
+    if (!forgeFx?.fx) scoreTag(st, sd, true) // the burn's own captions say what happened
     return
   }
   if (view.phase === 'spoils') return spoilsTable(st)
-  faceDown(view.me.locked ?? [], backCanvas(view.me.starter))
+  // your flambé burns as soon as it's locked. anything else waits face down
+  if (!forgeReturn() && view.me.lockKind !== 'flamber') faceDown(view.me.locked ?? [], backCanvas(view.me.starter))
   const theyLocked = view.phase === 'bet' || (view.phase === 'deal' && view.others[0].done)
   if (theyLocked) {
     const at = spring(`rstack${view.round}:${view.hands?.hand ?? 0}`, { x: FAR_ROW.cx, y: FAR_ROW.y - 4, r: 0.04, s: 1 }, { x: RIVAL_X, y: 104, r: 0.4, s: 1 })
@@ -1324,6 +1329,7 @@ function spoilsTable(st: DuelState): void {
     if (mine) cardHits.push({ id: c.id, x: at.x, y: at.y, r: at.r, w, h, onClick: () => { pop(`card${c.id}`); st.onSpoil(c.id) } })
     lookCard(c, at.x, at.y + lift, w, h, at.r)
   })
+  if (mine) tip('spoils', ['Spoils! Three cards on the table, one of them for your deck.', 'The loser picks first and the last card burns. Skip pays $1.'], { x: 226, y: 182, w: 188, h: 80 }, 'above')
   if (hovered !== spoilHover) setCompareHover(hovered)
   spoilHover = hovered
   // what already went: a skip pays $1, a pick shows on its picker's side
@@ -1463,7 +1469,8 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
     g.save()
     g.globalAlpha = 0.85
     nine('hud/score/tag/thrown', x0, y0, w0, 44)
-    text('JETÉE', x0 + w0 / 2, y0 + 6, { font: 'didone', color: '#ff7a24', align: 'center' })
+    const word = (mine ? sd.myKind : sd.theirKind) === 'flamber' ? 'FLAMBÉ' : 'JETÉE'
+    text(word, x0 + w0 / 2, y0 + 6, { font: 'didone', color: '#ff7a24', align: 'center' })
     text('scores 0', x0 + w0 / 2, y0 + 28, { font: 'tiny', color: CREAM, align: 'center' })
     g.restore()
     look(x0, y0, w0, 44, rule('flamber'))
@@ -1497,8 +1504,15 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   if (gr) parts.push([` × 2^${gr}`, GRADE.paper])
   const widths = parts.map(([s]) => measure(s, 'sans') + 1)
   let px = x + w / 2 - widths.reduce((s, n) => s + n, 0) / 2
+  // once it's settled, a box around the factor that decided the hand, on both tags
+  const decided = !l && !st.counting ? decider(sd) : null
+  const boxed = decided === 'value' ? 0 : decided === 'hype' ? 2 : decided === 'grade' ? 3 : -1
   parts.forEach(([s, color], i) => {
     text(s, px, y + 10, { font: 'sans', color })
+    if (i === boxed) {
+      g.strokeStyle = color
+      g.strokeRect(Math.round(px) - 1.5, y + 8.5, widths[i] + 1, 11)
+    }
     px += widths[i]
   })
   const ratio = total / REF_SCORE[Math.min(st.view.round,REF_SCORE.length)-1]
@@ -1525,11 +1539,28 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   g.restore()
   // the tag reads as its hand: your level shows, theirs you don't know
   look(x, y, w, 44, () => entry('hand', a.hand, mine ? st.view.me.levels[a.hand] : undefined))
+  if (mine && !st.counting && !l) tip('appraisal', ['Value × Hype × 2^Grade is the Appraisal. The higher one takes the hand.', 'Grade comes from graded and Prism cards. Every step doubles the score!'], { x, y, w, h: 44 }, 'above')
   if (l?.step) text(l.step, x + w / 2, y + 47, { font: 'tiny', color: CREAM, align: 'center', outline: OUTLINE })
   if (won) glow(x + w / 2, y + 30, 40, 'rgba(255,176,58,0.18)')
   // the near miss: how close the losing side came
   const other = mine ? sd.theirs : sd.mine
-  if (lostIt && other && !sd.ko) text(`lost by ${fmt(other.total - a.total)}`, x + w / 2, y + 47, { font: 'sans', color: CREAM, align: 'center', outline: OUTLINE })
+  if (lostIt && other && !sd.ko) text(`lost by ${fmt(other.total - a.total)}${decided ? ` on ${FACTOR[decided]}` : ''}`, x + w / 2, y + 47, { font: 'sans', color: CREAM, align: 'center', outline: OUTLINE })
+}
+
+const FACTOR = { value: 'Value', hype: 'Hype', grade: 'Grade' }
+
+// what decided a hand (docs/TUTORIAL.md): the factor where the winner beat the loser by the most. null for a tie or a
+// thrown hand, or when the winner wasn't ahead on any one factor
+function decider(sd: ShowdownView): keyof typeof FACTOR | null {
+  if (!sd.mine || !sd.theirs || sd.winner === null) return null
+  const [w, l] = sd.winner === sd.opponent ? [sd.theirs, sd.mine] : [sd.mine, sd.theirs]
+  const edge = {
+    value: Math.log(Math.max(1, w.value) / Math.max(1, l.value)),
+    hype: Math.log(Math.max(1, w.hype) / Math.max(1, l.hype)),
+    grade: (w.grade - l.grade) * Math.LN2,
+  }
+  const best = (['value', 'hype', 'grade'] as const).reduce((a, b) => (edge[b] > edge[a] ? b : a))
+  return edge[best] > 0 ? best : null
 }
 
 function you(st: DuelState, t: number): void {
@@ -1552,6 +1583,20 @@ function you(st: DuelState, t: number): void {
 }
 
 // your floating fan. cards lift on hover and more when picked
+// a small flame sitting on a card's top edge, flickering in the logo's colors
+function cardFlame(x: number, y: number, seed: number): void {
+  const f = Math.floor(now / 70 + seed) % 3
+  const rows = [[5, FIRE.deep], [5, FIRE.orange], [3, FIRE.yellow], [3, FIRE.yellow], [1, FIRE.white], [1, FIRE.yellow]] as const
+  rows.slice(0, 4 + f).forEach(([w, color], i) => {
+    const lean = i > 2 ? (f === 1 ? 1 : f === 2 ? -1 : 0) : 0
+    g.fillStyle = color
+    g.fillRect(Math.round(x - w / 2) + lean, Math.round(y - 1 - i), w, 1)
+  })
+  g.fillStyle = FIRE.red
+  g.fillRect(Math.round(x) - 3, Math.round(y) - 1, 1, 1)
+  g.fillRect(Math.round(x) + 3, Math.round(y) - 1, 1, 1)
+}
+
 function hand(st: DuelState, t: number): void {
   const view = st.view
   const me = view.me
@@ -1564,6 +1609,14 @@ function hand(st: DuelState, t: number): void {
   const pickable = !st.settled && view.phase === 'deal' && !me.locked
   // hover goes to the topmost card under the cursor, from last frame's layout
   const hovered = pickable ? cardUnder(mouse, lastCardHits)?.id : undefined
+  // hovering Flamber: a flame on each card that would burn, the kickers dim, a no-pair grind's card glows (FLAMBER.md §6)
+  const slip = hoverSlip >= 0 ? st.slips[hoverSlip] : null
+  const forging = pickable && slip?.kind === 'forge' && slip.enabled
+  const picked = forging ? cards.filter(c => st.selected.has(c.id)) : []
+  const plan = picked.length ? forgePlan(picked) : null
+  const burns = new Set(plan?.merged.map(c => c.id) ?? [])
+  const grindable = forging && !plan ? picked.filter(c => !c.bulk) : []
+  const glowing = grindable.length === 1 ? grindable[0].id : null
   const placed = cards.map((c, i) => {
     const th = ((i - (n - 1) / 2) * stepDeg * Math.PI) / 180
     const up = st.selected.has(c.id)
@@ -1578,10 +1631,20 @@ function hand(st: DuelState, t: number): void {
     return { c, at: spring(`card${c.id}`, target, { x: 146, y: 230, r: 0, s: 0.5 }) }
   })
   for (const { c, at } of placed) {
-    const dim = !!me.locked && !lockedIds.has(c.id)
+    const dim = (!!me.locked && !lockedIds.has(c.id)) || (!!plan && st.selected.has(c.id) && !burns.has(c.id))
     const j = juiced(`card${c.id}`)
     const s = at.s * j.s
     const { w, h } = drawCard(c, at.x, at.y, s, at.r + j.r, dim, true)
+    if (burns.has(c.id) || glowing === c.id) {
+      g.save()
+      g.translate(at.x, at.y)
+      g.rotate(at.r + j.r)
+      if (glowing === c.id) {
+        g.strokeStyle = `rgba(255,178,46,${0.7 + 0.3 * Math.sin(now / 90)})`
+        g.strokeRect(-w / 2 - 1, -h / 2 - 1, w + 2, h + 2)
+      } else cardFlame(0, -h / 2 + 1, c.id)
+      g.restore()
+    }
     const slot = dragInsert?.moved ? dragInsert.slot : st.insertSlot
     const activeInsert = slot === null ? undefined : me.sleeve[slot]
     if (activeInsert && (hovered === c.id || st.selected.has(c.id))) {
@@ -1595,6 +1658,28 @@ function hand(st: DuelState, t: number): void {
     cardHits.push({ id: c.id, x: at.x, y: at.y, r: at.r, w, h, onClick: pickable ? () => { pop(`card${c.id}`); st.onCard(c.id) } : () => {} })
     lookCard(c, at.x, at.y, w, h, at.r, true) // over the fan, never on top of it
   }
+  // the first time a special card is in your hand, it gets a lesson of its own
+  if (pickable && !st.counting) {
+    for (const l of CARD_LESSONS) {
+      const p = placed.find(p => l.test(p.c))
+      if (p) tip(l.id, l.lines, { x: p.at.x - 22, y: p.at.y - 32, w: 44, h: 64 }, 'above')
+    }
+    if (view.hands && view.hands.hand >= 2)
+      tip('hover', ['Not sure what something does? Hover it.', 'The Fiche box tells you what any card, ticket or number means.'], { x: 220, y: 250, w: 230, h: 100 }, 'above')
+  }
+  // the tutorial points at cards: one box around them all, the fée above it
+  const want = st.lesson?.cards
+  if (want) {
+    // each card lit as it's drawn, turned with the fan. the fée's bubble goes above all of them
+    const shapes = cardHits.filter(h => want.includes(h.id)).map(h => ({ x: h.x, y: h.y, w: h.w, h: h.h, r: h.r }))
+    if (shapes.length) {
+      const x = Math.min(...shapes.map(s => s.x - s.w / 2))
+      const y = Math.min(...shapes.map(s => s.y - s.h / 2))
+      const r = { x, y, w: Math.max(...shapes.map(s => s.x + s.w / 2)) - x, h: Math.min(H, Math.max(...shapes.map(s => s.y + s.h / 2))) - y }
+      tip(st.lesson!.id, st.lesson!.lines, r, 'above', { lead: true })
+      spotlight(shapes)
+    }
+  }
   // a blue pip under each picked card, so picked reads at a glance and not only by height
   if (pickable) for (const { c, at } of placed) {
     if (!st.selected.has(c.id)) continue
@@ -1605,6 +1690,17 @@ function hand(st: DuelState, t: number): void {
     g.fillRect(Math.round(at.x - Math.sin(at.r) * d) - 1, Math.round(at.y + Math.cos(at.r) * d) - 1, 3, 3)
   }
 }
+
+// the first time a special card shows up, in your hand or a pack, it gets a lesson of its own
+export const CARD_LESSONS: { id: string; lines: string[]; test: (c: Card) => boolean }[] = [
+  { id: 'star', lines: ['A ★ card! Flambéed cards keep their traits.', 'More stars, more trait slots. Flamber ★ cards together to climb to ★★★.'], test: c => c.tier > 0 },
+  { id: 'bulk', lines: ['Ash is what a flambé leaves behind.', 'No rank, no suit: just +5 Value when you play it.'], test: c => c.bulk },
+  { id: 'joker', lines: ['A Joker card! It plays like a card, but it bends a rule.', 'Hover it to read what it does.'], test: c => !!c.joker },
+  { id: 'knockoff', lines: ['An off-brand knockoff. Cheap, a little wrong, sometimes great.', 'Each kind breaks a rule its own way. Hover it to read how.'], test: c => !!c.knockoff },
+  { id: 'finish', lines: ['A shiny finish! Foil adds Value, Holo adds Hype, Prism adds Grade.', 'Hover any card to read exactly what it adds.'], test: c => !!c.finish },
+  { id: 'stamp', lines: ['A stamp: 1st Edition, Signed or Gold Border.', 'Each pays its own bonus. Hover the card to see it.'], test: c => !!c.stamp },
+  { id: 'graded', lines: ['A graded card! Its grade feeds the 2^Grade part of your Appraisal.', 'Every step of Grade doubles the score.'], test: c => c.grade !== null },
+]
 
 // your hand's score, anchored right above the tickets (docs/ONBOARDING.md #1). while you pick it shows what the
 // picked cards make, once you lock it shows the locked hand through the bet. base value × hype only, Balatro style:
@@ -1626,6 +1722,17 @@ function handReadout(st: DuelState): void {
     text('YOUR HAND', cx, y + 9, { font: 'tiny', color: BURGUNDY, align: 'center' })
     text(`pick 1–5 cards`, cx, y + 19, { font: 'sans', color: '#8c7656', align: 'center' })
     look(x, y, w, h, rule('appraisal'))
+    return
+  }
+  if (me.lockKind === 'flamber') {
+    // a locked flambé scores nothing: say what it makes instead
+    const plan = forgePlan(cards)
+    text('FLAMBÉ', cx, y + 4, { font: 'tiny', color: '#8c7656', align: 'center' })
+    text(plan ? HAND_NAMES[plan.hand].toUpperCase() : 'NO PAIR', cx, y + 12, { font: 'tiny', color: BURGUNDY, align: 'center' })
+    const made = plan ? `1 ★ card + ${plan.merged.length - 1} Ash` : '+1 Value'
+    text(made, cx, y + 21, { font: 'sans', color: plan ? GOLD : VALUE.paper, align: 'center', outline: plan ? INK : undefined })
+    text('scores 0 this hand', cx, y + 32, { font: 'tiny', color: '#8c7656', align: 'center' })
+    look(x, y, w, h, rule('flamber'))
     return
   }
   const hand = evaluateHand(cards)
@@ -1706,7 +1813,7 @@ function caseFired(slot: number, step: { value: number; hype: number; xhype: num
 export function cardTags(card: Card) {
   const tags: { label: string; color: string }[] = []
   const add = (label: string, color = '#c99a3a') => tags.push({ label, color })
-  if (card.bulk) add('Bulk: +5 Value', modifierInk('bulk'))
+  if (card.bulk) add('Ash: +5 Value', modifierInk('bulk'))
   if (card.variant) add(VARIANTS[card.variant].name, modifierInk(card.variant))
   if (card.joker) add(JOKERS[card.joker].name + ': ' + JOKERS[card.joker].text, specialInk[card.joker === 'crayon' ? 'crayon' : 'joker'])
   if (card.finish) add(({ foil: 'Foil', holo: 'Holo', prism: 'Prism', misprint: 'Misprint' })[card.finish], modifierInk(card.finish))
@@ -1722,7 +1829,6 @@ export function cardTags(card: Card) {
 export function cardInfo(card: Card): string {
   return cardTags(card).map(t => t.label).join(' · ')
 }
-const describeCard = cardInfo
 
 // ---------- hud ----------
 
@@ -1736,9 +1842,8 @@ function hud(st: DuelState, t: number): void {
   plate(482, 12, false, st, them.bankroll)
   // their sleeve hangs where their score tag goes, so it tucks away for the showdown
   if (!(st.settled && view.showdown)) {
-    for (let i = 0; i < them.sleeve; i++) pin('insert/back', 461 + i * 9, 75, { s: 0.55, r: (i - 0.5) * 0.12 })
+    for (let i = 0; i < them.sleeve; i++) pin('insert/back', 461 + i * 9, 75, { s: 0.275, r: (i - 0.5) * 0.12 })
     if (them.sleeve) look(454, 64, 16 + them.sleeve * 9, 24, rule('plate-sleeve'))
-    pin('you/cuff', 483, 87, { s: 0.5, flip: true })
   }
   marker(st)
   premier(st)
@@ -1822,6 +1927,7 @@ function marker(st: DuelState): void {
   const x = 14
   const y = 198
   look(x, y, 58, 26, rule('marker', due.due))
+  if (!st.settled && (st.view.round > 1 || (st.view.hands?.hand ?? 1) >= 3)) tip('patron', [`You owe Le Patron $${due.due}. He collects at the door of the next big shop.`, "Can't pay him and the run is over. Keep some money back!"], { x, y, w: 58, h: 26 }, 'right')
   pin('hud/marker/note', x, y, { r: stillCards.matches ? 0 : Math.sin(now / 800) * 0.018 })
   const age = now - markerAt
   if (!stillCards.matches && age >= 0 && age < 700) {
@@ -1835,19 +1941,18 @@ function marker(st: DuelState): void {
   text(`$${due.due}`, x + 4, y + 12, { font: 'sans', color: BURGUNDY, bold: true })
 }
 
-// the Sleeve's inserts as two cards beside your hand, out of your cuff (UX.md §4). hover for the Fiche,
+// the Sleeve's inserts as two cards held beside your hand (UX.md §4). hover for the Fiche,
 // a click picks one up (then click a card), or drag it straight onto a card
 const SLEEVE_AT = [{ x: 158, y: 306, r: -0.08 }, { x: 195, y: 313, r: 0.06 }]
-const INSERT_S = 2 // the 24×34 faces, doubled
+const INSERT_S = 1 // the 48×68 faces, drawn at their own size
 function sleeveCards(st: DuelState, t: number): void {
-  pin('you/cuff', 151, 328)
   if (st.bare) return
   const me = st.view.me
   const usable = sleeveUsable(st)
   me.sleeve.slice(0, 2).forEach((card, i) => {
     const spot = SLEEVE_AT[i]
-    const w = 24 * INSERT_S
-    const h = 34 * INSERT_S
+    const w = 48 * INSERT_S
+    const h = 68 * INSERT_S
     const picked = st.insertSlot === i
     const over = !dragInsert?.moved && Math.abs(mouse.x - spot.x) <= w / 2 && Math.abs(mouse.y - spot.y + 4) <= h / 2
     const target = { x: spot.x, y: spot.y - (picked ? 16 : over ? 8 : 0), r: picked || over ? 0 : spot.r, s: 1 }
@@ -1855,6 +1960,7 @@ function sleeveCards(st: DuelState, t: number): void {
     const def = INSERTS[card.id]
     const canUse = usable && def.when !== 'shop'
     hit(at.x - w / 2, at.y - h / 2, w, h, () => { if (usable) { sfx.fwip(); st.onInsert(i) } })
+    if (canUse) tip('sleeve', ['Inserts wait up your sleeve, two at most.', 'Click one, then the cards it changes. Or drag it straight onto a card.'], { x: at.x - w / 2, y: at.y - h / 2, w, h }, 'right')
     if (canUse) cuffHits.push({ slot: i, x: at.x, y: at.y, w, h })
     looks.push({ x: at.x, y: at.y, w, h, r: at.r, above: true, e: () => {
       const e = entry('insert', card.id, card)
@@ -1865,7 +1971,7 @@ function sleeveCards(st: DuelState, t: number): void {
   })
 }
 
-// one insert face at 2x, centered, with the cream outline when lit
+// one insert face, centered, with the cream outline when lit
 function insertCard(name: string, x: number, y: number, r: number, lit: boolean): void {
   const img = sub(sprite(name))
   const w = img.width * INSERT_S
@@ -1886,23 +1992,25 @@ function insertGhost(st: DuelState, t: number): void {
 }
 
 // balatro's sort buttons, right of the hand under the discard (the drawer owns the left edge). only while you hold a hand
-// one chip right of the hand: by rank (A K) or by suit (♠ ♥), the lit half is how the hand fans. click or R flips it
-const SORT = { x: 452, y: 262, w: 48, h: 18 }
+// a slim chip on the rail under the hand: by rank (A K) or by suit (♠ ♥), the lit half is how the hand fans.
+// click or R flips it. it sits over the cards' lower edges, where only the upside-down corner index shows
+const SORT = { w: 56, h: 13, y: 345 }
 
 function sortTabs(st: DuelState): void {
   if (st.settled || !st.view.me.hand.length) return
-  const { x, w, h } = SORT
-  const over = hit(x, SORT.y - 2, w, h + 12, () => flipSort(st))
+  const { w, h } = SORT
+  const x = Math.round(HAND_C.x - w / 2)
+  const over = hit(x - 22, SORT.y - 2, w + 24, h + 4, () => flipSort(st))
   const y = SORT.y - (over ? 1 : 0)
   nine('hud/plate/frame', x - 2, y - 2, w + 4, h + 4)
   for (const [i, by] of (['rank', 'suit'] as const).entries()) {
     const on = st.sort === by
     const hx = x + i * (w / 2)
     nine('hud/plate/paper', hx, y, w / 2, h, on ? GOLD : over ? '#d8c8a0' : '#9c8c6c')
-    const label = by === 'rank' ? 'A K' : '♠ ♥'
-    text(label, hx + w / 4, y + 4, { font: 'sans', color: on ? INK : '#5c4a36', align: 'center', bold: on })
+    text(by === 'rank' ? 'A K' : '♠ ♥', hx + w / 4, y + 2, { font: 'sans', color: on ? INK : '#5c4a36', align: 'center', bold: on })
   }
-  text('Sort · R', x + w / 2, y + h + 3, { font: 'tiny', color: over ? CREAM : '#bfa77e', align: 'center', outline: OUTLINE })
+  text('Sort', x - 5, y + 3, { font: 'tiny', color: over ? CREAM : '#bfa77e', align: 'right', outline: OUTLINE })
+  text('R', x + w + 5, y + 3, { font: 'tiny', color: over ? CREAM : '#8c7656', outline: OUTLINE })
 }
 
 function flipSort(st: DuelState): void {
@@ -1921,6 +2029,8 @@ function plate(x: number, y: number, mine: boolean, st: DuelState, bankroll: num
   const rival = st.view.others[0].rival
   // the plate reads as your bankroll, or as the rival (its stack, lane, case)
   look(x, y, mine ? 70 : 150, 58, mine || !rival ? rule('bankroll') : () => entry('rival', rival, tableOf(st.view.round)))
+  if (!mine && rival && !st.settled && st.view.phase === 'deal' && (st.view.round > 1 || (st.view.hands?.hand ?? 1) >= 2))
+    tip('rival', [`That's ${st.rival.name}. The money on their plate is their stack.`, 'Take all of it and they bust: the Table ends early and you skip ahead.', 'Every rival has a lane, a kind of hand they build. Hover their plate to scout it.'], { x, y, w: 150, h: 58 }, 'below')
   text(mine ? st.view.me.name === 'You' ? 'Vous' : st.view.me.name : st.rival.name, x + 34, y + 9, { font: 'sans', color: INK })
   const j = juiced(mine ? 'plate0' : 'plate1')
   g.save()
@@ -1978,16 +2088,21 @@ function premier(st: DuelState): void {
 function twistSign(view: SeatView): void {
   tile('hud/twist/string', 204, 0, 1, 53)
   tile('hud/twist/string', 271, 0, 1, 53)
-  // the sign grows to fit the whole rule, never cut off
+  // the sign grows to fit the whole name and rule, never cut off. a name too wide for didone goes to bold caps,
+  // wrapped onto more lines if it has to be
+  const name = twistLabel(view)
+  const didone = measure(name, 'didone') <= 104
+  const title = didone ? [name] : wrap(name.toUpperCase(), 104, 'sans', true)
+  const down = (title.length - 1) * 9 // the extra title lines push the rule down
   const rule = wrap(view.twist ? twistText(view.twist) : '', 104, 'tiny')
-  const h = 28 + Math.max(2, rule.length) * 7 // the 6px bottom border sits under the last line, not on it
+  const h = 28 + down + Math.max(2, rule.length) * 7 // the 6px bottom border sits under the last line, not on it
   nine('hud/twist/sign', 183, 52, 111, h)
   const tw = view.twist
   if (tw) look(183, 52, 111, h, () => entry('twist', tw.id, tw))
-  const name = twistLabel(view)
-  if (measure(name, 'didone') <= 104) text(name, 238, 52, { font: 'didone', color: BURGUNDY, align: 'center' })
-  else text(name.toUpperCase(), 238, 57, { font: 'sans', color: BURGUNDY, align: 'center', bold: true })
-  rule.forEach((line, i) => text(line, 238, 72 + i * 7, { font: 'tiny', color: INK, align: 'center' }))
+  if (tw && view.phase === 'deal') tip('twist', ['Boss round! This sign is the twist.', 'It bends one rule for both of you, just for this round. A boss also pays more.'], { x: 183, y: 52, w: 111, h }, 'below')
+  if (didone) text(name, 238, 52, { font: 'didone', color: BURGUNDY, align: 'center' })
+  else title.forEach((line, i) => text(line, 238, 57 + i * 9, { font: 'sans', color: BURGUNDY, align: 'center', bold: true }))
+  rule.forEach((line, i) => text(line, 238, 72 + down + i * 7, { font: 'tiny', color: INK, align: 'center' }))
 }
 
 // the rival's line, in a bubble to the left of their head (their plate owns the right)
@@ -2137,10 +2252,17 @@ function slips(st: DuelState): void {
     const over = s.enabled && hit(at.x, at.y - 4, TW, PITCH, act)
     if (!s.enabled) deniedHits.push({ x: at.x, y: at.y - 4, w: TW, h: PITCH, onClick: sfx.denied })
     const id = slipRule(s)
-    if (id) look(at.x, at.y - 4, TW, PITCH, rule(id))
+    if (id && s.kind === 'forge') look(at.x, at.y - 4, TW, PITCH, () => ({ ...rule(id)(), foot: flamberMakes(st) }))
+    else if (id) look(at.x, at.y - 4, TW, PITCH, rule(id))
     const box = { x: at.x, y: at.y - 4, w: TW, h: PITCH }
-    if (s.kind === 'forge' && s.enabled && s.price === '★') tip('flamber', 'Flamber merges your Pair into one ★ card.', box, 'left')
-    if (s.kind === 'max' && s.enabled) tip('max', 'Max bets more on yourself. Win and the House pays it.', box, 'left')
+    if (st.lesson?.slip === s.kind) {
+      tip(st.lesson.id, st.lesson.lines, box, 'left', { lead: true })
+      spotlight([boxShape(box)])
+    }
+    if (s.kind === 'forge' && s.enabled && s.price === '★') tip('flamber', ['Flamber throws this hand: it scores 0 and skips the bet.', 'Your Pair burns into one ★ card for next hand, plus Ash. The ★ card stays in your deck for good.'], box, 'left')
+    if (s.kind === 'discard' && s.enabled) tip('discard', ['Discard swaps the cards you picked for new ones.', `You have ${st.view.me.discardsLeft} left this round. Use them to chase a better hand.`], box, 'left')
+    if (s.kind === 'max' && s.enabled && s.label === 'Push') tip('push', ['The last push! Still on Min? You can move to Max now.', 'Hand 3 is locked already, so push only if you like your cards.'], box, 'left')
+    else if (s.kind === 'max' && s.enabled) tip('max', ['Max bets more on yourself.', 'Win the round and the House pays it. Lose and your rival takes it.'], box, 'left')
     if (over) {
       hovering = i
       if (hoverSlip !== i) pop(key)
@@ -2161,6 +2283,14 @@ function slips(st: DuelState): void {
 }
 
 // the rule a ticket stands for, if any
+// what pressing Flamber would make from the picked cards, for its Fiche
+function flamberMakes(st: DuelState): string {
+  const picked = st.view.me.hand.filter(c => st.selected.has(c.id))
+  const plan = forgePlan(picked)
+  if (plan) return `${plan.merged.length} cards → 1 ★ card + ${plan.merged.length - 1} Ash`
+  return picked.length ? 'no pair: one card gets +1 Value' : 'pick the cards to burn'
+}
+
 function slipRule(s: Slip): string | null {
   if (s.kind === 'max') return s.label === 'Push' ? 'push' : 'max'
   return ({ lock: 'play', forge: 'flamber', discard: 'discard', min: 'min', skip: 'spoils' } as Partial<Record<Kind, string>>)[s.kind] ?? null
@@ -2226,9 +2356,9 @@ function tally(st: DuelState): number {
   const notes: string[] = []
   // the near miss: a round lost on the totals says how close it was
   if (r.outcome === 'loss' && !r.ko && r.margin < 0) notes.push(`Lost by ${fmt(-r.margin)}.`)
-  for (const c of r.forged) notes.push(`New card: ${describeCard(c) || 'flambéed'}`)
-  if (r.bulk) notes.push(`${r.bulk} Bulk went into your deck.`)
-  for (const c of r.ground) notes.push(`Ground a card up to +${c.grind} Value.`)
+  for (const c of r.forged) notes.push(`New card: ${cardName(c)} ${'★'.repeat(c.tier)}`)
+  if (r.bulk) notes.push(`+${r.bulk} Ash in your deck`)
+  for (const c of r.ground) notes.push(`${cardName(c)} is now +${c.grind} Value`)
   if (r.torn.length) notes.push(`Torn up: ${r.torn.length} card${r.torn.length > 1 ? 's' : ''}.`)
   if (r.stolen) notes.push('Sticky Fingers: you took one of their cards.')
   if (r.robbed) notes.push('Sticky Fingers: they took one of yours.')
@@ -2261,6 +2391,7 @@ function tally(st: DuelState): number {
     text(`${n > 0 ? '+' : '−'}$${Math.abs(n)}`, at.x + w - 8, ry, { font: 'sans', color: n > 0 ? '#3a8040' : BURGUNDY, align: 'right', bold: true })
   })
   if(lines<rows.length) return y-8
+  tip('tally', ['The tally. Pot is what the winner takes, the House pays you both every round.', 'Interest: +$1 for every $10 you hold, up to $2. Saving pays!'], { x: at.x, y: at.y, w, h }, 'left')
   const ty = at.y + 26 + rows.length * 11
   g.fillStyle = '#bfa77e'
   g.fillRect(at.x + 6, ty - 2, w - 12, 1)
