@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flambeur</title>
+<style>
+@font-face { font-family: 'FSans'; src: url('assets/sans.woff2') format('woff2'); font-weight: 400; }
+@font-face { font-family: 'FSans'; src: url('assets/sans-bold.woff2') format('woff2'); font-weight: 700; }
+@font-face { font-family: 'FDidone'; src: url('assets/didone.woff2') format('woff2'); }
+@font-face { font-family: 'FTiny'; src: url('assets/tiny.woff2') format('woff2'); }
+
+:root {
+  --ink: #120a0e;
+  --wine: #2a0f17;
+  --felt: #1d4636;
+  --felt-dark: #12301f;
+  --gold: #f2b632;
+  --flame: #e8572a;
+  --red: #c8102e;
+  --cream: #f3e6c8;
+  --muted: #b8a88a;
+  --code-bg: #0c0709;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+body { font-family: 'FSans', ui-monospace, monospace; color: var(--cream); }
+img.px { image-rendering: pixelated; }
+
+/* fixed 1920x1080 stage, scaled to fit the screen */
+#stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: center; }
+.slide {
+  position: absolute; inset: 0; padding: 90px 120px 80px; display: none; flex-direction: column;
+  background:
+    radial-gradient(ellipse at 50% 120%, rgba(232,87,42,.18), transparent 60%),
+    radial-gradient(ellipse at 50% 40%, var(--wine), var(--ink) 75%);
+}
+.slide.on { display: flex; animation: in .45s ease-out; }
+@keyframes in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.slide.felt { background: radial-gradient(ellipse at 50% 45%, var(--felt), var(--felt-dark) 80%); }
+.slide::after { /* gold frame, like the card borders */
+  content: ''; position: absolute; inset: 28px; border: 4px solid rgba(242,182,50,.35); pointer-events: none;
+  box-shadow: inset 0 0 0 4px rgba(18,10,14,.6);
+}
+
+h1, h2 { font-family: 'FDidone', serif; font-weight: 400; margin: 0; color: var(--gold); letter-spacing: 2px; text-shadow: 4px 4px 0 var(--ink); }
+h2 { font-size: 84px; margin-bottom: 8px; }
+.kicker { font-size: 26px; letter-spacing: 6px; text-transform: uppercase; color: var(--flame); margin-bottom: 14px; font-weight: 700; }
+.sub { font-size: 30px; color: var(--muted); margin-bottom: 40px; }
+p, li { font-size: 32px; line-height: 1.45; }
+ul { margin: 0; padding-left: 0; list-style: none; }
+li { position: relative; padding-left: 46px; margin-bottom: 18px; }
+li::before { content: '♦'; position: absolute; left: 0; color: var(--red); }
+li:nth-child(even)::before { content: '♠'; color: var(--gold); }
+b, strong { color: var(--gold); font-weight: 700; }
+em { color: var(--flame); font-style: normal; }
+code { font-family: ui-monospace, 'JetBrains Mono', monospace; background: rgba(0,0,0,.35); padding: 2px 10px; border-radius: 4px; color: var(--gold); font-size: .9em; }
+
+.row { display: flex; gap: 60px; flex: 1; min-height: 0; }
+.col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.shot { border: 6px solid var(--ink); outline: 4px solid var(--gold); box-shadow: 14px 14px 0 rgba(0,0,0,.5); width: 100%; display: block; }
+.cap { font-family: 'FTiny', monospace; font-size: 22px; color: var(--muted); margin-top: 14px; letter-spacing: 1px; }
+
+.card {
+  background: rgba(0,0,0,.3); border: 3px solid rgba(242,182,50,.4); padding: 28px 32px; box-shadow: 8px 8px 0 rgba(0,0,0,.4);
+}
+.card h3 { font-family: 'FSans'; font-weight: 700; color: var(--gold); font-size: 34px; margin: 0 0 10px; }
+.card p { font-size: 27px; margin: 0; line-height: 1.4; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 32px; }
+
+.formula {
+  font-family: 'FDidone', serif; font-size: 72px; text-align: center; padding: 30px; margin: 10px 0 40px;
+  background: var(--ink); border: 4px solid var(--gold); box-shadow: 10px 10px 0 rgba(0,0,0,.5); color: var(--cream);
+}
+.formula .v { color: #6fb7ff; } .formula .h { color: var(--red); } .formula .g { color: var(--gold); }
+
+pre {
+  margin: 0; background: var(--code-bg); border: 3px solid rgba(242,182,50,.4); padding: 28px 34px; box-shadow: 10px 10px 0 rgba(0,0,0,.5);
+  font-family: ui-monospace, 'JetBrains Mono', 'Fira Code', monospace; font-size: 25px; line-height: 1.5; color: #e9dcc0; overflow: hidden; white-space: pre;
+}
+pre .c { color: #8fae7a; font-style: italic; } pre .k { color: #ff7a59; } pre .s { color: #f2b632; } pre .f { color: #7cc3ff; } pre .n { color: #d79bff; }
+.file { font-family: 'FTiny', monospace; font-size: 22px; color: var(--flame); margin-bottom: 10px; letter-spacing: 1px; }
+
+.foot { position: absolute; left: 120px; right: 120px; bottom: 46px; display: flex; justify-content: space-between; font-family: 'FTiny', monospace; font-size: 20px; color: rgba(243,230,200,.4); letter-spacing: 2px; }
+
+/* title */
+.title { align-items: center; justify-content: center; text-align: center; }
+.title img.logo { width: 1340px; margin-top: -40px; }
+.title .tag { font-size: 40px; color: var(--cream); margin-top: 6px; }
+.title .meta { margin-top: 44px; font-size: 28px; color: var(--muted); letter-spacing: 3px; }
+.pill { display: inline-block; border: 3px solid var(--gold); color: var(--gold); padding: 8px 22px; margin: 0 8px; font-weight: 700; font-size: 26px; letter-spacing: 2px; }
+
+svg text { font-family: 'FSans', monospace; }
+.stat { text-align: center; }
+.stat .num { font-family: 'FDidone', serif; font-size: 96px; color: var(--gold); line-height: 1; text-shadow: 4px 4px 0 var(--ink); }
+.stat .lbl { font-size: 24px; color: var(--muted); margin-top: 10px; letter-spacing: 2px; text-transform: uppercase; }
+
+.big-link { font-family: ui-monospace, monospace; font-size: 54px; color: var(--gold); background: var(--ink); border: 4px solid var(--gold); padding: 24px 40px; display: inline-block; box-shadow: 10px 10px 0 rgba(0,0,0,.5); margin: 10px 0 40px; }
+
+#hud { position: fixed; right: 18px; bottom: 12px; font: 14px ui-monospace, monospace; color: rgba(255,255,255,.35); z-index: 2; user-select: none; }
+#bar { position: fixed; left: 0; bottom: 0; height: 4px; background: var(--gold); transition: width .3s; z-index: 2; }
+
+/* print / pdf: one slide per page */
+@media print {
+  @page { size: 1920px 1080px; margin: 0; }
+  html, body { overflow: visible; height: auto; background: none; }
+  #stage { position: static; transform: none !important; }
+  .slide { display: flex !important; position: relative; width: 1920px; height: 1080px; page-break-after: always; break-after: page; animation: none; }
+  .slide.on { animation: none !important; }
+  #hud, #bar { display: none; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- 1. title -->
+<section class="slide title">
+  <img class="logo px" src="assets/logo@4x.png" alt="Flambeur">
+  <div class="tag">A booster-pack poker roguelike. Bet on yourself, or burn it all.</div>
+  <div class="meta">
+    <span class="pill">IEEE CS GAME SPRINT</span><span class="pill">NUDOX TRACK</span>
+  </div>
+  <div class="meta">Evan Hoddinott &nbsp;·&nbsp; KSU AI Club Hackathon &nbsp;·&nbsp; Nov 16–20, 2026</div>
+</section>
+
+<!-- 2. overview -->
+<section class="slide">
+  <div class="kicker">Game overview</div>
+  <h2>What is Flambeur?</h2>
+  <div class="row" style="margin-top:36px">
+    <div class="col" style="flex:.9">
+      <ul>
+        <li>A <b>poker roguelike</b> in the browser, set in a smoky Paris casino.</li>
+        <li>You start with <b>$20</b> and a debt to <em>Le Patron</em>. Your bankroll is your <b>life</b> and your <b>shop money</b>.</li>
+        <li>Rip <b>booster packs</b> to build a tiny deck. Cards carry finishes, stamps and traits.</li>
+        <li>Duel <b>10 rivals</b> across <b>12 rounds</b>. Bust them, or bust out.</li>
+        <li><b>Why:</b> poker roguelikes are all solo. I wanted one where the bluff is real: a <b>live rival</b> across the table.</li>
+      </ul>
+    </div>
+    <div class="col" style="flex:1.1">
+      <img class="shot" src="assets/duel.png" alt="the duel scene">
+      <div class="cap">THE DUEL: your hand at the bottom, the rival across the table</div>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>02</span></div>
+</section>
+
+<!-- 3. rules -->
+<section class="slide felt">
+  <div class="kicker">Rules</div>
+  <h2>How a round plays</h2>
+  <div class="formula">Appraisal = <span class="v">Value</span> × <span class="h">Hype</span> × 2<sup class="g">Grade</sup></div>
+  <div class="grid3">
+    <div class="card"><h3>1 · Lock in</h3><p>You're dealt 8 cards. Discard if you want, then lock 1–5 as a poker hand. Both seats lock blind.</p></div>
+    <div class="card"><h3>2 · Bet on yourself</h3><p><b>Min</b> or <b>Max</b>. Win a Max and the House pays you; lose it and the rival takes it. The underdog bets second.</p></div>
+    <div class="card"><h3>3 · Showdown</h3><p>Higher Appraisal takes the hand. <b>Best of 3 hands</b> wins the round and the pot.</p></div>
+  </div>
+  <div class="grid2" style="margin-top:32px">
+    <div class="card"><h3>Win · lose · difficulty</h3><p><b>Win:</b> bust every rival, survive 12 rounds and pay off Le Patron's marker. <b>Lose:</b> your bankroll hits $0. Rivals come in <b>Easy, Medium and High Roller</b>.</p></div>
+    <div class="card"><h3>Controls</h3><p><b>Mouse:</b> click cards to pick them, click the ticket buttons (Play, Flamber, Min, Max). <b>Hover</b> anything to see what it does. <b>Space</b> skips an animation, <b>M</b> mutes.</p></div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>03</span></div>
+</section>
+
+<!-- 4. mechanics -->
+<section class="slide">
+  <div class="kicker">Core mechanics</div>
+  <h2>What makes it different</h2>
+  <div class="row" style="margin-top:30px">
+    <div class="col" style="gap:26px">
+      <div class="card"><h3>🔥 Flamber</h3><p>Merge a locked hand into <b>one stronger card</b>, TFT style: ★1 → ★3. Each hand type leaves a trait, and traits stack into <b>bonus hands</b>. Leftovers turn to <em>Ash</em>, so the deck never shrinks.</p></div>
+      <div class="card"><h3>The Tabac</h3><p>Between rounds: booster packs, collectibles that boost Hype (order matters), scratchers, and a <b>grading desk</b> that ships a card off for a round.</p></div>
+      <div class="card"><h3>Tables &amp; bosses</h3><p>4 Tables × 3 rounds. A new rival each Table with their own deck build; every 3rd round is a boss with a twist.</p></div>
+    </div>
+    <div class="col" style="gap:30px; flex:.85">
+      <img class="shot" style="max-height:355px; width:auto; align-self:flex-end" src="assets/showdown.png" alt="a showdown">
+      <img class="shot" style="max-height:355px; width:auto; align-self:flex-end" src="assets/shop.png" alt="the tabac shop">
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>04</span></div>
+</section>
+
+<!-- AI -->
+<section class="slide felt">
+  <div class="kicker">The role of AI</div>
+  <h2>One developer, a studio of agents</h2>
+  <div style="display:flex; gap:70px; justify-content:center; margin:26px 0 30px">
+    <div class="stat"><div class="num">1</div><div class="lbl">developer</div></div>
+    <div class="stat"><div class="num">5</div><div class="lbl">days</div></div>
+    <div class="stat"><div class="num">22.5k</div><div class="lbl">lines of code</div></div>
+    <div class="stat"><div class="num">6.4k</div><div class="lbl">lines of design specs</div></div>
+    <div class="stat"><div class="num">146</div><div class="lbl">tests</div></div>
+  </div>
+  <div class="grid2" style="gap:40px">
+    <div class="card">
+      <h3>🎬 I was the Game Director</h3>
+      <ul style="margin-top:10px">
+        <li style="font-size:25px; margin-bottom:10px">I wrote the <b>design and specs</b>; AI agents (<b>Claude Code, Codex, OpenCode Go</b>) built against them, <b>in parallel</b>, each in its own git worktree.</li>
+        <li style="font-size:25px; margin-bottom:10px"><b>AI playtesters</b>: bots play <b>1000s of full runs</b> to balance the economy, and agents drive Chrome through whole games to catch crashes.</li>
+        <li style="font-size:25px; margin-bottom:0">Specialist agents for <b>art, sound, music and the trailer</b>, all checked against one shared art and rules spec.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>🃏 AI inside the game</h3>
+      <ul style="margin-top:10px">
+        <li style="font-size:25px; margin-bottom:10px"><b>10 rival AIs</b>, each with its own deck build and betting style, from nervous to bluffing sharks. Easy, Medium and High Roller.</li>
+        <li style="font-size:25px; margin-bottom:10px">They play by <b>the exact same rules</b> as you, one move at a time, and size up their hand with the real scoring engine.</li>
+        <li style="font-size:25px; margin-bottom:0"><b>Seeded procedural generation</b>: packs, rival decks, shopkeepers, the market and the daily are all built from one seed.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>05</span></div>
+</section>
+
+<!-- 5. state machine -->
+<section class="slide">
+  <div class="kicker">State machine</div>
+  <h2>The match is a phase machine</h2>
+  <div class="row" style="margin-top:20px; gap:50px">
+    <div class="col" style="flex:1.55; justify-content:center">
+      <svg viewBox="0 0 1080 640" width="100%">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f2b632"/></marker>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#e8572a"/></marker>
+        </defs>
+        <style>
+          .st rect { fill:#120a0e; stroke:#f2b632; stroke-width:4; }
+          .st text { fill:#f3e6c8; font-size:30px; font-weight:700; text-anchor:middle; }
+          .end rect { stroke:#c8102e; }
+          .ln { stroke:#f2b632; stroke-width:3.5; fill:none; marker-end:url(#ar); }
+          .lr { stroke:#e8572a; stroke-width:3.5; fill:none; marker-end:url(#arr); stroke-dasharray:10 7; }
+          .lb { fill:#b8a88a; font-size:20px; text-anchor:middle; }
+        </style>
+        <!-- start dot -->
+        <circle cx="40" cy="90" r="14" fill="#f2b632"/>
+        <path class="ln" d="M56 90 H118"/>
+        <g class="st"><rect x="120" y="50" width="200" height="80"/><text x="220" y="101">draft</text></g>
+        <path class="ln" d="M320 90 H448"/><text class="lb" x="384" y="76">deck drafted</text>
+        <g class="st"><rect x="450" y="50" width="200" height="80"/><text x="550" y="101">deal</text></g>
+        <path class="ln" d="M650 90 H808"/><text class="lb" x="729" y="76">both locked</text>
+        <g class="st"><rect x="810" y="50" width="200" height="80"/><text x="910" y="101">bet</text></g>
+        <!-- bet -> reveal -->
+        <path class="ln" d="M910 130 V248"/><text class="lb" x="990" y="196">bets in</text>
+        <g class="st"><rect x="790" y="250" width="240" height="80" style="stroke-dasharray:10 6"/><text x="910" y="301">reveal</text></g>
+        <!-- deal -> reveal (no betting on hand 2) -->
+        <path class="ln" d="M610 130 L800 252"/><text class="lb" x="640" y="215">hand 2: no bet</text>
+        <!-- reveal -> deal next hand -->
+        <path class="lr" d="M790 290 C 600 300, 520 230, 530 134"/><text class="lb" x="470" y="262" style="fill:#e8572a">next hand</text>
+        <!-- reveal -> settle -->
+        <path class="ln" d="M910 330 V448"/><text class="lb" x="1000" y="396">round decided</text>
+        <g class="st"><rect x="790" y="450" width="240" height="80" style="stroke-dasharray:10 6"/><text x="910" y="501">settle</text></g>
+        <!-- settle -> spoils -->
+        <path class="ln" d="M790 490 H652"/>
+        <g class="st"><rect x="450" y="450" width="200" height="80"/><text x="550" y="501">spoils</text></g>
+        <path class="ln" d="M450 490 H322"/><text class="lb" x="386" y="476">picked</text>
+        <g class="st"><rect x="120" y="450" width="200" height="80"/><text x="220" y="501">shop</text></g>
+        <!-- shop -> deal -->
+        <path class="ln" d="M240 450 C 260 300, 400 170, 470 132"/><text class="lb" x="262" y="300">left shop: round + 1</text>
+        <!-- settle -> over -->
+        <path class="ln" d="M910 530 V578"/>
+        <g class="st end"><rect x="810" y="580" width="200" height="56"/><text x="910" y="619" style="font-size:26px">over</text></g>
+        <text class="lb" x="740" y="612" style="text-anchor:end">bust or round 12</text>
+        <text class="lb" x="40" y="620" style="text-anchor:start;font-size:18px">dashed = transitions the engine runs on its own</text>
+      </svg>
+    </div>
+    <div class="col" style="justify-content:center">
+      <ul>
+        <li><b>6 phases</b>: <code>draft · deal · bet · spoils · shop · over</code>. Reveal and settle are automatic steps between them.</li>
+        <li>Every move goes through <code>step(match, seat, action)</code>. It checks the action is legal, applies it, then <code>advance()</code> moves phases until a player owes a move.</li>
+        <li style="font-size:26px; color:var(--muted)">A match is a <b>seed + an action log</b>, so any game can be replayed exactly.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>06</span></div>
+</section>
+
+<!-- 6. flowchart -->
+<section class="slide felt">
+  <div class="kicker">Game flowchart</div>
+  <h2>A full run</h2>
+  <svg viewBox="0 0 1680 760" width="100%" style="margin-top:10px; flex:1">
+    <defs>
+      <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f2b632"/></marker>
+    </defs>
+    <style>
+      .bx rect { fill:#0e2419; stroke:#f2b632; stroke-width:4; }
+      .bx text { fill:#f3e6c8; font-size:27px; font-weight:700; text-anchor:middle; }
+      .bx .s2 { font-size:20px; font-weight:400; fill:#b8a88a; }
+      .dm polygon { fill:#2a0f17; stroke:#e8572a; stroke-width:4; }
+      .dm text { fill:#f3e6c8; font-size:24px; font-weight:700; text-anchor:middle; }
+      .ok rect { stroke:#6fd38a; } .ko rect { stroke:#c8102e; }
+      .l2 { stroke:#f2b632; stroke-width:3.5; fill:none; marker-end:url(#a2); }
+      .yl { fill:#f2b632; font-size:22px; font-weight:700; }
+    </style>
+    <!-- top row -->
+    <g class="bx"><rect x="10" y="20" width="230" height="100"/><text x="125" y="66">Pick a</text><text x="125" y="98">starter box</text></g>
+    <path class="l2" d="M240 70 H298"/>
+    <g class="bx"><rect x="300" y="20" width="250" height="100"/><text x="425" y="66">Draft deck</text><text class="s2" x="425" y="98">4 rows of 6, keep 3</text></g>
+    <path class="l2" d="M550 70 H608"/>
+    <g class="bx"><rect x="610" y="20" width="250" height="100"/><text x="735" y="66">New Table</text><text class="s2" x="735" y="98">new rival sits down</text></g>
+    <path class="l2" d="M860 70 H918"/>
+    <g class="bx"><rect x="920" y="20" width="250" height="100"/><text x="1045" y="66">Deal 8 cards</text><text class="s2" x="1045" y="98">discard, lock 1–5</text></g>
+    <path class="l2" d="M1170 70 H1228"/>
+    <g class="dm"><polygon points="1385,10 1520,70 1385,130 1250,70"/><text x="1385" y="66">Play or</text><text x="1385" y="94">Flamber?</text></g>
+    <!-- bet -->
+    <path class="l2" d="M1385 130 V198"/>
+    <g class="bx"><rect x="1260" y="200" width="250" height="90"/><text x="1385" y="242">Bet Min / Max</text><text class="s2" x="1385" y="272">underdog acts second</text></g>
+    <path class="l2" d="M1385 290 V338"/>
+    <g class="bx"><rect x="1260" y="340" width="250" height="90"/><text x="1385" y="382">Showdown</text><text class="s2" x="1385" y="412">higher Appraisal wins</text></g>
+    <path class="l2" d="M1260 385 H1168"/>
+    <g class="dm"><polygon points="1040,325 1165,385 1040,445 915,385"/><text x="1040" y="380">Won 2</text><text x="1040" y="406">hands?</text></g>
+    <!-- no: back to deal -->
+    <path class="l2" d="M1040 325 C 1040 250, 1045 200, 1045 122"/><text class="yl" x="1056" y="250">no: next hand</text>
+    <!-- yes -->
+    <path class="l2" d="M915 385 H808"/><text class="yl" x="830" y="372">yes</text>
+    <g class="dm"><polygon points="680,325 805,385 680,445 555,385"/><text x="680" y="380">Anyone</text><text x="680" y="406">bust?</text></g>
+    <path class="l2" d="M680 445 V548"/><text class="yl" x="694" y="510">no</text>
+    <g class="bx"><rect x="545" y="550" width="270" height="100"/><text x="680" y="594">Spoils + Tabac</text><text class="s2" x="680" y="626">packs, grading, collectibles</text></g>
+    <path class="l2" d="M545 600 H448"/>
+    <g class="dm"><polygon points="320,540 445,600 320,660 195,600"/><text x="320" y="595">Round</text><text x="320" y="621">12 done?</text></g>
+    <path class="l2" d="M195 600 C 60 580, 90 200, 400 180 S 700 150, 720 124"/><text class="yl" x="20" y="420">no: next</text><text class="yl" x="20" y="446">round</text>
+    <path class="l2" d="M320 660 V688"/><text class="yl" x="334" y="682">yes</text>
+    <g class="bx ok"><rect x="160" y="690" width="320" height="64"/><text x="320" y="732">Pay the marker: win</text></g>
+    <path class="l2" d="M555 385 H460"/><text class="yl" x="470" y="372">yes</text>
+    <g class="bx ko"><rect x="210" y="345" width="250" height="80"/><text x="335" y="377">You bust: lose</text><text class="s2" x="335" y="406">rival busts: you win</text></g>
+  </svg>
+  <div class="foot"><span>FLAMBEUR</span><span>07</span></div>
+</section>
+
+<!-- 7. multiplayer -->
+<section class="slide felt">
+  <div class="kicker">Built multiplayer-first</div>
+  <h2>Play real people, live</h2>
+  <div class="row" style="margin-top:30px; gap:50px">
+    <div class="col" style="flex:1.05">
+      <ul>
+        <li><b>Real-time 1v1 duels</b>: share a <b>room code</b> with a friend, or hit <b>quick match</b> to get paired with whoever's online.</li>
+        <li>The <b>server runs the game</b>. Your browser sends moves, the server runs the same <code>step()</code> and sends each player only what they're allowed to see.</li>
+        <li><b>No cheating by peeking</b>: the rival's hand never reaches your browser, so devtools can't show it.</li>
+        <li>Every move is <b>saved before it's sent</b>, so a crashed server rebuilds every live match by replaying its log.</li>
+      </ul>
+    </div>
+    <div class="col" style="flex:.95; justify-content:center">
+      <svg viewBox="0 0 760 600" width="100%">
+        <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f2b632"/></marker></defs>
+        <style>
+          .nb rect { fill:#0e2419; stroke:#f2b632; stroke-width:4; }
+          .nb text { fill:#f3e6c8; font-size:28px; font-weight:700; text-anchor:middle; }
+          .nb .s3 { font-size:19px; font-weight:400; fill:#b8a88a; }
+          .sv rect { fill:#2a0f17; stroke:#e8572a; stroke-width:5; }
+          .w { stroke:#f2b632; stroke-width:4; fill:none; marker-end:url(#a3); marker-start:url(#a3); }
+          .wl { fill:#f2b632; font-size:19px; text-anchor:middle; }
+        </style>
+        <g class="nb"><rect x="10" y="20" width="250" height="110"/><text x="135" y="68">You</text><text class="s3" x="135" y="100">browser</text></g>
+        <g class="nb"><rect x="500" y="20" width="250" height="110"/><text x="625" y="68">Rival</text><text class="s3" x="625" y="100">browser, anywhere</text></g>
+        <g class="nb sv"><rect x="200" y="250" width="360" height="130"/><text x="380" y="302">Game server</text><text class="s3" x="380" y="338">step() · view() · lobby</text></g>
+        <path class="w" d="M135 132 L265 246"/><path class="w" d="M625 132 L495 246"/>
+        <text class="wl" x="140" y="200">WebSocket</text><text class="wl" x="620" y="200">WebSocket</text>
+        <text class="wl" x="380" y="160" style="fill:#b8a88a">moves in · your view out</text>
+        <path class="w" d="M380 382 V468" style="marker-start:none"/>
+        <g class="nb"><rect x="230" y="470" width="300" height="100"/><text x="380" y="514">Postgres</text><text class="s3" x="380" y="546">action log · scores</text></g>
+      </svg>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>08</span></div>
+</section>
+
+<!-- 8. daily + coming soon -->
+<section class="slide">
+  <div class="kicker">Daily seed &amp; what's next</div>
+  <h2>Same deal for everyone</h2>
+  <div class="grid3" style="margin-top:50px; align-items:stretch; gap:40px">
+    <div class="card"><h3 style="font-size:38px; margin-bottom:18px">📅 The Daily</h3><p style="font-size:31px">One <b>seed a day</b>, the same shuffle, packs and rival for every player in the world. Easy, Medium or High Roller.</p><p style="font-size:31px; margin-top:22px">It runs <b>on the server</b>, so nobody can sim the seed offline and submit a perfect run.</p></div>
+    <div class="card"><h3 style="font-size:38px; margin-bottom:18px">🏆 Global leaderboard</h3><p style="font-size:31px">Two boards each day: <b>best score</b> (replay as much as you want) and <b>first try</b> (no do-overs).</p><p style="font-size:31px; margin-top:22px">Fair by design: today's seed is locked behind a hash, and <b>yesterday's seed is published</b> so anyone can replay it.</p></div>
+    <div class="card" style="border-color:rgba(232,87,42,.7)"><h3 style="font-size:38px; margin-bottom:18px; color:var(--flame)">✨ Coming soon: cosmetics</h3><p style="font-size:31px">Card backs, table felts and more, <b>unlocked by playing</b>, never bought.</p><p style="font-size:31px; margin-top:22px">Next on the list after that: a <b>10-player battle royale</b>. The engine already seats 10.</p></div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>09</span></div>
+</section>
+
+<!-- 8. code overview -->
+<section class="slide">
+  <div class="kicker">Code overview</div>
+  <h2>How the code is organized</h2>
+  <div class="row" style="margin-top:30px">
+    <div class="col" style="flex:1.15">
+<pre><span class="n">src/engine/</span>   <span class="c">pure game rules. no DOM, no Math.random</span>
+  <span class="f">match.ts</span>      <span class="c">the phase machine: step / legal / view</span>
+  <span class="f">hands.ts</span>      <span class="c">poker hand eval + flambéed bonus hands</span>
+  <span class="f">scoring.ts</span>    <span class="c">Value × Hype × 2^Grade</span>
+  <span class="f">forge.ts</span>      <span class="c">flambéing cards into one</span>
+  <span class="f">betting.ts</span>    <span class="c">Min / Max, who acts first</span>
+  <span class="f">shop.ts</span>       <span class="c">packs, inserts, collectibles</span>
+  <span class="f">rivals.ts</span>     <span class="c">10 rivals as data</span>
+  <span class="f">bot.ts</span>        <span class="c">rival AI, same rules as you</span>
+  <span class="f">rng.ts</span>        <span class="c">seeded rng (sfc32 + cyrb128)</span>
+<span class="n">src/ui/</span>       <span class="c">canvas scenes: duel, shop, fire, sound</span>
+<span class="n">server/</span>       <span class="c">multiplayer: same engine, Node + ws</span>
+<span class="n">sim/</span>          <span class="c">headless balance sim, 1000s of runs</span>
+<span class="n">art/</span>          <span class="c">aseprite sprites + python build scripts</span></pre>
+    </div>
+    <div class="col" style="justify-content:space-between">
+      <div class="grid2">
+        <div class="stat"><div class="num">22.5k</div><div class="lbl">lines of TypeScript</div></div>
+        <div class="stat"><div class="num">0</div><div class="lbl">browser dependencies</div></div>
+        <div class="stat"><div class="num">146</div><div class="lbl">engine tests</div></div>
+        <div class="stat"><div class="num">80</div><div class="lbl">focused commits</div></div>
+      </div>
+      <ul style="margin-top:30px">
+        <li style="font-size:28px">The <b>engine is pure</b>: the same code runs the browser game, the server and the balance sim.</li>
+        <li style="font-size:28px">The UI only <b>reads</b> state and sends actions. It never changes the game by itself.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>10</span></div>
+</section>
+
+<!-- 9. code: step -->
+<section class="slide">
+  <div class="kicker">Code · the core loop</div>
+  <h2>One way in: <span style="font-family:ui-monospace,monospace;font-size:64px">step()</span></h2>
+  <div class="file">SRC/ENGINE/MATCH.TS</div>
+<pre style="font-size:19px; line-height:1.36; padding:18px 34px"><span class="c">// the only way a match changes. works on a copy, so a throw can't leave it half-changed</span>
+<span class="k">export function</span> <span class="f">step</span>(match: Match, s: SeatId, action: Action): StepResult {
+  <span class="k">return</span> <span class="f">stepInPlace</span>(JSON.<span class="f">parse</span>(JSON.<span class="f">stringify</span>(match)), s, action)
+}
+
+<span class="k">export function</span> <span class="f">stepInPlace</span>(m: Match, s: SeatId, action: Action): StepResult {
+  <span class="k">const</span> why = <span class="f">problem</span>(m, s, action)   <span class="c">// is this move legal for this seat, right now?</span>
+  <span class="k">if</span> (why) <span class="k">throw new</span> <span class="f">Error</span>(<span class="s">`seat ${s} ${action.type}: ${why}`</span>)  <span class="c">// fail loud</span>
+  <span class="k">const</span> emit: Emit = []                  <span class="c">// events the UI animates: deals, chips, count-ups</span>
+  <span class="f">apply</span>(m, s, action, emit)              <span class="c">// do the move</span>
+  m.n++                                  <span class="c">// one more action in the log</span>
+  <span class="f">advance</span>(m, emit)                      <span class="c">// run the phase machine forward</span>
+  <span class="f">check</span>(m)                               <span class="c">// invariants: throws on any impossible state</span>
+  <span class="k">return</span> { match: m, events: emit }
+}
+
+<span class="c">// keeps moving the match forward while nobody owes a move in this phase</span>
+<span class="k">function</span> <span class="f">advance</span>(m: Match, emit: Emit): <span class="k">void</span> {
+  <span class="k">for</span> (;;) {
+    <span class="k">if</span> (m.phase === <span class="s">'over'</span> || <span class="f">pending</span>(m).length > <span class="n">0</span>) <span class="k">return</span>
+    <span class="k">if</span> (m.phase === <span class="s">'draft'</span> || m.phase === <span class="s">'shop'</span>) <span class="f">enterRound</span>(m, emit)  <span class="c">// shuffle, deal 8</span>
+    <span class="k">else if</span> (m.phase === <span class="s">'deal'</span>) <span class="f">afterLocks</span>(m, emit)    <span class="c">// open betting, or reveal</span>
+    <span class="k">else if</span> (m.phase === <span class="s">'bet'</span>) <span class="f">revealHand</span>(m, emit)    <span class="c">// score it, next hand or settle</span>
+    <span class="k">else if</span> (m.phase === <span class="s">'spoils'</span>) <span class="f">nextShop</span>(m, emit)   <span class="c">// round + 1, into the tabac</span>
+  }
+}</pre>
+  <div class="foot"><span>FLAMBEUR</span><span>11</span></div>
+</section>
+
+<!-- 10. code: scoring + rng -->
+<section class="slide">
+  <div class="kicker">Code · scoring and randomness</div>
+  <h2>The math behind a hand</h2>
+  <div class="row" style="margin-top:24px; gap:40px">
+    <div class="col">
+      <div class="file">SRC/ENGINE/SCORING.TS · APPRAISE()</div>
+<pre style="font-size:23px"><span class="c">// a hand is a list of steps the UI counts up:</span>
+<span class="c">// hand base, each card, each collectible</span>
+<span class="k">let</span> value = <span class="n">0</span>
+<span class="k">let</span> hype = <span class="n">0</span>
+<span class="k">let</span> grade = <span class="n">0</span>
+<span class="k">for</span> (<span class="k">const</span> s <span class="k">of</span> steps) {
+  value += s.value
+  <span class="c">// a ×Hype collectible multiplies what came</span>
+  <span class="c">// before it,</span>
+  <span class="c">// so the order of your display case matters</span>
+  hype = (hype + s.hype) * s.xhype
+  grade += s.grade
+}
+hype = Math.<span class="f">max</span>(<span class="n">1</span>, hype)
+<span class="c">// each Grade doubles the lot</span>
+total: Math.<span class="f">floor</span>(value * hype * <span class="n">2</span> ** grade)</pre>
+    </div>
+    <div class="col">
+      <div class="file">SRC/ENGINE/RNG.TS</div>
+<pre style="font-size:23px"><span class="c">// seeded rng so runs and daily seeds replay exactly.</span>
+<span class="c">// never Math.random in the engine.</span>
+<span class="c">// the state is plain data (4 × 32-bit words of sfc32),</span>
+<span class="c">// so a match survives a JSON round trip mid-stream</span>
+<span class="k">export type</span> Rng = { s: [number, number, number, number] }
+
+<span class="c">// every stream is named, like "seed:round:seat:pile",</span>
+<span class="c">// so buying a pack never changes your next deal</span>
+<span class="k">export function</span> <span class="f">cyrb128</span>(str: string) {
+  <span class="k">let</span> h1 = <span class="n">1779033703</span>, h2 = <span class="n">3144134277</span>
+  <span class="k">let</span> h3 = <span class="n">1013904242</span>, h4 = <span class="n">2773480762</span>
+  <span class="k">for</span> (<span class="k">let</span> i = <span class="n">0</span>; i < str.length; i++) {
+    <span class="k">const</span> k = str.<span class="f">charCodeAt</span>(i)
+    h1 = h2 ^ Math.<span class="f">imul</span>(h1 ^ k, <span class="n">597399067</span>)
+    <span class="c">// ...three more mixing lanes</span>
+  }
+  ...
+}</pre>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>12</span></div>
+</section>
+
+<!-- 11. github -->
+<section class="slide felt">
+  <div class="kicker">GitHub repository</div>
+  <h2>The repo</h2>
+  <div class="big-link">github.com/evan-hoddinott/flambeur</div>
+  <div class="row">
+    <div class="col">
+      <ul>
+        <li><b>README</b> with screenshots, how to play and how to run it: <code>pnpm install</code> then <code>pnpm dev</code>.</li>
+        <li><b>DESIGN.md</b> holds every rule and number, kept in sync with the code.</li>
+        <li><code>docs/</code> has a spec for each piece: art, the duel, the shop, cards, sound, music, the tutorial.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <ul>
+        <li><b>One focused commit per change</b>, with messages that say what changed.</li>
+        <li>Tests, typecheck and build: <code>pnpm test</code> and <code>pnpm build</code>.</li>
+        <li><code>art/</code> keeps the sources (Aseprite files, Python build scripts) next to what they export.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>13</span></div>
+</section>
+
+<!-- 12. limitations & challenges -->
+<section class="slide">
+  <div class="kicker">Limitations &amp; challenges</div>
+  <h2>What was hard</h2>
+  <div class="grid2" style="margin-top:36px">
+    <div class="card" style="border-color:rgba(200,16,46,.6)">
+      <h3 style="color:var(--red)">Limitations</h3>
+      <ul style="margin-top:14px">
+        <li style="font-size:27px">Some newer sprites are still <b>flat placeholders</b> while their final art gets drawn.</li>
+        <li style="font-size:27px"><b>Solo dev, one week</b>: cosmetics and the battle royale didn't make the cut yet.</li>
+        <li style="font-size:27px">Balance isn't finished: the <b>High Roller</b> difficulty is still a wall.</li>
+      </ul>
+    </div>
+    <div class="card" style="border-color:rgba(232,87,42,.6)">
+      <h3 style="color:var(--flame)">Challenges</h3>
+      <ul style="margin-top:14px">
+        <li style="font-size:27px"><b>Balancing by hand doesn't scale.</b> I wrote a sim that plays 1000s of runs with different bots to tune the economy.</li>
+        <li style="font-size:27px">A <b>full rules rewrite mid-week</b> (v2: best of 3, Flamber as a hand) after the first playtest.</li>
+        <li style="font-size:27px"><b>Teaching a deep game fast</b>: a seeded first run and La Fée Verte, a guide who explains each mechanic as it shows up.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>FLAMBEUR</span><span>14</span></div>
+</section>
+
+<!-- 13. demo -->
+<section class="slide title felt">
+  <div class="kicker">Live demo</div>
+  <h1 style="font-size:150px">À la table.</h1>
+  <div class="tag" style="margin-top:24px">It's live. Let's play a hand.</div>
+  <div style="display:flex; gap:40px; margin-top:50px"><div class="big-link" style="font-size:56px; margin:0 0 40px">flambeur.ksuevt.org</div><div class="big-link" style="font-size:56px; margin:0 0 40px">flambeur.battery.rip</div></div>
+  <div class="meta" style="margin-top:0">Live now. Play the daily, or grab a friend for a duel.</div>
+</section>
+
+<!-- 14. tools (last page) -->
+<section class="slide">
+  <div class="kicker">Tools &amp; resources</div>
+  <h2>What I built it with</h2>
+  <div class="grid3" style="margin-top:30px; gap:28px">
+    <div class="card"><h3>Code</h3><p>TypeScript 7<br>Node 24 (node:test)<br>Vite 8 · pnpm<br>HTML5 Canvas + Web Audio<br>ws + pg (server only)</p></div>
+    <div class="card"><h3>Art &amp; audio</h3><p>Aseprite (pixel art)<br>Python + Pillow (atlas builds)<br>Custom bitmap fonts<br>FluidSynth + SoundFonts (GeneralUser GS, FluidR3)<br>Music: Satie's <i>Gnossienne No. 1</i> (public domain), re-arranged</p></div>
+    <div class="card"><h3>Sound effects</h3><p>Kenney audio packs (CC0)<br>OpenGameArt CC0 packs<br>Freesound (CC0)<br>Full credits: <code style="font-size:22px">art/sfx/CREDITS.md</code></p></div>
+    <div class="card"><h3>AI tools</h3><p>Claude Code<br>OpenAI Codex<br>OpenCode Go<br>Nudox (code search MCP)</p></div>
+    <div class="card"><h3>Infra</h3><p>Docker · Kubernetes (k3s)<br>Postgres · Cloudflare Tunnel<br>GitHub: <span style="color:var(--gold)">github.com/evan-hoddinott/flambeur</span></p></div>
+    <div class="card"><h3>Inspiration</h3><p>Balatro (scoring feel)<br>Teamfight Tactics (star-up merging)<br>Pokémon battles (camera)<br>Paris tabacs &amp; casinos</p></div>
+  </div>
+  <div class="foot"><span>FLAMBEUR · MERCI</span><span>16</span></div>
+</section>
+
+</div>
+<div id="bar"></div>
+<div id="hud"></div>
+<script>
+  // slides: arrows / space / click to move, f for fullscreen, home/end
+  const slides = [...document.querySelectorAll('.slide')]
+  const stage = document.getElementById('stage')
+  const hud = document.getElementById('hud')
+  const bar = document.getElementById('bar')
+  let at = Math.min(slides.length - 1, Math.max(0, (parseInt(location.hash.slice(1)) || 1) - 1))
+
+  function show(i) {
+    at = Math.max(0, Math.min(slides.length - 1, i))
+    slides.forEach((s, j) => s.classList.toggle('on', j === at))
+    hud.textContent = `${at + 1} / ${slides.length}`
+    bar.style.width = `${((at + 1) / slides.length) * 100}%`
+    history.replaceState(null, '', `#${at + 1}`)
+  }
+  function fit() {
+    const k = Math.min(innerWidth / 1920, innerHeight / 1080)
+    stage.style.transform = `translate(-50%, -50%) scale(${k})`
+  }
+  addEventListener('resize', fit)
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'ArrowDown', ' ', 'PageDown', 'Enter'].includes(e.key)) show(at + 1)
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) show(at - 1)
+    else if (e.key === 'Home') show(0)
+    else if (e.key === 'End') show(slides.length - 1)
+    else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()
+    else return
+    e.preventDefault()
+  })
+  addEventListener('click', e => show(e.clientX < innerWidth / 3 ? at - 1 : at + 1))
+  fit()
+  show(at)
+</script>
+</body>
+</html>
