@@ -452,7 +452,7 @@ def collectible(name, rarity):  # name '' = blank plaque, the game writes the na
 
 scratch_art = run_path(str(ROOT / "scratchers.py"))
 scratch_parts = scratch_art["parts"](text)
-scratch_parts.update(run_path(str(ROOT / "inserts.py"))["parts"](text, scratch_parts))
+scratch_parts.update(run_path(str(ROOT / "inserts.py"))["parts"](text, scratch_parts, measure))
 
 
 sleeve_art = run_path(str(ROOT / "sleeves.py"))

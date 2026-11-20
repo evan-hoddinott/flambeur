@@ -4,7 +4,7 @@ The tabac between rounds: you stand at the counter, the buraliste stands behind 
 
 **Built Nov 17 (first pass):** the counter view is in the game (`src/ui/shop.ts`, art from `art/shop/buraliste.py` and `art/shop/counter.py`, which export `art/shop/shop.png` + `shop.json`). Working: the buraliste's idle (reading, glances, sighs and "Alors ?" after 20s), bubbles (Bonjour, Bon, Pfff, Mouais), the offer shelf with hover tags and VENDU, the deal-in on restock, the bell (click it or the Restock ticket), the sign with a hover tag, the STONKS board with Chatty's tip, the round and next-twist note, the wall clock online, and the bottom bar. Still the DOM harness: pack ripping, the binder (tap to pick, sell all), the Vitrine, the grading desk and the scratcher pick. Not built yet: the whip-pan, the side pan to the guichet, the salty note (needs `rolledOver` in the view), the god-pull stare.
 
-**Polished Nov 18** (brief: `docs/handoff-shop-polish.md`): the back wall is a real tabac (green faience tiles as the color anchor, carton cubbies, mirror, lottery poster, lighter carousel), a pendant lamp lights the counter with a warm pool and dark edges, the case is a framed vitrine with a velvet back, a light strip, glass bands, and a contact shadow and reflection under each offer. The row is centered. Offers lift and tilt on hover with a cream outline. Tickets use the READABILITY colors (Restock and Bin Bulk green, Grading violet, Sortir brass), the plate uses the Didone, the deck pile is card-sized with a caption, and the binder is leather. The buraliste is shaded to the lamp. Beats: door bell on arrival, buy hop with coins to the plate and a count-down, restock box slam with the old row sliding out, Bin Bulk thunk.
+**Polished Nov 18** (brief: `docs/handoff-shop-polish.md`): the back wall is a real tabac (green faience tiles as the color anchor, carton cubbies, mirror, lottery poster, lighter carousel), a pendant lamp lights the counter with a warm pool and dark edges, the case is a framed vitrine with a velvet back, a light strip, glass bands, and a contact shadow and reflection under each offer. The row is centered. Offers lift and tilt on hover with a cream outline. Tickets use the READABILITY colors (Restock and Ashtray green, Grading violet, Sortir brass), the plate uses the Didone, the deck pile is card-sized with a caption, and the binder is leather. The buraliste is shaded to the lamp. Beats: door bell on arrival, buy hop with coins to the plate and a count-down, restock box slam with the old row sliding out, ash tapped into the Ashtray.
 
 Nov 17 2026, from Evan's shop ideation answers. The scope is **full**: everything here ships Friday. Where this doc and ART.md disagree about the shop, this doc wins.
 
@@ -30,7 +30,7 @@ Nov 17 2026, from Evan's shop ideation answers. The scope is **full**: everythin
 | Table → shop | **Whip-pan**, as in ART.md. |
 | Rival in the shop | **Not shown.** It shops off-screen. |
 | Buraliste | **Short French bubbles on beats**, same system as the rival. Rules text never goes in a bubble. |
-| Restock and Bin a Bulk | **Ticket buttons** by the counter. Pressing Restock also **rings the bell** on the counter. |
+| Restock and Ashtray | **Ticket buttons** by the counter. Pressing Restock also **rings the bell** on the counter. |
 | Friday scope | **Everything** in ART.md §7.4–7.7, trimmed to the layout above. |
 | Stock size | **Unchanged** (up to 7 offers). |
 | Salty rollover | **A grumpy handwritten note** goes up beside the sign, prices +10%. |
@@ -72,7 +72,7 @@ Change these here if they're wrong.
  │  └─────┘└─────┘└─────┘  └─────┘└─────┘  └─────┘└─────┘  └─────┘            │ 290
  │   $0     $3     $6       $6     $9       $3     $3       $10   (paper tags) │ 304
  │═════════ shelf lip ════════════════════════════════════════════════════════│ 312
- │ ┌YOU $ 62┐ [deck ▯]   [Restock $1] [Bin a Bulk $2] [Grading →]  📕 [SORTIR]│
+ │ ┌YOU $ 62┐ [deck ▯]   [Restock $1] [Ashtray $2] [Grading →]  📕 [SORTIR]│
  └──────────────────────────────────────────────────────────────────────────┘ 360
 ```
 
@@ -94,7 +94,7 @@ Change these here if they're wrong.
 | Shelf lip | y 312–318 | Brass strip |
 | Your plate | bottom-left (8,322) | Your bankroll in blue, same plate as the duel |
 | Deck pile | (110,340) | Click for the deck viewer |
-| Ticket buttons | y 322–352, centered | Restock (brass ink on cream), Bin a Bulk, Grading → |
+| Ticket buttons | y 322–352, centered | Restock (brass ink on cream), Ashtray, Grading → |
 | Binder | (560,340) | Leather, gold tooling. Opens the binder overlay |
 | Sortir | bottom-right (600,337) | Brass, pulses |
 | Vitrine tab | top-left (8,0) | Same pull-down as the duel; sell collectibles from it here |
@@ -110,7 +110,7 @@ A bought offer leaves an empty dark gap on the shelf with a "VENDU" slip in it. 
 - **Hover an offer:** it lifts 4 px and tilts toward the cursor (the duel's card hover), its paper tag unfolds with the one-line rule.
 - **Buy:** the offer hops off the shelf toward the camera and away, coins slide from your plate. He grunts: "Bon."
 - **Restock:** press the ticket, the **bell dings**, he slams a fresh box on the counter, the old row slides off, the new one deals in left to right. "Pfff."
-- **Bin a Bulk:** the Bulk card drops into a bin under the counter with a stone thunk.
+- **Ashtray:** the Ash card is emptied into a brass ashtray on the counter (`shop/bulk/bin` in `art/shop/services.py`: ash, a burnt card corner, a cigarette in a notch), with two taps on metal and a puff of ash (`sfx.bin`).
 - **Sell:** cards slide out of the binder onto the counter and turn into coins that jump to your plate. "Mouais."
 - **Salty rollover:** he slaps the handwritten note up next to the sign. "Ma marchandise vous plaît pas ?"
 - **Leave:** "Au revoir." Whip-pan back to the table.
@@ -134,7 +134,7 @@ Bubble lines are short, flavor only, and never repeat back to back.
 ## 5. The grading window (side pan)
 
 - **Grading →** whip-pans right to the side wall: a postal **guichet** with a brass grille, stamps, a scale and a parcel.
-- First you pick the card: the deck and binder open as one picker (deck cards left, binder right). Bulk and graded cards are greyed out.
+- First you pick the card: the deck and binder open as one picker (deck cards left, binder right). Ash and graded cards are greyed out.
 - Then the three **parcels** sit on the sill, each with its odds on its tag:
   - **La Poste** $2: plain brown paper and twine.
   - **Chronopost** $4: a crisp padded envelope.
@@ -298,8 +298,8 @@ The multiplayer shop is 30s (45s before a tournament round). A full rub with the
 | Parcels × 3 | ~64×48 each | Brown paper, padded envelope, armored-van tin |
 | Postmark stamp | ~32×32 | |
 | Grading slab | 72×100 | Card goes inside, label separate |
-| Bulk bin | ~50×40 | Under the counter edge |
-| Ticket buttons | from READABILITY.md | Restock, Bin a Bulk, Grading →, ← Comptoir, Vendre $X, Sortir |
+| Ashtray | ~50×40 | Under the counter edge |
+| Ticket buttons | from READABILITY.md | Restock, Ashtray, Grading →, ← Comptoir, Vendre $X, Sortir |
 
 ---
 
