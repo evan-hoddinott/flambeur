@@ -329,12 +329,11 @@ function onView(next: SeatView, deadlines: (number | null)[], events: Event[]): 
     toCount = false
     pack = null
     selected = new Set()
-    boxRip = null
-    boxOpened = false
+    boxesAt = null
     pickedBox = null
     sweepAt = null
     boxesShown = 0
-    draftPicks = null
+    tossedRow = null
   }
   online = { view: next, deadlines }
   const rival = next.others[0] // the rival's bets show up on the felt, from the view (duel.ts)
@@ -518,12 +517,11 @@ function startRun(seed: string, autoplay = false): void {
   patronPaid = null
   patronMissed = false
   pack = null
-  boxRip = null
-  boxOpened = false
+  boxesAt = null
   pickedBox = null
   sweepAt = null
   boxesShown = 0
-  draftPicks = null
+  tossedRow = null
   dailyBoard = null
   boardAsked = false
   // dev only: ?quick&wild makes the rival bet at random, so folds and flambés come up fast for testing
@@ -680,7 +678,7 @@ function drawScreen(): void {
 }
 
 // ---------- draft ----------
-// both on the bare duel table: rip the sealed starter box and choose one, then keep 3 of its rows
+// both on the bare duel table: choose a starter box, it rips open, then toss one of its rows
 
 // art/packaging/starters/*.png, loaded on first use. null until it has loaded (the scene redraws every frame)
 const boxArt = new Map<string, HTMLImageElement>()
@@ -705,15 +703,14 @@ function drawBoxArt(g: CanvasRenderingContext2D, id: string, x: number, y: numbe
 
 const FELT_TEXT = { color: '#f6ecd2', outline: '#0e0b0a' } as const
 
-let boxRip: number | null = null // when the sealed box got clicked, it shakes open
-let boxOpened = false
-let pickedBox: { id: StarterId; at: number; x: number; sent: boolean } | null = null
+let boxesAt: number | null = null // when the three boxes came out on the tray
+let pickedBox: { id: StarterId; at: number; x: number; sent: boolean; ripped: boolean } | null = null
 let dealAt = 0
 let sweepAt: number | null = null
 let boxesShown = 0
 const tray = new Image()
 tray.src = new URL('../art/packaging/tray.png',import.meta.url).href
-let draftPicks: Set<number> | null = null
+let tossedRow: number | null = null
 
 function drawTray(g: CanvasRenderingContext2D, x: number, y: number, w: number): void {
   if (!tray.complete || !tray.naturalWidth) return
@@ -724,78 +721,25 @@ function drawTray(g: CanvasRenderingContext2D, x: number, y: number, w: number):
   g.drawImage(tray, 120 - end, 0, end, 144, x + w - end, y, end, 132)
 }
 
+// the three boxes on the tray. click one: it comes to the middle, shakes, tears and opens, and its rows deal out
 function starterPanel(): Panel {
   const offer = v().me.draft!.offer
-  for (const id of [
-    'sealed',
-    'sealed-tear-1',
-    'sealed-tear-2',
-    'sealed-base',
-    'sealed-lid',
-    ...offer,
-    ...offer.map(id => id + '-open'),
-  ])
-    boxImage(id)
-  const rip = () => {
-    if (boxRip !== null) return
-    boxRip = performance.now()
-    sfx.rip()
-    render()
-  }
-  if (!boxOpened)
-    return {
-      title: match ? `Seed ${match.config.seed}` : 'Starter box',
-      help: 'Open your starter box.',
-      felt: true,
-      body: (ui, box) => {
-        const w = 132
-        const h = 168
-        const x = box.x + (box.w - w) / 2
-        const y = box.y + (box.h - h) / 2 - 14
-        const over = ui.hit(x, y, w, h, rip)
-        const t = boxRip === null ? 0 : ui.now - boxRip
-        const shake = shakeAmount() * (boxRip !== null ? Math.sin(t / 25) * 4 * Math.max(0, 1 - t / 450) : over ? Math.sin(ui.now / 40) * 1.5 : 0)
-        if (t >= 650) {
-          const rise = land(progress(t - 650, 400))
-          drawTray(ui.g, box.x, box.y + 20 + 100 * (1 - rise), box.w)
-        }
-        ui.g.save()
-        ui.g.translate(x + w / 2 + shake, y + h / 2 - (over ? 3 : 0))
-        ui.g.rotate(shake * 0.02)
-        const lift = progress(t - 650, 400)
-        if (t < 650) drawBoxArt(ui.g, t < 450 ? 'sealed' : t < 550 ? 'sealed-tear-1' : 'sealed-tear-2', -w / 2, -h / 2, w, h)
-        else {
-          ui.g.globalAlpha = 1 - lift
-          drawBoxArt(ui.g, 'sealed-base', -w / 2, -h / 2 + 20 * lift, w, h)
-          ui.g.globalAlpha = 1
-          drawBoxArt(ui.g, 'sealed-lid', -w / 2, -h / 2 - 200 * land(lift), w, h)
-        }
-        if (t > 450 && t < 850) {
-          const u = progress(t - 450, 400)
-          for (let i = 0; i < 6; i++)
-            fit(ui.g, 'pack/scrap/' + ((i % 4) + 1), { x: (i - 2.5) * (8 + 15 * u), y: -35 - 55 * u + 90 * u * u, w: 6, h: 8 })
-        }
-        if (boxRip !== null && (lift === 1 || still.matches)) {
-          boxOpened = true
-          render()
-        }
-        ui.g.restore()
-      },
-      buttons: [{ label: 'Open', kind: 'go', enabled: boxRip === null, onClick: rip }],
-    }
+  for (const id of [...offer, ...offer.map(id => id + '-open')]) boxImage(id)
+  const shown = (boxesAt ??= performance.now())
   return {
     title: 'Choose a starter box',
     felt: true,
     body: (ui, box) => {
       const n = offer.length
       const cw = Math.floor((box.w - (n - 1) * 8) / n)
-      const leave = pickedBox ? (still.matches ? 1 : progress(ui.now - pickedBox.at, 400)) : 0
+      const t = pickedBox ? (still.matches ? 1300 : ui.now - pickedBox.at) : 0
+      const leave = progress(t, 300)
       drawTray(ui.g, box.x, box.y + 16 + leave * 100, box.w)
       offer.forEach((id, i) => {
         const s = getStarter(id)
         const x = box.x + i * (cw + 8)
         const y = box.y + 20
-        const intro = still.matches ? 1 : progress(ui.now - (boxRip ?? 0) - 1050 - i * 60, 260)
+        const intro = still.matches ? 1 : progress(ui.now - shown - i * 60, 260)
         if (intro > 0 && boxesShown <= i) {
           boxesShown = i + 1
           sfx.flip(false, i)
@@ -804,50 +748,83 @@ function starterPanel(): Panel {
           !pickedBox &&
           intro === 1 &&
           ui.hit(x, y, cw, box.h - 20, () => {
-            if (!pickedBox) pickedBox = { id, at: performance.now(), x: x + cw / 2, sent: false }
+            if (!pickedBox) pickedBox = { id, at: performance.now(), x: box.x + box.w / 2, sent: false, ripped: false }
           })
         const chosen = pickedBox?.id === id
+        if (!chosen) {
+          ui.g.save()
+          ui.g.translate(x + cw / 2, y + 56 + (1 - land(intro)) * 56 - (over ? 6 : 0) + leave * 100)
+          ui.g.rotate(over ? (ui.mouse.x - x - cw / 2) * 0.002 : 0)
+          ui.g.globalAlpha = intro * (1 - leave)
+          drawBoxArt(ui.g, id, -44, -56, 88, 112)
+          ui.g.restore()
+        } else openBox(ui.g, id, t, x + cw / 2, y + 56, box)
         ui.g.save()
-        ui.g.translate(x + cw / 2, y + 56)
-        ui.g.translate(0, (1 - land(intro)) * 56 - (over ? 6 : 0) + leave * (chosen ? -18 : 100))
-        ui.g.rotate(over ? (ui.mouse.x - x - cw / 2) * 0.002 : 0)
-        ui.g.globalAlpha = intro * (chosen ? 1 : 1 - leave)
-        if (chosen) ui.g.drawImage(backCanvas(id), -22, -45 - 38 * leave, 44, 60)
-        drawBoxArt(ui.g, chosen ? id + '-open' : id, -44, -56, 88, 112)
-        ui.g.restore()
-        if (chosen && leave === 1 && pickedBox && !pickedBox.sent && !busy) {
-          pickedBox.sent = true
-          dealAt = performance.now()
-          void dispatch({ type: 'pickBox', box: id })
-        }
+        ui.g.globalAlpha = 1 - leave
         let ty = y + 118
         ui.text(s.name, x + cw / 2, ty, { align: 'center', bold: true, color: '#fff0b0', outline: FELT_TEXT.outline })
         ty += 13
         ty += ui.lines(s.deckText, x + cw / 2, ty, cw, { align: 'center', ...FELT_TEXT }) + 4
         ui.lines(s.twist, x + cw / 2, ty, cw, { align: 'center', color: '#fff0b0', outline: FELT_TEXT.outline })
-        if (id !== 'standard') ui.fiche(entry('hud', `box-${id}`), x, y, cw, box.h - 20)
+        ui.g.restore()
+        if (id !== 'standard' && !pickedBox) ui.fiche(entry('hud', `box-${id}`), x, y, cw, box.h - 20)
       })
+      if (pickedBox && t >= 1300 && !pickedBox.sent && !busy) {
+        pickedBox.sent = true
+        dealAt = performance.now()
+        void dispatch({ type: 'pickBox', box: pickedBox.id })
+      }
     },
     buttons: [],
   }
 }
 
-// the rows on the felt. click a row to keep or drop it, the compare dock adds up what you'd keep
+// the picked box: slides to the middle and grows (0-300ms), shakes (300-750), bursts open with scraps, its card
+// back rises out (750-1300)
+function openBox(g: CanvasRenderingContext2D, id: StarterId, t: number, fromX: number, fromY: number, box: { x: number; y: number; w: number; h: number }): void {
+  const go = land(progress(t, 300))
+  const cx = mix(fromX, box.x + box.w / 2, go)
+  const cy = mix(fromY, box.y + box.h / 2 - 20, go)
+  const size = mix(1, 1.35, go)
+  const shaking = t >= 300 && t < 750
+  if (t >= 300 && !pickedBox!.ripped) {
+    pickedBox!.ripped = true
+    sfx.rip()
+  }
+  const shake = shaking ? shakeAmount() * Math.sin(t / 25) * 4 * (0.4 + 0.6 * progress(t - 300, 450)) : 0
+  g.save()
+  g.translate(cx + shake, cy)
+  g.rotate(shake * 0.02)
+  g.scale(size, size)
+  const open = t >= 750
+  const rise = land(progress(t - 750, 450))
+  if (open) g.drawImage(backCanvas(id), -22, -45 - 50 * rise, 44, 60)
+  drawBoxArt(g, open ? id + '-open' : id, -44, -56, 88, 112)
+  if (t > 650 && t < 1100) {
+    const u = progress(t - 650, 450)
+    for (let i = 0; i < 6; i++) fit(g, 'pack/scrap/' + ((i % 4) + 1), { x: (i - 2.5) * (8 + 15 * u), y: -50 - 55 * u + 90 * u * u, w: 6, h: 8 })
+  }
+  g.restore()
+}
+
+// the rows on the felt, dealt out of the box. click the one row you don't want: it lifts off with a stamp, the
+// other three are your deck. click another and the toss moves. the compare dock adds up what you'd keep
 function draftPanel(): Panel {
   const me = v().me
   const rows = me.draft!.rows!
-  const picks = draftPicks ?? (draftPicks = new Set(rows.slice(0, DRAFT_PICKS).map((_, i) => i)))
-  const toggle = (i: number) => {
-    if (sweepAt !== null || (!still.matches && performance.now() - dealAt < 950)) return
-    if (picks.has(i)) picks.delete(i)
-    else picks.add(i)
-    sfx.select(picks.has(i))
+  const dealing = () => !still.matches && performance.now() - dealAt < 950
+  const toss = (i: number) => {
+    if (sweepAt !== null || dealing()) return
+    tossedRow = tossedRow === i ? null : i
+    if (tossedRow === null) sfx.select(true)
+    else sfx.fwip()
     render()
   }
-  docked = { offers: rows.filter((_, i) => picks.has(i)).flatMap(r => r.cards), dest: 'deck' }
+  const kept = rows.map((_, i) => i).filter(i => i !== tossedRow)
+  docked = { offers: tossedRow === null ? [] : kept.flatMap(i => rows[i].cards), dest: 'deck' }
   return {
     title: getStarter(me.starter!).name,
-    help: `Keep ${DRAFT_PICKS} rows. That's your ${DRAFT_PICKS * rows[0].cards.length} card deck.`,
+    help: `Toss one row. The other ${DRAFT_PICKS * rows[0].cards.length} cards are your deck.`,
     felt: true,
     docked: true,
     body: (ui, box) => {
@@ -857,41 +834,47 @@ function draftPanel(): Panel {
       const rowH = Math.floor((box.h - 20) / rows.length)
       const w = Math.min(40, Math.floor((box.w - (n - 1) * gap) / n), Math.floor(((rowH - 13) * 64) / 88))
       rows.forEach((row, i) => {
+        const out = tossedRow === i
         const y = box.y + i * rowH
-        const on = picks.has(i)
         const left = Math.round(box.x + (box.w - (row.cards.length * w + (row.cards.length - 1) * gap)) / 2)
-        ui.hit(box.x, y, box.w, rowH - 2, () => toggle(i))
-        ui.text(`${on ? '★ ' : ''}${row.label}`, left, y, {
+        const over = sweepAt === null && ui.hit(box.x, y, box.w, rowH - 2, () => toss(i))
+        const lift = out ? -3 : over ? -1 : 0
+        ui.text(out ? `Tossed · ${row.label}` : row.label, left, y + lift, {
           font: 'tiny',
-          color: on ? '#fff0b0' : FELT_TEXT.color,
+          color: out ? '#e07a6a' : over ? '#fff0b0' : FELT_TEXT.color,
           outline: FELT_TEXT.outline,
         })
         row.cards.forEach((c, j) => {
           const arrive = still.matches ? 1 : land(progress(ui.now - dealAt - (i * n + j) * 30, 250))
           const fly = sweepAt === null ? 0 : land(progress(ui.now - sweepAt - j * 12, 400))
-          const dx = mix(mix(pickedBox?.x ?? 320, left + j * (w + gap), arrive), on ? box.x : box.x + j * w, fly)
-          const dy = mix(mix(70, y + (on ? 11 : 13), arrive), on ? box.y + box.h - 18 : -80, fly)
+          const dx = mix(mix(pickedBox?.x ?? 320, left + j * (w + gap), arrive), out ? box.x + j * w : box.x, fly)
+          const dy = mix(mix(box.y + box.h / 2 - 40, y + 11 + lift, arrive), out ? -80 : box.y + box.h - 18, fly)
           if (arrive !== 1 || sweepAt !== null) {
-            const size = on ? mix(w,22,fly) : w
+            const size = out ? w : mix(w, 22, fly)
             ui.g.drawImage(cardCanvas(c), dx, dy, size, CARD_H(size))
-          } else ui.card(c, dx, dy, w, { picked: on, dim: !on, onClick: () => toggle(i) })
+          } else ui.card(c, dx, dy, w, { dim: out, onClick: () => toss(i) })
         })
+        if (out && sweepAt === null) {
+          const mid = left + (row.cards.length * (w + gap) - gap) / 2
+          fit(ui.g, 'hud/stamp/discard', { x: mid - 36, y: y + 6, w: 72, h: rowH - 10 })
+        }
       })
     },
     buttons: [
       {
-        label: `Keep these ${picks.size}/${DRAFT_PICKS}`,
+        label: 'Toss it',
         kind: 'go',
-        enabled: picks.size === DRAFT_PICKS,
+        enabled: tossedRow !== null,
         onClick: () => {
-          if (picks.size !== DRAFT_PICKS || sweepAt !== null || (!still.matches && performance.now() - dealAt < 950)) return
+          if (tossedRow === null || sweepAt !== null || dealing()) return
           const at = (sweepAt = performance.now())
+          sfx.shove()
           setTimeout(
             () => {
               if (sweepAt !== at || (!match && !online) || v().phase !== 'draft' || v().me.done) return
-              draftPicks = null
+              tossedRow = null
               closeCompare()
-              void dispatch({ type: 'draft', rows: [...picks].sort() })
+              void dispatch({ type: 'draft', rows: kept })
             },
             still.matches ? 0 : 500,
           )
