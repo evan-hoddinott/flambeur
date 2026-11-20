@@ -940,7 +940,6 @@ function packPanel(): Panel {
     title: entry('hud', 'pack-' + open.kind).name,
     felt: true,
     docked: p.settled,
-    help: p.settled ? 'Click a card to switch its pile.' : undefined,
     scrim: now => 0.7 * progress(now - p.at, 300) * (p.doneAt === null ? 1 : 1 - progress(now - p.doneAt, 400 + last * 50)),
     body: (ui, box) => {
       const g = ui.g
@@ -1290,7 +1289,7 @@ function binderPanel(): Panel {
   const total = [...binderPicked].reduce((sum, id) => sum + sellPrice(me.binder.find(c => c.id === id)!), 0)
   return {
     title: `Binder · ${me.binder.length}`,
-    help: me.binder.length ? `Pick cards, then sell them. STONKS: ${rule('hud', 'stonks', 0, { stonks: view_.stonks, hotMarket: me.sleeves.includes('hot_market') })}.` : 'Empty. Pulls you send to the binder land here.',
+    help: me.binder.length ? 'Pick cards, then sell them.' : 'Empty. Pulls you send to the binder land here.', // STONKS is on its board
     body: (ui, box) => {
       const w = 40
       grid(me.binder.length, { ...box, y: box.y + 6 }, w, 6, 14).forEach((at, i) => {
@@ -1383,7 +1382,7 @@ function gradingPanel(): Panel {
   }
   return {
     title: entry('hud', 'grading').name,
-    help: entry('hud', 'grading').text.map(plainText).join('. ') + '. One per shop.',
+    help: 'Pick a card to ship. One per shop.', // how grading works is on the window's Fiche
     body: (ui, box) => {
       const ids = Object.keys(SHIPPERS) as Shipper[]
       const bw = Math.floor((box.w - 8) / 3)
@@ -1525,11 +1524,9 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
 
   const merges = n > 0 && !!forgePlan(picked)
   const grindable = picked.filter(c => !c.bulk)
-  // nothing picked: the hand track and your plate's readout already say which hand and what to do
-  const hint = !n
-    ? ''
-    : merges ? 'Flamber merges them into a ★ card for your next hand. This hand scores 0.'
-    : `Play scores them. Flamber: ${rule('hud', 'flamber')}.`
+  // the tickets, their Fiches and the flamber tip say what each choice does. the column only says what you can't
+  // see elsewhere: that a flambé gives up this hand
+  const hint = merges ? 'This hand scores 0. The ★ card comes back next hand.' : ''
   const lock = (type: 'play' | 'flamber', grind: number | null) => {
     lastLocked = picked
     selected = new Set()
@@ -1585,12 +1582,11 @@ function renderTable(): void {
     slips = (['max', 'min'] as const).map(c => ({ label: c === 'max' && isArmed('max') ? 'Sure?' : push && c === 'max' ? 'Push' : BET_LABEL[c], price: b.options.includes(c) ? price(c) : b.why[c] ?? price(c), stamp: ask(c) && !isArmed('max') ? '' : c, kind: c, enabled: b.options.includes(c), onClick: c === 'max' ? confirmed('max', () => void dispatch({ type: 'bet', choice: c })) : () => {
       void dispatch({ type: 'bet', choice: c })
     } }))
-    const off = (['min', 'max'] as const).filter(c => b.why[c]).map(c => `${BET_LABEL[c]}: ${b.why[c]}.`).join(' ')
-    // the bet order, said once before the first bet (the 1er puck carries it after)
-    const order = !b.choices.length ? (me.bankroll === view_.others[0].bankroll ? 'You bet first (tied: it alternates).' : 'You bet first: more money goes first.') : ''
-    hint = [order, push ? `Last push: ${rule('hud', 'push')}.` : `Max: ${rule('hud', 'max')}.`, off].filter(Boolean).join(' ')
+    // the bet order, said once before the first bet (the 1er puck carries it after). what Max and Push do is on
+    // their tickets' Fiches, and why one is off is on its price chip
+    hint = !b.choices.length ? (me.bankroll === view_.others[0].bankroll ? 'You bet first (tied: it alternates).' : 'You bet first: more money goes first.') : ''
   } else if (view_.phase === 'spoils' && view_.spoils?.toPick === me.seat) {
-    hint = `Spoils: pick one for your deck. ${rule('hud', 'spoils', 1)}. ${rule('hud', 'spoils', 2)}.`
+    hint = 'Pick one for your deck.' // the band says who picks first, Skip's Fiche says what skipping pays
     docked = { offers: [], dest: 'deck' }
     announceOnce(`spoils:${view_.round}`, 'Le butin', rule('hud', 'spoils', 1))
     slips = [{ label: 'Skip', price: '+$1', kind: 'skip', enabled: true, onClick: () => void dispatch({ type: 'spoils', cardId: null }) }]
