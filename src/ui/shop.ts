@@ -19,9 +19,9 @@ import type { SeatView, ShopOfferView } from '../engine/match.ts'
 import * as sfx from './sound.ts'
 import { drawBand, runStrip } from './frame.ts'
 import { drawPanel, panelClick, panelHover, panelHoverAt, panelKey, panelOpen } from './panels.ts'
-import { drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, setDrawerHover, type DrawerThing } from './drawer.ts'
+import { bookTour, drawDrawer, drawerHoverAt, drawerKey, drawerOpen, drawerPointer, setDrawerHover, type DrawerThing } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
-import { drawTips, tip as teach } from './tips.ts'
+import { drawTips, guiding, tip as teach, tipClick, wasSeen } from './tips.ts'
 import { still as reducedMotion, frameGate, stageScale, flash as calm } from './prefs.ts'
 import { PAUSE_TAB, drawPause, openPause, pauseClick, pauseHoverAt, pauseOpen, pauseTab } from './pause.ts'
 import { cursorFor } from './cursor.ts'
@@ -302,7 +302,10 @@ function counterInsert(): void {
   g.translate(x, y)
   g.rotate(Math.sin(u * Math.PI) * .18)
   if (shopInsert.card) g.drawImage(cardCanvas(shopInsert.card), -12, -17, 24, 34)
-  else pin(insertFace(shopInsert.id), -12, -17)
+  else {
+    const s = sprite(insertFace(shopInsert.id))
+    g.drawImage(s.img, s.x, s.y, s.w, s.h, -12, -17, 24, 34) // the 48×68 face at half size, as small as the card it flies with
+  }
   pin(insertMark(shopInsert.id), 4, 0, .12)
   g.restore()
 }
@@ -433,6 +436,7 @@ function click(p: { x: number; y: number }): void {
 }
 
 function clicked(p: { x: number; y: number }): boolean {
+  if (tipClick(p)) return true // the fée talking, or her spotlight
   if (drawerPointer(p.x, p.y, true)) return drawerHoverAt() !== null
   if (panelOpen()) {
     const on = panelHoverAt(p) !== null
@@ -497,7 +501,7 @@ function frame(t: number): void {
   sales()
   drawDrawer(g, state.view, now)
   drawBand(g, now,state.view.me.shop?.open ? 76 : 195)
-  drawTips(g, drawerOpen() || paused)
+  drawTips(g, paused, drawerOpen())
   drawFiche(g)
   drawPause(g, mouse)
   if (paused) {
@@ -635,6 +639,7 @@ function draw(st: ShopState): void {
   plate(v)
   shelfBeat()
   rivalTag(v)
+  lessons(st)
   if (!lotto) {
     // above the offer, so it never lands on the action stack
     if (hover) fiche(offerEntry(hover.offer), hover.box, { above: true })
@@ -944,7 +949,6 @@ function offers(st: ShopState): { offer: ShopOfferView; box: { x: number; y: num
       return f ? opaque(f, ax, ay) : ax >= 0 && ay >= 0 && ax < art.width && ay < art.height
     }
     const body = hit(x - 5, SLOT.top - 8, w + 10, SLOT.h + 16, buy, mask)
-    if (f) teach('collectible', 'Collectibles sit in your case and trigger left to right.', { x: x - 5, y: SLOT.top - 8, w: w + 10, h: SLOT.h + 16 }, 'above')
     const tag = hit(center - 21, 294, 43, 17, buy)
     const over = body || tag
     const dt = Math.min(.025, (now - motion.time) / 1000)
@@ -1045,7 +1049,7 @@ function bottomBar(st: ShopState): void {
   const open: [number, Ticket][] = [
     [104, { key: 'restock', label: 'Restock', price: shop.restockPrice ? `$${shop.restockPrice}` : 'free', ...spend, enabled: st.canRestock, onClick: st.onRestock, fiche: 'restock' }],
   ]
-  if (shop.services.bulkBin) open.push([118, { key: 'bulk', label: 'Bin Bulk', price: shop.bulkInDeck ? `$${shop.bulkPrice}` : 'none', ...spend, enabled: st.canBinBulk, onClick: st.onBinBulk, fiche: 'bulk-bin' }])
+  if (shop.services.bulkBin) open.push([118, { key: 'bulk', label: 'Ashtray', price: shop.bulkInDeck ? `$${shop.bulkPrice}` : 'none', ...spend, enabled: st.canBinBulk, onClick: st.onBinBulk, fiche: 'bulk-bin' }])
   if (shop.services.grading) open.push([96, { key: 'grade', label: 'Grading', price: '$2+', ...spend, enabled: st.canGrade, onClick: st.onGrading, fiche: 'grading' }])
   const tickets: [number, number, Ticket][] = []
   let tx = 158
@@ -1059,6 +1063,40 @@ function bottomBar(st: ShopState): void {
     const id = t.fiche
     if (id) tip(() => entry('hud', id), x, 322, w, 30, true)
   }
+}
+
+// the tabac's lessons (docs/TUTORIAL.md), each the first time it's there, in the order they should come:
+// the first tag called each frame wins. la fée says them in the tutorial run, paper tags after
+function lessons(st: ShopState): void {
+  if (lotto) return
+  const v = st.view
+  const shop = v.me.shop!
+  teach('shop', ['Welcome to the tabac! Here your money is both your life and your shop money.', 'Buy what makes your deck stronger, but keep enough to bet and to pay Le Patron.', 'Leave goes back to the table when you are done.'], { x: 538, y: 322, w: 96, h: 30 }, 'above', { lead: true })
+  if (guiding() && wasSeen('shop')) bookTour()
+  if (shop.rolledOver) teach('salty', ['You have seen every collectible, so the buraliste is salty.', 'Everything costs 10% more from now on.'], { x: 530, y: 118, w: 98, h: 48 }, 'left')
+  if (st.patronPaid !== null) teach('patronPaid', ['Le Patron took his payment at the door.', 'The next one is bigger. His note under your plate says how much.'], { x: 86, y: LEDGER_Y, w: 70, h: 44 }, 'right')
+  for (const { slot, x, w } of offerLayout(shop.offers)) {
+    const o = shop.offers[slot]
+    if (o.sold) continue
+    const box = { x: x - 5, y: SLOT.top - 8, w: w + 10, h: SLOT.h + 16 }
+    if (o.type === 'pack') teach('packs', ['Packs! Buy one and rip it open for new cards.', 'Each pack leans to a lane, like pairs or flushes. Every card you pull is yours to keep.'], box, 'above')
+    if (o.type === 'collectible') teach('collectible', ['A collectible. It sits in your display case and fires on every hand.', 'They fire left to right, in the order you buy them, so the order matters.'], box, 'above')
+    if (o.type === 'sleeve') teach('pochette', ['This one is an upgrade that lasts the whole run.', 'Only big shops sell one, so think it over.'], box, 'above')
+  }
+  const scratch = shop.offers.findIndex(o => o.type === 'scratcher' && !o.sold)
+  if (scratch >= 0) teach('scratcher', ['Scratchers! Scratch one to win an insert.', 'Inserts wait up your sleeve and change your cards during a hand.'], { x: 410, y: 151, w: 40, h: 19 }, 'below')
+  teach('stonks', ['This chalkboard names a hot rank, suit or finish for today.', 'Binder cards that match it sell for more. You sell from your binder.'], { x: 508, y: 12, w: 124, h: 92 }, 'below')
+  teach('sign', ["The buraliste's sign: three quirks for this shop.", 'They bend his prices and what he likes. Hover each line to read it.'], { x: 530, y: 118, w: 98, h: 48 }, 'left')
+  // the service tickets, laid out like bottomBar
+  let tx = 158
+  teach('restock', ['Restock rerolls the shelf: packs, collectibles and scratchers.', 'It costs a little more each time.'], { x: tx, y: 322, w: 104, h: 30 }, 'above')
+  tx += 110
+  if (shop.services.bulkBin) {
+    teach('bulkbin', ['The Ashtray takes the Ash out of your deck, for a price.', 'Less Ash in the deck means better draws.'], { x: tx, y: 322, w: 118, h: 30 }, 'above')
+    tx += 124
+  }
+  if (shop.services.grading) teach('grading', ['The grading desk ships one card away for a round.', 'It comes back with a grade, and every step of Grade doubles a score. Safer shippers cost more.'], { x: tx, y: 322, w: 96, h: 30 }, 'above')
+  if (v.scout) teach('dossier', ['A big shop! The tag up here is your scouting report.', 'It shows the rival at the next Table: their lane, their case and the boss twist. Shop for that fight.'], { x: 520, y: 0, w: 112, h: 16 }, 'below')
 }
 
 // zone B: your plate, the duel's spot and look, directly above the bifold. le patron's note hangs off it
@@ -1088,7 +1126,7 @@ function marker(v: SeatView): void {
   const round = due.table >= 4 ? (v.lastRound ?? 12) : due.table * ROUNDS_PER_TABLE + 1
   text(`M${round}`, x + 54, y + 14, { font: 'tiny', color: '#5c4a36', align: 'right' })
   tip(() => entry('hud', 'marker', due.due), x, y, 58, 26)
-  teach('patron', `You owe Le Patron $${due.due}. Pay at the next big shop.`, { x, y, w: 58, h: 26 }, 'right')
+  teach('patron', [`You owe Le Patron $${due.due}. He collects at the door of the next big shop.`, "Can't pay him and the run is over. Keep some money back!"], { x, y, w: 58, h: 26 }, 'right')
 }
 
 const breath = () => 0.5 - 0.5 * Math.cos((now / 1200) * Math.PI * 2)

@@ -1,8 +1,10 @@
 // the rules columns the carnet's Hands page draws: poker hands (an example row, value/hype with your levels) on the
-// left, how a hand works on the right. the crumpled ball on the duel's rail opens that page
+// left, how a hand works on the right. the crumpled ball on the duel's rail opens that page.
+// and the How to play page: the four things a new player has to leave knowing (docs/TUTORIAL.md), each with a tiny
+// looping example
 import { faceCanvas } from './art.ts'
 import { drawText, measure, wrapText } from './font.ts'
-import { HYPE, VALUE } from './ink.ts'
+import { GRADE, HYPE, MONEY, VALUE } from './ink.ts'
 import { HAND_BASE, HAND_NAMES, HAND_TYPES, type HandType } from '../engine/hands.ts'
 import { LEVEL_HYPE, LEVEL_VALUE } from '../engine/scoring.ts'
 import type { Suit } from '../engine/cards.ts'
@@ -88,4 +90,90 @@ export function howColumn(g: CanvasRenderingContext2D, v: SeatView, x: number, y
     at += 10 + gap
   }
   return at - y
+}
+
+// ---------- how to play ----------
+
+type Lesson = { title: string; text: string; show: (g: CanvasRenderingContext2D, x: number, y: number, w: number, t: number) => void }
+
+// a 2s loop: which beat of n we're on
+const beat = (t: number, n: number, ms = 1400) => Math.floor(t / ms) % n
+
+const PLAY: Lesson[] = [
+  {
+    title: '1. Appraisal',
+    text: 'Each hand scores Value × Hype × 2^Grade. The higher Appraisal takes the hand, and 2 hands take the round.',
+    show: (g, x, y, w, t) => {
+      const hands = [[20, 2, 0], [35, 3, 1], [60, 5, 2]]
+      const [v, h, gr] = hands[beat(t, 3)]
+      const parts: [string, string][] = [[`Value ${v}`, VALUE.paper], [' × ', FADED], [`Hype ${h}`, HYPE.paper], [' × ', FADED], [`2^${gr}`, GRADE.paper], [' = ', FADED], [String(v * h * 2 ** gr), INK]]
+      let px = x + w / 2 - parts.reduce((n, [p]) => n + measure(p, 'sans') + 1, 0) / 2
+      for (const [p, color] of parts) {
+        drawText(g, p, px, y, { font: 'sans', color, bold: color === INK })
+        px += measure(p, 'sans') + 1
+      }
+    },
+  },
+  {
+    title: '2. Your bankroll is your life',
+    text: 'The same money pays for the shop, your bets and Le Patron. Hit $0 and the run is over. Interest pays +$1 for every $10 you hold.',
+    show: (g, x, y, w, t) => {
+      const money = [20, 18, 26, 14][beat(t, 4)]
+      const why = ['start', 'the ante', 'won the pot', 'went shopping'][beat(t, 4)]
+      for (let i = 0; i < money / 2; i++) {
+        g.fillStyle = i % 2 ? MONEY.paper : '#2e6a33'
+        g.fillRect(x + 4 + i * 6, y + 2, 5, 7)
+      }
+      drawText(g, `$${money}`, x + w - 70, y, { font: 'sans', color: MONEY.paper, bold: true })
+      drawText(g, why, x + w - 44, y + 1, { font: 'tiny', color: FADED })
+    },
+  },
+  {
+    title: '3. Min, Max and Flamber',
+    text: 'Min bets the ante. Max bets more on yourself: win the round and the House pays it. Flamber throws a hand (no bet) to burn a Pair into a ★ card for good.',
+    show: (g, x, y, w, t) => {
+      const tickets: [string, string][] = [['Min', '#3a8040'], ['Max', '#a82a38'], ['Flamber', '#e8501a']]
+      const on = beat(t, 3)
+      const tw = Math.floor((w - 12) / 3)
+      tickets.forEach(([label, color], i) => {
+        const tx = x + i * (tw + 6)
+        const up = i === on ? -2 : 0
+        g.fillStyle = color
+        g.globalAlpha = i === on ? 1 : 0.45
+        g.fillRect(tx, y + up, tw, 11)
+        g.globalAlpha = 1
+        drawText(g, label, tx + tw / 2, y + 1 + up, { font: 'sans', color: '#f6ecd2', align: 'center' })
+      })
+    },
+  },
+  {
+    title: '4. Deck or binder',
+    text: 'Every card you pull goes to your deck (you play it) or your binder (you sell it). The binder is one way.',
+    show: (g, x, y, w, t) => {
+      const u = (t % 1400) / 1400
+      const toDeck = beat(t, 2) === 0
+      drawText(g, 'DECK', x + 10, y + 1, { font: 'tiny', color: BURGUNDY })
+      drawText(g, 'BINDER', x + w - 10, y + 1, { font: 'tiny', color: BURGUNDY, align: 'right' })
+      const ease = u < 0.5 ? 0 : Math.min(1, (u - 0.5) * 3)
+      const cx = x + w / 2 + (toDeck ? -1 : 1) * ease * (w / 2 - 56)
+      const face = faceCanvas(toDeck ? 5 : 13, toDeck ? 'S' : 'H')
+      g.drawImage(face, 0, 0, face.width, face.height, Math.round(cx - 12), y - 14, 24, 34)
+    },
+  },
+]
+
+// two lessons a leaf. side 0 = the left leaf. t = ms, for the examples
+export function playColumn(g: CanvasRenderingContext2D, side: 0 | 1, x: number, y: number, w: number, t: number): void {
+  let at = y
+  for (const l of PLAY.slice(side * 2, side * 2 + 2)) {
+    drawText(g, l.title, x, at, { font: 'sans', color: BURGUNDY, bold: true })
+    at += 14
+    for (const row of wrapText(l.text, w, 'sans')) {
+      drawText(g, row, x, at, { font: 'sans', color: INK })
+      at += 10
+    }
+    at += 10
+    l.show(g, x, at, w, t)
+    at += 34
+  }
 }

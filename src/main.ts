@@ -10,8 +10,8 @@ import { randomSeed } from './engine/rng.ts'
 import { autoKeep, forgePlan, type ForgePlan } from './engine/forge.ts'
 import { getRival } from './engine/rivals.ts'
 import {
-  DIFFICULTIES, botAction, canGrade, defaultToDeck, newMatch, pending, problem, step, view,
-  type Action, type BetChoice, type Difficulty, type Event, type Match, type SeatView,
+  DIFFICULTIES, bestPlay, botAction, canGrade, defaultToDeck, legal, newMatch, pending, problem, step, view,
+  type Action, type BetChoice, type Difficulty, type Event, type Match, type SeatView, type StepResult,
 } from './engine/match.ts'
 import { api, connect, type PlayerInfo, type ServerMsg, type Status } from './net.ts'
 import type { Appraisal } from './engine/scoring.ts'
@@ -28,12 +28,12 @@ import { loadLogo } from './ui/logo.ts'
 import { loadTitle, panTo, showTitle, type TitleOnline } from './ui/title.ts'
 import { albumSeen, ALBUM_SETS, recordPull } from './ui/album.ts'
 import { spoilPicked } from './ui/spoils.ts'
-import { showBareTable, rivalBusted, showDuel, insertUsed, countUp as duelCountUp, type HandSort, type Slip } from './ui/duel.ts'
+import { CARD_LESSONS, flambeBusy, showBareTable, rivalBusted, showDuel, insertUsed, countUp as duelCountUp, type HandSort, type Slip } from './ui/duel.ts'
 import { lottoOpen, showShop, shelfCenter, gradingReturn, clearGradingReturn, dropCigarette, shopInsertUsed, keeperSays, type Scratch } from './ui/shop.ts'
 import { setPanel, grid, fit, CARD_H, type Panel, type Ui } from './ui/panels.ts'
 import { closeCompare, closeDrawer, openDrawer, setCompareHover, setDrawerActions, setGlossary, type Compare } from './ui/drawer.ts'
 import { setKeywords } from './ui/fiche.ts'
-import { tip } from './ui/tips.ts'
+import { guiding, markSeen, resetTips, setGuide, tip } from './ui/tips.ts'
 import { announce, bandShowing, type Tone } from './ui/frame.ts'
 import { onPref, pace, pref, setPref, shake as shakeAmount } from './ui/prefs.ts'
 import { pauseOpen, setPauseHooks } from './ui/pause.ts'
@@ -132,6 +132,7 @@ async function dispatch(action: Action): Promise<void> {
     if (before && action.type === 'spoils') spoilPicked(before, action.cardId, !!before.spoils?.picks.length)
     match = res.match
     onEvents(res.events.filter(e => e.to === ME || e.to === 'all').map(e => e.event))
+    if (action.type === 'flamber' || action.type === 'forgeKeep') await burnt()
     await runBots()
   } finally {
     busy = false
@@ -141,6 +142,20 @@ async function dispatch(action: Action): Promise<void> {
 
 // a pause you can watch, or skip with a click, space or enter
 let skipBeat: (() => void) | null = null
+// your flambé burns the moment it locks (duel.ts). the rival's turn and the reveal wait for it, never more than 8s
+// (a hidden tab stops drawing, so the burn would never end)
+function burnt(): Promise<void> {
+  render()
+  const t0 = performance.now()
+  return new Promise(done => {
+    const poll = setInterval(() => {
+      if (flambeBusy() && performance.now() - t0 < 8000) return
+      clearInterval(poll)
+      done()
+    }, 50)
+  })
+}
+
 function beat(ms: number): Promise<void> {
   ms /= pace()
   return new Promise(done => {
@@ -498,12 +513,14 @@ async function loadTitleBoard(): Promise<void> {
 // the first run of a visit goes fullscreen (a click started it, so the browser allows it). leave it and it stays left
 let wentFullscreen = false
 
-function startRun(seed: string, autoplay = false): void {
+// autoplay: the bot style that plays your seat (dev skips), false = you play
+function startRun(seed: string, autoplay: string | false = false): void {
   if (!wentFullscreen && !QUICK && !autoplay && !document.fullscreenElement) {
     wentFullscreen = true
     void document.documentElement.requestFullscreen?.().catch(() => {})
   }
   run++
+  setGuide(false)
   armed = null
   announced = new Set()
   clearGradingReturn()
@@ -526,7 +543,7 @@ function startRun(seed: string, autoplay = false): void {
   boardAsked = false
   // dev only: ?quick&wild makes the rival bet at random, so folds and flambés come up fast for testing
   const wild = QUICK && new URLSearchParams(location.search).has('wild') ? { style: 'random' } : {}
-  match = newMatch({ mode: 'solo', seed, seats: [{ kind: 'human', name: 'You', ...(autoplay ? { style: 'house' } : {}) }, { kind: 'bot', name: 'Rival', difficulty, ...wild }] })
+  match = newMatch({ mode: 'solo', seed, seats: [{ kind: 'human', name: 'You', ...(autoplay ? { style: autoplay } : {}) }, { kind: 'bot', name: 'Rival', difficulty, ...wild }] })
   render()
 }
 
@@ -558,6 +575,7 @@ function abandonRun(): void {
   boardAsked = false
   setPanel(null)
   closeDrawer()
+  setGuide(false)
   if (online) leaveOnline()
   else renderTitle()
 }
@@ -580,10 +598,35 @@ onPref(key => {
 
 function firstRun(): void {
   difficulty = 'easy'
-  startRun(FIRST_SEED)
+  // dev only: ?first&shop plays the tutorial seed for you (house bot style) up to its first shop, ?first&big up to its
+  // big shop, ?first&boss up to the round 3 boss deal, ?first&lose plays one card and bets Max every hand until it busts,
+  // to test a lesson deep in the run without playing up to it
+  const q = new URLSearchParams(location.search)
+  const skipTo = import.meta.env.DEV ? (['big', 'shop', 'boss', 'lose'] as const).find(k => q.has(k)) ?? null : null
+  startRun(FIRST_SEED, skipTo ? 'house' : false)
+  // the tutorial (docs/TUTORIAL.md): la fée verte teaches every tag again, the forced first hand says the goal.
+  // a dev skip keeps the tags already seen, so a lesson deep in the run can be tested by itself
+  if (!skipTo) resetTips()
+  markSeen('goal', 'preview')
+  setGuide(true)
   let m = match!
   m = step(m, ME, { type: 'pickBox', box: 'classic' }).match
   m = step(m, ME, { type: 'draft', rows: autoDraft(m.players[ME].draft!.rows!) }).match
+  const there = () =>
+    skipTo === 'boss' ? m.phase === 'deal' && m.round >= 3
+    : skipTo === 'lose' ? false
+    : m.phase === 'shop' && m.round >= 2 && (skipTo !== 'big' || m.players[ME].shop?.kind === 'big')
+  while (skipTo && m.phase !== 'over' && !there()) {
+    const seat = pending(m)[0]
+    let a = botAction(m, seat)
+    if (skipTo === 'lose' && seat === ME) {
+      if (a.type === 'play' || a.type === 'flamber') a = { type: 'play', cardIds: [a.cardIds.at(-1)!] }
+      if (a.type === 'bet' && legal(m, ME).some(l => l.type === 'bet' && l.choice === 'max')) a = { type: 'bet', choice: 'max' }
+    }
+    const r = step(m, seat, a)
+    m = r.match
+    skipped(r.events)
+  }
   match = m
   render()
 }
@@ -591,7 +634,7 @@ function firstRun(): void {
 // dev only: ?quick drafts and shops for you (house bot style) straight to the first deal, for testing the table.
 // ?quick&shop plays on (house bot style) until the round 2 shop, for testing the tabac. ?quick&big: the first big shop
 function quickStart(): void {
-  startRun(randomSeed(), true)
+  startRun(randomSeed(), 'house')
   let m = match!
   const q = new URLSearchParams(location.search)
   const big = q.has('big')
@@ -600,10 +643,23 @@ function quickStart(): void {
   const going = () => toShop ? m.phase !== 'over' && !atShop() : m.phase === 'draft' || m.phase === 'shop'
   while (going()) {
     const seat = pending(m)[0]
-    m = step(m, seat, botAction(m, seat)).match
+    const r = step(m, seat, botAction(m, seat))
+    m = r.match
+    skipped(r.events)
   }
   match = m
   render()
+}
+
+// a dev skip's events: only what's read after it, never onEvents (no sounds, holds or announcements for the
+// hands it played). the best appraisal for the run's receipt, and le patron's payment at the big shop door,
+// so his paid-at-the-door lesson shows
+function skipped(events: StepResult['events']): void {
+  for (const { to, event: e } of events) {
+    if (to !== ME && to !== 'all') continue
+    if (e.kind === 'showdown' && e.showdown.mine && e.showdown.mine.total > best.total) best = { total: e.showdown.mine.total, hand: handLabel(e.showdown.mine) }
+    if (e.kind === 'patron' && e.seat === ME) patronPaid = e.paid ? e.due : null
+  }
 }
 
 // ---------- render: one switch on the phase ----------
@@ -946,6 +1002,7 @@ function packPanel(): Panel {
     body: (ui, box) => {
       const g = ui.g
       const t = still.matches ? Math.max(ui.now - p.at, flipStart(last) + 900) : ui.now - p.at
+      if (!p.settled) tip('rip', ['Rip! The cards flip one by one.', 'The last one is held back, because it can be a rare. Click to hurry the rest along.'], { x: box.x + box.w / 2 - 60, y: box.y + 20, w: 120, h: 120 }, 'above')
       const cx = box.x + box.w / 2
       const cy = box.y + box.h * 0.43
       if (t < fanAt + 500) {
@@ -1067,6 +1124,8 @@ function packPanel(): Panel {
         }
         if (p.settled && p.doneAt === null) {
           if (i === 0) tip('deckbinder', 'Click to switch. Deck cards get played, Binder cards get sold.', { x: x - w / 2, y: y - CARD_H(w) / 2, w, h: CARD_H(w) + 12 }, 'below')
+          const lesson = CARD_LESSONS.find(l => l.test(c))
+          if (lesson) tip(lesson.id, lesson.lines, { x: x - w / 2, y: y - CARD_H(w) / 2, w, h: CARD_H(w) }, 'above')
           ui.card(c, x - w / 2, y - CARD_H(w) / 2, w, {
             tag: p.discoveries.has(c.id) ? 'New' : undefined,
             onClick: () => {
@@ -1321,6 +1380,7 @@ function binderPanel(): Panel {
     title: `Binder · ${me.binder.length}`,
     help: me.binder.length ? 'Pick cards, then sell them.' : 'Empty. Pulls you send to the binder land here.', // STONKS is on its board
     body: (ui, box) => {
+      if (me.binder.length) tip('binder', ['Your binder: the cards you kept out of your deck.', 'This is the only place you can sell from. Cards that match the chalkboard in the shop sell for more.'], box, 'above')
       const w = 40
       grid(me.binder.length, { ...box, y: box.y + 6 }, w, 6, 14).forEach((at, i) => {
         const c = me.binder[i]
@@ -1414,6 +1474,7 @@ function gradingPanel(): Panel {
     title: entry('hud', 'grading').name,
     help: 'Pick a card to ship. One per shop.', // how grading works is on the window's Fiche
     body: (ui, box) => {
+      tip('shippers', ['Pick a shipper. La Poste is cheap but your card can come back damaged.', 'Chronopost is safe. The Fourgon blindé grades twice and keeps the better grade.'], { x: box.x, y: box.y, w: box.w, h: 54 }, 'below')
       const ids = Object.keys(SHIPPERS) as Shipper[]
       const bw = Math.floor((box.w - 8) / 3)
       ids.forEach((id, i) => {
@@ -1515,6 +1576,39 @@ function confirmed(kind: 'max' | 'forge', go: () => void): () => void {
   }
 }
 
+// the tutorial's forced first hand (docs/TUTORIAL.md): your best hand, then Play, then Max. the fée spotlights
+// each one and only it works. on the first run's seed that's a 9–K Straight, which beats the rival's Full House
+// and opens a round 1 knockout. null once hand 1 of round 1 is locked and bet, or outside the tutorial
+type Lesson = { id: string; lines: string[]; cards?: number[]; slip?: 'lock' | 'max'; want: number[] }
+
+function lessonNow(view_: SeatView): Lesson | null {
+  if (!guiding() || !match || view_.round !== 1 || view_.hands?.hand !== 1) return null
+  const me = view_.me
+  if (view_.phase === 'deal' && !me.locked && !me.forge) {
+    const best = bestPlay(match, match.players[ME])
+    const want = best.played.map(c => c.id)
+    if (!want.every(id => selected.has(id))) {
+      const cards = [...best.played].sort((a, b) => b.rank - a.rank).map(c => rankLabel(c.rank)).join(' ')
+      return { id: 'lesson-pick', want, cards: want, lines: [
+        "Bonsoir! I'm La Fée Verte. Let me show you how this table works.",
+        'A round is up to 3 hands against your rival. Win 2 hands and the pot is yours.',
+        `Your best poker hand here is a ${HAND_NAMES[best.est.hand]}: ${cards}. Click those ${want.length === 1 ? 'card' : `${want.length} cards`}.`,
+      ] }
+    }
+    return { id: 'lesson-play', want, slip: 'lock', lines: [
+      'Your plate reads Value × Hype. Multiply them: that is the start of your Appraisal.',
+      "Play locks your cards in. Your rival locks theirs face down, so you can't see them.",
+    ] }
+  }
+  if (view_.phase === 'bet' && view_.bet?.toAct === me.seat && view_.bet.stage !== 'push' && view_.bet.options.includes('max'))
+    return { id: 'lesson-bet', want: [], slip: 'max', lines: [
+      'Now the bet, before anyone reveals. Min just pays the ante.',
+      'Max bets more on yourself. Win the round and the House pays it, lose and your rival takes it.',
+      'Your hand is a strong one. Go on, bet Max!',
+    ] }
+  return null
+}
+
 function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
   const ids = [...selected] // click order, which photocopie reads (the first becomes the second)
   const picked = me.hand.filter(c => selected.has(c.id))
@@ -1556,7 +1650,7 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
   const grindable = picked.filter(c => !c.bulk)
   // the tickets, their Fiches and the flamber tip say what each choice does. the column only says what you can't
   // see elsewhere: that a flambé gives up this hand
-  const hint = merges ? 'This hand scores 0. The ★ card comes back next hand.' : ''
+  const hint = merges ? 'This hand scores 0 and skips the bet. The ★ card comes back next hand.' : ''
   const lock = (type: 'play' | 'flamber', grind: number | null) => {
     lastLocked = picked
     selected = new Set()
@@ -1622,6 +1716,13 @@ function renderTable(): void {
     slips = [{ label: 'Skip', price: '+$1', kind: 'skip', enabled: true, onClick: () => void dispatch({ type: 'spoils', cardId: null }) }]
   } else hint = `Waiting on ${rivalFace().name}…`
 
+  // the forced first hand: only the ticket the fée points at works, and Play only with exactly the Pair
+  const lesson = settled ? null : lessonNow(view_)
+  if (lesson) {
+    const exact = selected.size === lesson.want.length && lesson.want.every(id => selected.has(id))
+    slips = slips.map(s => ({ ...s, enabled: s.enabled && s.kind === (lesson.slip ?? 'lock') && (s.kind !== 'lock' || exact) }))
+  }
+
   const deadline = online ? online.deadlines[me.seat] : null
   const face = rivalFace()
   showDuel(app, {
@@ -1636,6 +1737,7 @@ function renderTable(): void {
     tally,
     counting,
     selected,
+    lesson,
     lastLocked,
     slips,
     hint,
@@ -1722,6 +1824,7 @@ function forgePanel(plan: ForgePlan): Panel {
     title: `${name} holds ${plan.tier} trait${plan.tier > 1 ? 's' : ''}`,
     help: `Pick ${plan.tier} to keep. The rest burn off.`,
     body: (ui, box) => {
+      tip('traits', ['Each hand type gives its own trait when you flamber it.', 'A ★ card holds one trait per star. Pick the ones that fit your deck.'], box, 'above')
       const w = 34
       const spots = grid(plan.merged.length, box, w, 4)
       plan.merged.forEach((c, i) => ui.card(c, spots[i].x, spots[i].y, w))
@@ -1762,6 +1865,22 @@ function forgePanel(plan: ForgePlan): Panel {
 let dailyBoard: DailyBoard | null = null // the server's board for the results, fetched once per run end
 let boardAsked = false
 let receiptAt: number | null = null
+let lostQuip = ''
+
+const QUIPS = [
+  'Ah, la vie... The cards were cruel tonight.',
+  "Don't cry into your absinthe, mon chou.",
+  'Pas de chance! The next deal will be kinder.',
+  'Even the best flambeurs go home with empty pockets sometimes.',
+  'Ouf. Le Patron is already counting your chips.',
+]
+
+// what to try next time, from how the run was lost
+function lostLesson(alive: boolean, solo: boolean): string {
+  if (alive && solo) return "Le Patron wanted his money. Read his note before you shop, and keep that much back."
+  if (alive) return 'So close! Your rival just held more chips at the end.'
+  return 'Out of money! Bet Max when your hand is strong, Min when it is not. And interest pays you to save.'
+}
 let receiptLine = -1
 
 // the music follows the screen (docs/MUSIC.md §5): le tabac in the shop and after a won run, la fée verte in boss
@@ -1782,6 +1901,7 @@ function overPanel(): Panel {
   const won = res.winner === me.seat
   if (receiptAt === null) {
     receiptAt = performance.now()
+    lostQuip = QUIPS[Math.floor(Math.random() * QUIPS.length)]
     if (won) sfx.fanfare()
     else sfx.busted()
   }
@@ -1826,6 +1946,8 @@ function overPanel(): Panel {
       const ink = '#2e2320'
       const faded = '#5c4a36'
       const age = still.matches ? 5000 : ui.now - receiptAt!
+      // la fée comes back for every lost run, Balatro-style: a quip, then what to try next time (docs/TUTORIAL.md)
+      if (!won && age > 900) tip(`lost:${run}`, [lostQuip, lostLesson(me.alive, solo)], { x: 8, y: 236, w: 4, h: 40 }, 'right', { fee: true, again: true })
       if (!still.matches && age < 550) {
         if (won) fit(ui.g, 'fx/leak', { x: -160 + 800 * progress(age, 550), y: 0, w: 160, h: 360 })
         else {
@@ -1966,10 +2088,12 @@ if (QUICK) quickStart()
 else if (new URLSearchParams(location.search).has('first')) firstRun() // also the golden-path demo run
 else renderTitle()
 
-// dev only: ?quick&auto plays your seat with the bot through the real ui, a full run with every screen drawn
+// dev only: ?quick&auto plays your seat with the bot through the real ui, a full run with every screen drawn.
+// &burn flambés every pair it would have played, to watch the flambé beat in a real run
 if (QUICK && new URLSearchParams(location.search).has('auto')) {
+  const burn = new URLSearchParams(location.search).has('burn')
   setInterval(() => {
-    if (busy || counting || !match) return
+    if (busy || counting || !match || flambeBusy()) return
     if (match.phase === 'over') {
       document.body.dataset.autoDone = '1'
       return
@@ -1979,6 +2103,12 @@ if (QUICK && new URLSearchParams(location.search).has('auto')) {
       tallyHold = false
       return render()
     }
-    if (pending(match).includes(ME)) void dispatch(botAction(match, ME))
+    if (!pending(match).includes(ME)) return
+    let a = botAction(match, ME)
+    if (burn && a.type === 'play') {
+      const hand = view(match, ME).me.hand
+      if (forgePlan(a.cardIds.map(id => hand.find(c => c.id === id)!))) a = { type: 'flamber', cardIds: a.cardIds, grind: null }
+    }
+    void dispatch(a)
   }, 120)
 }
