@@ -107,7 +107,7 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
 
 ## How to work here
 
-- **Big changes are welcome** (Evan, Nov 18). Don't shrink a redesign, rewrite or engine change because of the deadline, and don't steer toward the "safe" option for scope reasons. Evan will put in the extra work. The one exception is **Friday Nov 20 (demo day)**: no big changes that day, only fixes, polish and the golden-path demo run.
+- **Big changes are welcome** (Evan, Nov 18). Don't shrink a redesign, rewrite or engine change because of the deadline, and don't steer toward the "safe" option for scope reasons. Evan will put in the extra work. That holds through demo day and up to launch.
 - **The engine stays pure and deterministic.**
   - All randomness goes through `Rng`.
   - Per-round streams come from `roundRng` and the deck's `seed:round:pile` stream, so a shop restock never changes a deal. The same seed plus the same picks must replay the same run.

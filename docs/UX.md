@@ -236,8 +236,6 @@ These are rule and name changes, so update DESIGN.md in the same change.
 6. Canvas rebuilds (§8).
 7. Final carnet art (done Nov 18), the flight and cover swing, and sounds. Rules paper art: the crumpled ball, the uncrumple frames and the sheet.
 
-Demo day (Fri Nov 20) is fixes only, so anything from steps 4–7 that isn't in by Thursday night waits.
-
 ## 12. Interfaces (so parallel pieces snap together)
 
 Scope: **everything in §0–§10 except teaching beyond the rules paper and the carnet (no first-encounter tags, no buraliste lines, no labels toggle) and final art.** The art is placeholders registered in `src/ui/placeholders.ts`, and another model draws it later.

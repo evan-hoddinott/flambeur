@@ -308,7 +308,7 @@ src/ui/music.ts             the music player (MUSIC.md): synced loops, crossfade
 
 ## 9. Build order
 
-Tonight (Thu Nov 19). Friday is demo day: levels and fixes only.
+Tonight (Thu Nov 19).
 
 | # | What | Done when |
 |---|---|---|
