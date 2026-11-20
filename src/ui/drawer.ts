@@ -1,13 +1,15 @@
-import { still } from './motion.ts'
-import { creak, rip } from './sound.ts'
-// the drawer (UX.md §3): a leather bifold half off the left edge, the same in every scene. its tabs peek out with live
-// counts, a click or D/B/S/V/? swings it open in the middle as one tabbed viewer, and compare mode docks it small
-// beside an offer. stage units (640×360), drawn by whichever scene is up
+import { mix, still } from './motion.ts'
+import { creak, rip, thunk } from './sound.ts'
+// the drawer (UX.md §3): a worn leather carnet poking out of the bottom-left corner, the same in every scene. its
+// index tabs stick out with live counts, hover pulls it into view, a click or D/B/S/V/? flies it to the middle and
+// swings it open as one tabbed viewer, and compare mode docks it small beside an offer. stage units (640×360)
 import { cardCanvas, sprite } from './art.ts'
 import { collectible, drawCollectible } from './collectibles.ts'
 import { drawText, measure, richSize, richText, wrapText, type TextStyle } from './font.ts'
 import { insertFace } from './placeholders.ts'
 import { handsColumn, howColumn } from './rules.ts'
+import { lang, setLang } from './lang.ts'
+import { setTips, tipsOn } from './tips.ts'
 import { SUITS, SUIT_GLYPH, cardValue, rankLabel, type Card } from '../engine/cards.ts'
 import { deckDelta } from '../engine/compare.ts'
 import { getDef } from '../engine/collectibles.ts'
@@ -46,9 +48,6 @@ const RED = '#a82a38'
 const GOLD = '#e8c260'
 const BRASS = '#c99a3a'
 const FLAME = '#a8260a'
-const LEATHER = '#6b4a1a'
-const LEATHER_DARK = '#3d2a10'
-const LEATHER_LIGHT = '#9c7028'
 
 const TABS: { id: Tab; name: string; en: string; key: string; ink: string }[] = [
   { id: 'etui', name: 'Étui', en: 'Deck', key: 'D', ink: RED },
@@ -58,10 +57,21 @@ const TABS: { id: Tab; name: string; en: string; key: string; ink: string }[] = 
   { id: 'carnet', name: 'Carnet', en: 'Rules', key: '?', ink: '#d04a4e' },
 ]
 
-// closed peek on the left edge, the open book in the middle, the compare dock on the left
-const PEEK = { x: -14, y: 204, tabW: 46, tabH: 23 }
-const SPINE = 320
-const LEAF = { w: 268, h: 266, top: 62 }
+// the carnet sits in the bottom-left corner, tilted and mostly off-stage. hover pulls it into view, a click flies
+// it to the middle and swings the cover open. poses are the cover's top-left corner, in stage units
+const BOOK = 80 // the closed carnet's face is 80×80 (plus 4px of page block, art/duel/booklet.py)
+const REST = { x: -42, y: 300, rot: -0.15 }
+const OUT = { x: 8, y: 262, rot: 0 }
+// its index tabs: how far each one sticks out of the fore-edge. they've never sat flush
+const SLIP = { y: 6, step: 14, h: 13, w: 48, edge: 84 }
+const SLIP_REST = [7, 10, 6, 9, 8]
+const SLIP_OUT = [27, 29, 26, 28, 27]
+// the open book: the cover lands on the right leaf, then swings over the spine to become the left leaf
+const SPINE = 312
+const LEAF = { w: 268, h: 266, top: 50 }
+const GROW = LEAF.w / BOOK
+const BIG_AT = 0.95 // past this far into the flight, the big art takes over from the small carnet
+const TAB = { w: 64, h: 40, out: 52, top: 14, step: 48 }
 const DOCK = { x: 6, y: 34, w: 196, h: 296 }
 
 // ---------- state ----------
@@ -88,14 +98,25 @@ let pageTurnAt = -Infinity
 let carnetPage: 'hands' | 'glossary' = 'hands'
 let glossPage = 0
 
-// one-number springs: open slides it in, swing turns the right leaf on the spine, peek pops it out on hover
+let lastTab: Tab = 'etui' // a click on the cover opens where you left off
+let creaked = false
+
+// one-number springs: out pulls the carnet from the corner on hover, slide flies it to the middle,
+// swing turns the cover on the spine (-1 shut, 1 open), band slips the elastic off, slips are the tabs
 type Spring = { at: number; vel: number }
+const out: Spring = { at: 0, vel: 0 }
 const slide: Spring = { at: 0, vel: 0 }
 const swing: Spring = { at: -1, vel: 0 }
-const peek: Spring = { at: 0, vel: 0 }
+const band: Spring = { at: 0, vel: 0 }
 const dock: Spring = { at: 0, vel: 0 }
+const slips: Spring[] = SLIP_REST.map(at => ({ at, vel: 0 }))
 
 function chase(s: Spring, target: number, dt: number, stiff = 170): void {
+  if (still.matches) {
+    s.at = target
+    s.vel = 0
+    return
+  }
   const damp = 2 * Math.sqrt(stiff) * 0.6 // under-damped a little, for the overshoot
   s.vel += (stiff * (target - s.at) - damp * s.vel) * dt
   s.at += s.vel * dt
@@ -109,9 +130,10 @@ export function openDrawer(t: Tab, c?: Compare): void {
     compare = c
     return
   }
-  if (tab === null) { swing.at = -1; creak() }
+  if (tab === null && slide.at < 0.02) thunk() // the elastic snaps off
   if (tab !== null && tab !== t) { pageTurnAt=performance.now(); rip(.035) }
   tab = t
+  lastTab = t
 }
 
 // closes the full viewer first, and the compare dock when nothing else is open
@@ -164,24 +186,53 @@ export function drawerKey(key: string): boolean {
   return true
 }
 
-// the tab under a point: the peek's tabs when closed, the tab row when open
-function drawerHit(x: number, y: number): Tab | null {
-  if (tab !== null) {
-    for (const [i, t] of TABS.entries()) {
-      const r = topTab(i)
-      if (inside(x, y, r)) return t.id
-    }
-    return null
+// where the carnet is: the corner pose (rest, or pulled out by hover) on its way to the middle as it opens.
+// s is its scale, 1 in the corner and GROW when it's landed on the right leaf
+function pose(): { x: number; y: number; rot: number; s: number } {
+  const k = slide.at
+  const x = mix(mix(REST.x, OUT.x, out.at), SPINE, k)
+  const y = mix(mix(REST.y, OUT.y, out.at), LEAF.top, k)
+  return { x, y, rot: mix(mix(REST.rot, OUT.rot, out.at), 0, Math.min(1, k)), s: 1 + (GROW - 1) * k }
+}
+
+// a stage point in the carnet's own pixels (its cover's top-left is 0,0)
+function local(x: number, y: number): { x: number; y: number } {
+  const p = pose()
+  const half = (BOOK * p.s) / 2
+  const dx = x - p.x - half
+  const dy = y - p.y - half
+  const c = Math.cos(-p.rot)
+  const s = Math.sin(-p.rot)
+  return { x: (dx * c - dy * s) / p.s + BOOK / 2, y: (dx * s + dy * c) / p.s + BOOK / 2 }
+}
+
+// the index tab under a stage point, on the closed carnet
+function slipAt(x: number, y: number): number | null {
+  const l = local(x, y)
+  for (let i = 0; i < TABS.length; i++) {
+    const top = SLIP.y + i * SLIP.step
+    if (l.x >= SLIP.edge - 2 && l.x <= SLIP.edge + slips[i].at && l.y >= top && l.y < top + SLIP.h) return i
   }
-  if (compare) return null
-  for (const [i, t] of TABS.entries()) if (inside(x, y, peekTab(i, 10))) return t.id
   return null
+}
+
+// the closed carnet under a stage point: cover, papers sticking out the top, pencil, ribbon, tabs
+function overBook(x: number, y: number): boolean {
+  if (x < 0 || y < 0) return false
+  const l = local(x, y)
+  return (l.x >= -6 && l.x <= SLIP.edge && l.y >= -10 && l.y <= BOOK + 12) || slipAt(x, y) !== null
+}
+
+// the open book's tabs, out of the right leaf's fore-edge. the visible part only
+function sideTab(i: number): Anchor {
+  return { x: SPINE + LEAF.w, y: LEAF.top + TAB.top + i * TAB.step, w: TAB.out, h: TAB.h }
 }
 
 // pointer moves and clicks from the scene, in stage units. true = the drawer took it (the scene ignores it)
 export function drawerPointer(x: number, y: number, down: boolean): boolean {
   mouse = { x, y }
-  const over = hits.some(h => inside(x, y, h)) || (tab === null && drawerHit(x, y) !== null)
+  const closed = tab === null && slide.at < 0.02 && !compare
+  const over = hits.some(h => inside(x, y, h)) || (closed && overBook(x, y))
   if (!down) return over || tab !== null
   for (let i = hits.length - 1; i >= 0; i--) {
     if (inside(x, y, hits[i])) {
@@ -190,13 +241,13 @@ export function drawerPointer(x: number, y: number, down: boolean): boolean {
     }
   }
   if (tab !== null) {
-    // a click off the book closes it
-    if (!inside(x, y, { x: SPINE - LEAF.w - 4, y: LEAF.top - 24, w: LEAF.w * 2 + 8, h: LEAF.h + 30 })) tab = null
+    // a click off the book (and its tabs) closes it
+    if (!inside(x, y, { x: SPINE - LEAF.w - 4, y: LEAF.top - 24, w: LEAF.w * 2 + TAB.out + 12, h: LEAF.h + 30 })) tab = null
     return true
   }
-  const t = drawerHit(x, y)
-  if (t) {
-    openDrawer(t)
+  if (closed && overBook(x, y)) {
+    const i = slipAt(x, y)
+    openDrawer(i === null ? lastTab : TABS[i].id)
     return true
   }
   return !!compare && inside(x, y, { ...DOCK, h: dockH })
@@ -325,23 +376,34 @@ function counts(v: SeatView): Record<Tab, string> {
 
 // ---------- per frame ----------
 
-// ms is the frame time (performance.now()). draws the peek, the open book, or the compare dock
+// ms is the frame time (performance.now()). draws the carnet in its corner (or flying), the open book, or the compare dock
 export function drawDrawer(g: CanvasRenderingContext2D, v: SeatView, ms: number): void {
   const dt = Math.min(0.05, (ms - lastMs) / 1000 || 0)
   lastMs = ms
   hits = []
   hovered = null
   const opening = tab !== null
-  chase(slide, opening ? 1 : 0, dt, 260)
-  // the cover swings once it's mostly in, and folds shut first when closing
-  chase(swing, opening && slide.at > 0.7 ? 1 : -1, dt, 200)
-  if (!opening && swing.at > -0.6) slide.vel = Math.max(slide.vel, 0)
+  const flying = slide.at > 0.02
+  // hover pulls it out of the corner. while it flies, the corner pose holds still so the path doesn't wander
+  if (!flying && !opening) chase(out, !compare && overBook(mouse.x, mouse.y) ? 1 : 0, dt, 240)
+  // it flies in, then the cover swings. closing: the cover shuts first, then it flies home
+  chase(slide, opening || swing.at > -0.9 ? 1 : 0, dt, 190)
+  chase(swing, opening && slide.at > BIG_AT ? 1 : -1, dt, 160)
+  chase(band, opening || flying ? 1 : 0, dt, 300)
   chase(dock, compare ? 1 : 0, dt, 220)
+  if (opening && !creaked && slide.at > BIG_AT) {
+    creak()
+    creaked = true
+  }
+  if (!opening) creaked = false
 
   if (dock.at > 0.02) drawDock(g, v)
-  if (slide.at > 0.02) drawBook(g, v)
-  else if (!compare) drawPeek(g, v, dt)
-  else peek.at = 0
+  if (flying) {
+    g.fillStyle = `rgba(14,11,10,${0.6 * Math.min(1, slide.at)})`
+    g.fillRect(0, 0, W, H)
+  }
+  if (slide.at >= BIG_AT) drawBook(g, v)
+  else if (!compare || flying) drawCarnet(g, v, dt, flying)
 
   const active = slide.at > 0.02 || !!compare
   if (hoverFn && (active || wasActive)) {
@@ -351,117 +413,129 @@ export function drawDrawer(g: CanvasRenderingContext2D, v: SeatView, ms: number)
   wasActive = active
 }
 
-// ---------- closed ----------
-
-function peekTab(i: number, out: number): Anchor {
-  return { x: PEEK.x + 22 + out, y: PEEK.y + 2 + i * PEEK.tabH, w: PEEK.tabW, h: PEEK.tabH - 2 }
-}
-
-function drawPeek(g: CanvasRenderingContext2D, v: SeatView, dt: number): void {
-  const zone = { x: 0, y: PEEK.y, w: PEEK.x + 34 + PEEK.tabW + peek.at, h: TABS.length * PEEK.tabH + 4 }
-  chase(peek, over(zone) ? 10 : 0, dt, 300)
-  const out = Math.round(peek.at)
-  const n = counts(v)
-  const hotBinder = v.me.binder.some(c => stonksOf(v, c) > 1)
-  let lit: number | null = null
-  TABS.forEach((_, i) => { if (over(peekTab(i, out))) lit = i })
-  if (lit !== null) {
-    // the cream 1px outline around the whole bifold
-    g.fillStyle = CREAM
-    g.fillRect(0, PEEK.y - 1, PEEK.x + 35 + out, 124)
-    TABS.forEach((_, i) => {
-      const r = peekTab(i, out)
-      g.fillRect(r.x - 1, r.y - 1, PEEK.tabW + 2, r.h + 2)
-    })
-  }
-  // tabs first, so the leather covers their roots
-  TABS.forEach((t, i) => {
-    const r = peekTab(i, out)
-    const lift = lit === i ? 2 : 0
-    blit(g, `drawer/tab/${t.id}`, r.x + lift, r.y)
-    text(g, n[t.id], r.x + lift + 15, r.y + 3, { font: 'tiny', color: INK })
-    text(g, t.key, r.x + lift + 15, r.y + 12, { font: 'tiny', color: FADED })
-    if (t.id === 'classeur' && hotBinder && Math.floor(lastMs / 500) % 2) {
-      g.fillStyle = '#fff0b0'
-      g.fillRect(r.x + lift + PEEK.tabW - 9, r.y + 3, 1, 3)
-      g.fillRect(r.x + lift + PEEK.tabW - 10, r.y + 4, 3, 1)
-    }
-  })
-  blit(g, 'drawer/peek', PEEK.x + out, PEEK.y)
-  if (lit !== null) {
-    const t = TABS[lit]
-    const r = peekTab(lit, out)
-    const cap = `${t.en} · ${n[t.id]} · ${t.key}`
-    const w = measure(cap, 'sans') + 10
-    box(g, r.x + PEEK.tabW + 8, r.y + 3, w, 15, CREAM)
-    text(g, cap, r.x + PEEK.tabW + 13, r.y + 5)
-  }
-}
+// ---------- closed: the carnet ----------
 
 function blit(g: CanvasRenderingContext2D, name: string, x: number, y: number): void {
   const s = sprite(name)
   g.drawImage(s.img, s.x, s.y, s.w, s.h, Math.round(x), Math.round(y), s.w, s.h)
 }
 
-// ---------- open ----------
-
-function topTab(i: number): Anchor {
-  return { x: SPINE - LEAF.w + 14 + i * 74, y: LEAF.top - 20, w: 70, h: 22 }
+// a paper tucked in the top edge, set a little crooked
+function tucked(g: CanvasRenderingContext2D, name: string, x: number, y: number, rot: number): void {
+  const s = sprite(name)
+  g.save()
+  g.translate(x + s.w / 2, y + s.h)
+  g.rotate(rot)
+  g.drawImage(s.img, s.x, s.y, s.w, s.h, -s.w / 2, -s.h, s.w, s.h)
+  g.restore()
 }
 
-function drawBook(g: CanvasRenderingContext2D, v: SeatView): void {
-  const s = slide.at
-  const settled = Math.abs(1 - s) < 0.03 && swing.at > 0.97
+function drawCarnet(g: CanvasRenderingContext2D, v: SeatView, dt: number, flying: boolean): void {
+  const p = pose()
+  const lit = flying ? null : slipAt(mouse.x, mouse.y)
+  slips.forEach((s, i) => chase(s, lit === i ? SLIP_OUT[i] + 6 : mix(SLIP_REST[i], SLIP_OUT[i], out.at), dt, 320))
+  const half = (BOOK * p.s) / 2
   g.save()
-  g.fillStyle = `rgba(14,11,10,${0.6 * Math.min(1, s)})`
-  g.fillRect(0, 0, W, H)
-  // slides from the left edge and grows into place, about the spine
-  const spine = 10 + (SPINE - 10) * s
-  const cy = LEAF.top + LEAF.h / 2
-  const sc = 0.35 + 0.65 * Math.min(1.05, s)
-  g.translate(spine, cy)
-  g.scale(sc, sc)
-  g.translate(-SPINE, -cy)
-  const shown = tab ?? 'etui'
+  // whole stage pixels while it sits still, so the counts on the tabs stay crisp
+  const parked = !flying && Math.abs(p.rot) < 0.01
+  g.translate(parked ? Math.round(p.x) + half : p.x + half, parked ? Math.round(p.y) + half : p.y + half)
+  g.rotate(p.rot)
+  g.scale(p.s, p.s)
+  g.translate(-BOOK / 2, -BOOK / 2)
+  g.imageSmoothingEnabled = false
+  // the papers stuck in the top rise a little when you pull it out, like they're about to fall
+  const lift = 2 * out.at
+  tucked(g, 'drawer/book/receipt', 15, -10 - lift, -0.1 - 0.04 * out.at)
+  tucked(g, 'drawer/book/note', 29, -5 - lift * 0.5, 0.05)
+  tucked(g, 'drawer/book/card', 50, -8 - lift, 0.17 + 0.03 * out.at)
+  // the tabs come out from between the pages, so the cover hides their roots
+  TABS.forEach((t, i) => blit(g, `drawer/book/slip/${t.id}`, SLIP.edge + slips[i].at - SLIP.w, SLIP.y + i * SLIP.step))
+  blit(g, 'drawer/book/ribbon', 22, 74)
+  blit(g, 'drawer/book/cover', 0, 0)
+  blit(g, 'drawer/book/pencil', -4, -6)
+  blit(g, 'drawer/book/loop', -6, 10)
+  blit(g, 'drawer/book/loop', -6, 40)
+  if (band.at < 0.98) {
+    g.globalAlpha = 1 - band.at
+    blit(g, 'drawer/book/band', 64 + 18 * band.at, -1)
+    g.globalAlpha = 1
+  }
+  // counts on the tabs once it's out far enough to read them
+  const n = counts(v)
+  if (out.at > 0.6 && !flying) {
+    const hotBinder = v.me.binder.some(c => stonksOf(v, c) > 1)
+    TABS.forEach((t, i) => {
+      const y = SLIP.y + i * SLIP.step
+      text(g, n[t.id], SLIP.edge + 2, y + 4, { font: 'tiny', color: INK })
+      if (t.id === 'classeur' && hotBinder && Math.floor(lastMs / 500) % 2) {
+        const gx = SLIP.edge + slips[i].at - 9
+        g.fillStyle = '#fff0b0'
+        g.fillRect(gx, y + 3, 1, 3)
+        g.fillRect(gx - 1, y + 4, 3, 1)
+      }
+    })
+  }
+  if (lit !== null) outlineRect(g, { x: SLIP.edge, y: SLIP.y + lit * SLIP.step, w: slips[lit].at - 1, h: SLIP.h })
+  g.restore()
+  // the caption beside the tab you're on: Deck · 14/18 · D
+  if (lit !== null) {
+    const t = TABS[lit]
+    const cap = `${t.en} · ${n[t.id]} · ${t.key}`
+    const w = measure(cap, 'sans') + 10
+    const x = Math.round(p.x) + SLIP.edge + Math.round(slips[lit].at) + 4
+    const y = Math.round(p.y) + SLIP.y + lit * SLIP.step - 1
+    box(g, x, y, w, 15, CREAM)
+    text(g, cap, x + 5, y + 2)
+  }
+}
+
+// ---------- open ----------
+
+function drawBook(g: CanvasRenderingContext2D, v: SeatView): void {
+  const settled = Math.abs(1 - slide.at) < 0.03 && swing.at > 0.97
+  const p = pose()
+  g.save()
+  // the flight's last few percent and its overshoot: the whole book scales about the cover's top-left
+  g.translate(p.x, p.y)
+  g.scale(p.s / GROW, p.s / GROW)
+  g.translate(-SPINE, -LEAF.top)
+  g.imageSmoothingEnabled = false
+  const shown = tab ?? lastTab
   const n = counts(v)
 
-  // the tab row along the top, the open one in front
+  // the tabs stick out of the right leaf's fore-edge, the open one pulled out furthest
   TABS.forEach((t, i) => {
-    const r = topTab(i)
+    const r = sideTab(i)
     const on = t.id === shown
-    const lit = settled && hit(r, () => openDrawer(t.id))
-    const y = r.y + (on ? 0 : lit ? 1 : 4)
-    box(g, r.x, y, r.w, r.h + 4, on ? PAPER : lit ? CREAM : TAN)
-    g.fillStyle = t.ink
-    g.fillRect(r.x + 1, y + 1, r.w - 2, 2)
-    text(g, t.name, r.x + 5, y + 5, { bold: on })
-    text(g, n[t.id], r.x + r.w - 5, y + 7, { font: 'tiny', color: FADED, align: 'right' })
+    const lit = settled && hit({ ...r, w: r.w + 6 }, () => openDrawer(t.id))
+    const pull = on ? 6 : lit ? 3 : 0
+    blit(g, `drawer/book/tab/${t.id}`, r.x - (TAB.w - TAB.out) + pull, r.y)
+    text(g, t.name, r.x + 4 + pull, r.y + 7, { bold: on, color: on ? BURGUNDY : INK })
+    text(g, n[t.id], r.x + 4 + pull, r.y + 19, { font: 'tiny', color: INK })
+    text(g, t.key, r.x + 4 + pull, r.y + 28, { font: 'tiny', color: FADED })
   })
-  // close tag, top right
-  const close = { x: SPINE + LEAF.w - 54, y: LEAF.top - 18, w: 54, h: 18 }
-  const lit = settled && hit(close, () => { tab = null })
-  box(g, close.x, close.y + (lit ? 0 : 2), close.w, close.h + 2, lit ? CREAM : TAN)
-  text(g, 'Esc ×', close.x + close.w / 2, close.y + 5 + (lit ? 0 : 2), { align: 'center' })
-
-  // the left leaf holds the contents, the right leaf the details. the right one swings on the spine
-  blit(g, 'drawer/leaf', SPINE - LEAF.w, LEAF.top)
-  if (swing.at > 0) {
-    g.save()
-    g.translate(SPINE, 0)
+  blit(g, 'drawer/leaf/right', SPINE, LEAF.top)
+  // shut, the cover lies on the right leaf. it turns on the spine and comes down as the left leaf
+  g.save()
+  g.translate(SPINE, 0)
+  if (swing.at < 0) {
+    g.scale(Math.max(0.01, -swing.at), 1)
+    g.translate(-SPINE, 0)
+    blit(g, 'drawer/book/big', SPINE, LEAF.top)
+  } else {
     g.scale(Math.max(0.01, swing.at), 1)
     g.translate(-SPINE, 0)
-    blit(g, 'drawer/leaf', SPINE, LEAF.top)
-    g.restore()
+    blit(g, 'drawer/leaf/left', SPINE - LEAF.w, LEAF.top)
   }
+  g.restore()
   // gutter shadow
   g.fillStyle = 'rgba(28,21,19,0.35)'
   g.fillRect(SPINE - 3, LEAF.top + 6, 6, LEAF.h - 12)
   if (swing.at > 0.5) {
     // pages only register clicks once the book has settled
-    const clickable = settled
     const keep = hits.length
     page(g, v, shown)
-    if (!clickable) hits.length = keep
+    if (!settled) hits.length = keep
   }
   const turn=(lastMs-pageTurnAt)/210
   if (turn>=0 && turn<1 && !still.matches) {
@@ -470,19 +544,17 @@ function drawBook(g: CanvasRenderingContext2D, v: SeatView): void {
     const fold=Math.cos(Math.PI*turn)
     g.scale(fold,1)
     g.fillStyle=fold>0?PAPER:TAN
-    g.fillRect(0,0,LEAF.w-7,LEAF.h-12)
+    g.fillRect(0,0,LEAF.w-9,LEAF.h-14)
     g.fillStyle=CREAM
-    g.beginPath();g.moveTo(LEAF.w-30,0);g.lineTo(LEAF.w-7,turn<.5?18:32);g.lineTo(LEAF.w-7,0);g.fill()
+    g.beginPath();g.moveTo(LEAF.w-32,0);g.lineTo(LEAF.w-9,turn<.5?18:32);g.lineTo(LEAF.w-9,0);g.fill()
     g.restore()
   }
-  if (swing.at <= 0) {
-    // still folded: the cover lies over the left leaf, mirrored
-    g.save()
-    g.translate(SPINE, 0)
-    g.scale(Math.min(-0.01, swing.at), 1)
-    g.translate(-SPINE, 0)
-    blit(g, 'drawer/back', SPINE, LEAF.top)
-    g.restore()
+  // close tag, top right
+  if (swing.at > 0.5) {
+    const close = { x: SPINE + LEAF.w - 54, y: LEAF.top - 18, w: 54, h: 18 }
+    const lit = settled && hit(close, () => { tab = null })
+    box(g, close.x, close.y + (lit ? 0 : 2), close.w, close.h + 2, lit ? CREAM : TAN)
+    text(g, 'Esc ×', close.x + close.w / 2, close.y + 5 + (lit ? 0 : 2), { align: 'center' })
   }
   g.restore()
 }
@@ -828,6 +900,18 @@ function vitrine(g: CanvasRenderingContext2D, v: SeatView): void {
 
 // ---------- carnet ----------
 
+// the game's two switches live at the foot of the rules page, not on the table: the language and the tips
+function settings(g: CanvasRenderingContext2D, y: number): void {
+  let x = R.x
+  text(g, 'Language', x, y + 2, { font: 'tiny', color: FADED })
+  x += measure('Language', 'tiny') + 6
+  for (const [id, label] of [['en', 'EN'], ['fr', 'FR']] as const) x += chip(g, label, x, y, lang() === id, () => setLang(id)) + 3
+  x += 12
+  text(g, 'Tips', x, y + 2, { font: 'tiny', color: FADED })
+  x += measure('Tips', 'tiny') + 6
+  for (const on of [true, false]) x += chip(g, on ? 'On' : 'Off', x, y, tipsOn() === on, () => setTips(on)) + 3
+}
+
 const GLOSS_KIND: Record<Kind, string> = {
   card: 'card', finish: 'finish', stamp: 'stamp', knockoff: 'knockoff', trait: 'trait', tier: 'tier', variant: 'card type',
   joker: 'joker', bulk: 'card', collectible: 'collectible', insert: 'insert', pochette: 'pochette', twist: 'twist',
@@ -848,6 +932,7 @@ function carnet(g: CanvasRenderingContext2D, v: SeatView): void {
     handsColumn(g, v, L.x, L.y + 12, L.w, 22)
     text(g, 'How a hand works', R.x, R.y, { bold: true, color: BURGUNDY })
     howColumn(g, v, R.x, R.y + 18, R.w, 6)
+    settings(g, LEAF.top + LEAF.h - 22)
     return
   }
   // glossary: two leaves of entries, paged

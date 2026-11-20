@@ -7,7 +7,9 @@ import { progress, mix, juiceAt, spring, springs, stepSprings } from './motion.t
 import { laneArt } from './lanes.ts'
 import { sprite, canvas, ctx2d, blit, backCanvas, cardCanvas, stockScale, specialInk, type Sprite, nineSlice } from './art.ts'
 import { GRADE, HYPE, MONEY as CASH, RARE, VALUE, modifierInk, starInk } from './ink.ts'
-import { HAND_NAMES } from '../engine/hands.ts'
+import { HAND_NAMES, evaluateHand, handNote } from '../engine/hands.ts'
+import { handBase } from '../engine/scoring.ts'
+import { STARTERS } from '../engine/starters.ts'
 import { tableOf } from '../engine/economy.ts'
 import { JOKERS, VARIANTS, knockoffName, traitName, type Card } from '../engine/cards.ts'
 import { twistName, twistText } from '../engine/twists.ts'
@@ -15,16 +17,17 @@ import type { BetChoice, SeatView, ShowdownView } from '../engine/match.ts'
 import { INSERTS, type Insert } from '../engine/shop.ts'
 import type { Difficulty } from '../engine/match.ts'
 import { insertFace, insertMark } from './placeholders.ts'
+import { collectible, drawCollectible } from './collectibles.ts'
 import type { Appraisal } from '../engine/scoring.ts'
 import type { StarterId } from '../engine/starters.ts'
 import * as sfx from './sound.ts'
-import { LANG_TAB, STRIP, announce, bandShowing, drawBand, langTab, runStrip, skipBand, vitrineWord } from './frame.ts'
-import { lang, toggleLang } from './lang.ts'
+import { STRIP, announce, drawBand, runStrip, skipBand } from './frame.ts'
+import { lang } from './lang.ts'
 import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
 import { drawText, measure, wrapText, type TextStyle } from './font.ts'
 import { closeDrawer, deckCounts, drawDrawer, drawerKey, drawerOpen, drawerPointer, openDrawer, setCompareHover, setDrawerActions, setDrawerHover } from './drawer.ts'
-import { drawRules, rulesClick, rulesKey, rulesOpen, toggleRules } from './rules.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
+import { drawTips, tip, tipShowing } from './tips.ts'
 import { KEYWORDS, cardEntry, entry, type Entry } from '../engine/glossary.ts'
 
 export type Kind = 'lock' | 'max' | 'min' | 'forge' | 'discard' | 'insert' | 'skip' | 'continue'
@@ -70,7 +73,6 @@ const MONEY = CASH.felt
 const INK = '#2e2320'
 const CREAM = '#f6ecd2'
 const BURGUNDY = '#7a1a2c'
-const FLAME = '#ff7a24'
 const GOLD = '#e8c260'
 const CROWD: [number, number][] = [
   [193, 127], [544, 130], [147, 135], [493, 129], [220, 127], [576, 134],
@@ -81,6 +83,7 @@ const FAR_ROW = { cx: 365, y: 151, gap: 41, w: 36 }
 const HAND_C = { x: 335, y: 298, r: 260 }
 const MY_PILE = { x: 146, y: 251 }
 const MY_DISCARD = { x: 470, y: 228 } // just left of the action column
+const MY_PLATE_W = 196 // your plate is wider than the rival's: it carries your hand readout
 const COL = { x: 508, w: 126, bottom: 352 } // the action column: messages, tally, tickets
 const OUTLINE = '#0e0b0a' // text over the world gets a 1px ink outline
 const STAMP_DIFFICULTY: Record<string, Difficulty> = { FACILE: 'easy', MOYEN: 'medium', 'GROS JOUEUR': 'hard' } // main.ts's plate stamps
@@ -263,7 +266,7 @@ export function showDuel(app: HTMLElement, next: DuelState): void {
     detachFiche = ficheInput(cv, toStage)
     cv.onpointerdown = e => {
       suppressClick = false
-      if (!e.isPrimary || e.button !== 0 || calling() || rulesOpen() || drawerOpen() || overDrawer || panelOpen()) return
+      if (!e.isPrimary || e.button !== 0 || calling() || drawerOpen() || overDrawer || panelOpen()) return
       const p = toStage(e)
       const cuff = cuffHits.find(h => Math.abs(p.x - h.x) <= h.w / 2 && Math.abs(p.y - h.y) <= h.h / 2)
       if (!cuff) return
@@ -354,7 +357,6 @@ function toStage(e: MouseEvent): { x: number; y: number } {
 }
 
 function click(p: { x: number; y: number }): void {
-  if (rulesClick(p.x, p.y)) return
   if (drawerPointer(p.x, p.y, true)) return
   if (panelClick(p)) return
   if (calling()) return endCallout()
@@ -401,7 +403,7 @@ function frame(t: number): void {
   // whichever of them has the mouse, the scene doesn't see it
   const real = mouse
   const off = { x: -1, y: -1 }
-  const covered = overDrawer || drawerOpen() || rulesOpen()
+  const covered = overDrawer || drawerOpen()
   if (covered || panelOpen()) mouse = off
   spoilsShown = false
   draw(state)
@@ -412,10 +414,10 @@ function frame(t: number): void {
   }
   drawBand(g, now)
   drawPanel(g, now, covered ? off : mouse)
-  drawRules(g, state.view)
   drawDrawer(g, state.view, now)
+  drawTips(g, drawerOpen())
   drawFiche(g)
-  cv.style.cursor = (covered ? overDrawer || rulesOpen() : panelOpen() ? panelHover(mouse) : hoverable()) ? 'pointer' : 'default'
+  cv.style.cursor = (covered ? overDrawer : panelOpen() ? panelHover(mouse) : hoverable()) ? 'pointer' : 'default'
 }
 
 function hoverable(): boolean {
@@ -494,19 +496,6 @@ function silhouette(img: HTMLCanvasElement): HTMLCanvasElement {
 }
 const AROUND = [[-1, 0], [1, 0], [0, -1], [0, 1]] as const
 
-// the cream 1px hover outline of a pinned sprite. draw the sprite on top after
-function outline(name: string, x: number, y: number, r = 0): void {
-  const s = sprite(name)
-  const sil = silhouette(sub(s))
-  for (const [dx, dy] of AROUND) {
-    g.save()
-    g.translate(x + dx, y + dy)
-    if (r) g.rotate(r)
-    g.drawImage(sil, -s.px, -s.py)
-    g.restore()
-  }
-}
-
 // every string on the stage goes through here. y is the top of the line box
 type TextOpt = TextStyle & { alpha?: number }
 
@@ -531,7 +520,7 @@ function hit(x: number, y: number, w: number, h: number, onClick: () => void): b
 
 type Look = { x: number; y: number; w: number; h: number; r: number; e: () => Entry; above: boolean }
 let looks: Look[] = []
-const STACK = { x: 508, y: 230, w: 126, h: 122 } // the action stack, the Fiche never covers it
+const STACK = { x: 508, y: 226, w: 126, h: 126 } // the action stack, the Fiche never covers it
 const FICHE_W = 162 // the box at its widest, with padding
 const FICHE_H = 130 // a tall one
 
@@ -828,7 +817,7 @@ function draw(st: DuelState): void {
     g.beginPath()
     g.rect(0, 0, W, H)
     g.clip()
-    frameZones(st, t)
+    frameZones(st)
     showLook()
     g.restore()
     return
@@ -865,9 +854,9 @@ function draw(st: DuelState): void {
   hand(st, t)
   insertGhost(st, t)
   hud(st, t)
+  caseShelf(st) // over the hud: during the count-up the shelf is the thing to watch, even over the twist sign
   insertEffect()
   effects()
-  turnBanner()
   calloutBanner(st)
   showLook()
   g.restore()
@@ -1027,11 +1016,9 @@ function tableTop(st: DuelState): void {
   text(over ? `Deck · ${n.pile}/${n.total} · D` : `${n.pile}/${n.total}`, MY_PILE.x, top - 9, { font: 'tiny', color: over ? CREAM : '#bfa77e', align: 'center', outline: OUTLINE })
   drawPile(MY_DISCARD.x, MY_DISCARD.y, 0.84, me.starter, me.discard.length, true)
   look(MY_DISCARD.x - 30, MY_DISCARD.y - 24, 60, 46, rule('discard-pile'))
-  // bankroll stacks (the plates carry the numbers) and the pot with its number
+  // the pot with its number. the plates carry the bankrolls
   const b = view.bet
   const pot = b ? 2 * b.stake + (b.onMax[0] ? b.extra : 0) + (b.onMax[1] ? b.extra : 0) : 0
-  chips(180, 160, them.bankroll, 0.78) // left of their pile, clear of their row and tag
-  chips(86, 262, me.bankroll, 0.95) // right of the drawer
   chips(346, 193, pot, 0.95)
   if (pot) {
     text(`$${pot}`, 374, 184, { font: 'sans', color: MONEY, align: 'center', bold: true, outline: OUTLINE })
@@ -1043,7 +1030,7 @@ function tableTop(st: DuelState): void {
 // the rival's right of the pot, yours left of it. each one slams down the first time it shows,
 // and the rival's also gets their line in the bubble. driven by the view, so it works online too
 const FELT_TW = 96
-const FELT_AT = { me: { x: 236, y: 202 }, them: { x: 446, y: 178 } } // ticket centers
+const FELT_AT = { me: { x: 252, y: 206 }, them: { x: 446, y: 178 } } // ticket centers
 // face up, the rows take the felt: yours goes right of your score tag, theirs under their tag, clear of their row
 const SHOWDOWN_AT = { me: { x: 414, y: 280 }, them: { x: 518, y: 146 } }
 const seenBets = new Set<string>()
@@ -1313,7 +1300,7 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
     g.globalAlpha = 0.85
     nine('hud/score/tag/thrown', x0, y0, w0, 44)
     text('JETÉE', x0 + w0 / 2, y0 + 6, { font: 'didone', color: '#ff7a24', align: 'center' })
-    text('thrown: scores 0, no KO', x0 + w0 / 2, y0 + 28, { font: 'tiny', color: CREAM, align: 'center' })
+    text('scores 0', x0 + w0 / 2, y0 + 28, { font: 'tiny', color: CREAM, align: 'center' })
     g.restore()
     look(x0, y0, w0, 44, rule('flamber'))
     return
@@ -1325,6 +1312,7 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   const gr = l ? l.g : a.grade
   const total = Math.floor(v * hy * 2 ** gr)
   const label = l ? l.label : [a.hand, ...a.bonus].map(h => HAND_NAMES[h]).join(' + ')
+  const note = l ? '' : handNote(mine ? sd.myCards : sd.theirCards, a.hand)
   const w = 96
   const x = mine ? NEAR_ROW.cx - w / 2 : THEIR_TAG_X
   const y = mine ? 260 : 74
@@ -1339,6 +1327,7 @@ function scoreTag(st: DuelState, sd: ShowdownView, mine: boolean): void {
   if (lostIt) g.globalAlpha = 0.6
   nine('hud/score/tag', x, y, w, 44)
   text(label, x + w / 2, y + 4, { font: 'tiny', color: BURGUNDY, align: 'center' })
+  if (note) text(note, x + w / 2, y + 46, { font: 'tiny', color: CREAM, outline: OUTLINE, align: 'center' })
   // each factor in its stat's color (ink.ts), so the tag reads the same as the Fiche and the floats
   const parts: [string, string][] = [[fmt(v), VALUE.paper], [' × ', '#8c7656'], [hypeText(hy), HYPE.paper]]
   if (gr) parts.push([` × 2^${gr}`, GRADE.paper])
@@ -1452,6 +1441,103 @@ function hand(st: DuelState, t: number): void {
   }
 }
 
+// your hand's score, anchored right above the tickets (docs/ONBOARDING.md #1). while you pick it shows what the
+// picked cards make, once you lock it shows the locked hand through the bet. base value × hype only, Balatro style:
+// never the full appraisal, so trying card orders gains nothing. the showdown hands over to the score tag on the felt.
+// returns its top, or null when it isn't up
+// the hand you're building, on the right of your plate: what the picked cards make (base Value × Hype only,
+// ONBOARDING.md #1), then the locked hand through the bet. the showdown's count-up is the felt tag's
+const READOUT = { x: 8 + 76, y: 144 + 7, w: MY_PLATE_W - 76 - 7, h: 44 }
+// out of the deal and the bet the plate folds back to name and money
+const readoutUp = (st: DuelState) => !st.settled && !st.view.me.forge && (st.view.phase === 'deal' || st.view.phase === 'bet')
+function handReadout(st: DuelState): void {
+  const me = st.view.me
+  if (!readoutUp(st)) return
+  const cards = me.locked ?? (st.insertSlot === null ? me.hand.filter(c => st.selected.has(c.id)) : [])
+  const { x, y, w, h } = READOUT
+  const cx = x + w / 2
+  nine('hud/score/tag', x, y, w, h)
+  if (!cards.length) {
+    text('YOUR HAND', cx, y + 9, { font: 'tiny', color: BURGUNDY, align: 'center' })
+    text(`pick 1–5 cards`, cx, y + 19, { font: 'sans', color: '#8c7656', align: 'center' })
+    look(x, y, w, h, rule('appraisal'))
+    return
+  }
+  const hand = evaluateHand(cards)
+  const hypeMod = me.starter ? STARTERS.find(b => b.id === me.starter)?.rules.hypeMod : undefined
+  let value = 0
+  let hype = 0
+  for (const type of [hand.type, ...hand.bonus]) {
+    const b = handBase(type, me.levels[type], hypeMod)
+    value += b.value
+    hype += b.hype
+  }
+  const label = [hand.type, ...hand.bonus].map(t => HAND_NAMES[t]).join(' + ').toUpperCase()
+  const note = handNote(cards, hand.type)
+  const parts: [string, string][] = [[`Value ${value}`, VALUE.paper], [' × ', '#8c7656'], [`Hype ${hype}`, HYPE.paper]]
+  const widths = parts.map(([s_]) => measure(s_, 'sans') + 1)
+  text(me.locked ? 'LOCKED' : 'YOUR HAND', cx, y + 4, { font: 'tiny', color: '#8c7656', align: 'center' })
+  text(label, cx, y + 12, { font: 'tiny', color: BURGUNDY, align: 'center' })
+  let px = cx - widths.reduce((a, b) => a + b, 0) / 2
+  parts.forEach(([s_, color], i) => {
+    text(s_, px, y + 21, { font: 'sans', color })
+    px += widths[i]
+  })
+  if (note) text(note, cx, y + 32, { font: 'tiny', color: '#8c7656', align: 'center' })
+  tip('preview', 'Value × Hype is your Appraisal. Cards and collectibles add more.', { x, y, w, h }, 'below')
+  look(x, y, w, h, () => entry('hand', hand.type, me.levels[hand.type]))
+}
+
+const SHELF = { x: 8, y: 58, item: 34, gap: 6 }
+const caseHits = new Map<number, number>() // slot → when it last fired
+
+function caseShelf(st: DuelState): void {
+  const display = st.view.me.display
+  const down = !!live && display.length > 0
+  const at = spring('shelf', { x: 0, y: down ? 0 : -SHELF.y - 50, r: 0, s: 1 }, { x: 0, y: -SHELF.y - 50, r: 0, s: 1 })
+  if (at.y <= -SHELF.y - 48) return
+  const w = display.length * (SHELF.item + SHELF.gap) + SHELF.gap
+  const x0 = SHELF.x
+  const y0 = SHELF.y + at.y
+  nine('hud/plate/frame', x0 - 4, y0 - 4, w + 8, SHELF.item + 18)
+  nine('hud/plate/paper', x0, y0, w, SHELF.item + 10)
+  display.forEach((o, i) => {
+    const f = collectible(o, now, i)
+    const k = Math.min(1, SHELF.item / Math.max(f.art.width, f.art.height))
+    const j = juiced(`case${i}`)
+    const cx = x0 + SHELF.gap + i * (SHELF.item + SHELF.gap) + SHELF.item / 2
+    const cy = y0 + 5 + SHELF.item / 2
+    const fired = now - (caseHits.get(i) ?? -Infinity)
+    if (fired < 260) {
+      g.save()
+      g.globalAlpha = 0.5 * (1 - fired / 260)
+      g.fillStyle = HYPE.felt
+      g.fillRect(cx - SHELF.item / 2 - 2, cy - SHELF.item / 2 - 2, SHELF.item + 4, SHELF.item + 4)
+      g.restore()
+    }
+    g.save()
+    g.translate(cx, cy)
+    g.scale(k * j.s, k * j.s)
+    g.rotate(j.r * 0.3)
+    drawCollectible(g, f, -f.art.width / 2, -f.art.height / 2, now + i * 213)
+    g.restore()
+    look(cx - SHELF.item / 2, cy - SHELF.item / 2, SHELF.item, SHELF.item, () => entry('collectible', o.id, o))
+  })
+}
+
+// the count-up calls this when one of your collectibles' steps lands
+function caseFired(slot: number, step: { value: number; hype: number; xhype: number; grade: number }): void {
+  caseHits.set(slot, now)
+  pop(`case${slot}`)
+  const cx = SHELF.x + SHELF.gap + slot * (SHELF.item + SHELF.gap) + SHELF.item / 2
+  const bits: [string, string][] = []
+  if (step.value) bits.push([`+${step.value} Value`, VALUE.felt])
+  if (step.hype) bits.push([`+${step.hype} Hype`, HYPE.felt])
+  if (step.xhype !== 1) bits.push([`×${step.xhype} Hype`, HYPE.felt])
+  if (step.grade) bits.push([`+${step.grade} Grade`, GRADE.felt])
+  bits.forEach(([t_, color], b) => floats.push({ text: t_, x: cx, y: SHELF.y + SHELF.item + 22 + b * 11, color, t: now }))
+}
+
 export function cardTags(card: Card) {
   const tags: { label: string; color: string }[] = []
   const add = (label: string, color = '#c99a3a') => tags.push({ label, color })
@@ -1479,9 +1565,10 @@ function hud(st: DuelState, t: number): void {
   const view = st.view
   const me = view.me
   const them = view.others[0]
-  const phaseCards = view.phase === 'deal' || view.phase === 'bet'
-  plate(8, 144, true, st, me.bankroll, me.hand.length, me.discardsLeft, me.sleeve.length)
-  plate(482, 12, false, st, them.bankroll, phaseCards ? them.handSize : 0, them.discards, them.sleeve)
+  plate(8, 144, true, st, me.bankroll)
+  handReadout(st)
+  if (st.tally && !st.counting) tip('bankroll', "Your money is your life. At $0 you're out.", { x: 8, y: 144, w: MY_PLATE_W, h: 58 }, 'above')
+  plate(482, 12, false, st, them.bankroll)
   // their sleeve hangs where their score tag goes, so it tucks away for the showdown
   if (!(st.settled && view.showdown)) {
     for (let i = 0; i < them.sleeve; i++) pin('insert/back', 461 + i * 9, 75, { s: 0.55, r: (i - 0.5) * 0.12 })
@@ -1500,24 +1587,20 @@ function hud(st: DuelState, t: number): void {
   bandTop = colText(st, top - 6) - 8 // next frame's band starts above whatever is in the column
   sortTabs(st)
   handTrack(st)
-  frameZones(st, t)
+  frameZones(st)
 }
 
-// zone A and the table's own ways into the frame: the run strip, the VITRINE and CARNET tabs over it, the rules
-// paper on the rail. the bare table draws these too
-function frameZones(st: DuelState, t: number): void {
+// zone A: the run strip and the twist line. the bare table draws it too
+function frameZones(st: DuelState): void {
   const view = st.view
-  const twist = runStrip(g, view, st.settled && view.last ? view.last.round : view.round)
+  const twist = runStrip(g, view, st.settled && view.last ? view.last.round : view.round, !!view.twist)
   look(STRIP.x, STRIP.y, STRIP.w, 16, rule('round'))
   const tw = view.twist ?? view.nextTwist?.twist
   if (twist && tw) look(twist.x, twist.y, twist.w, twist.h, () => entry('twist', tw.id, tw))
-  vitrineTab(st, t)
-  carnetTab()
-  langChip()
-  rulesBall(st, t)
 }
 
-// "Main 2 / 3" across the top: one pip per hand (won, lost, tie, thrown, still to play), the score, and the KO line
+// "Main 2 / 3" across the top: how the round is won, in one place. one pip per hand (won, lost, tie, thrown, still
+// to play), the score, and the K.O. line
 let lastHands: SeatView['hands'] = null
 
 function handTrack(st: DuelState): void {
@@ -1528,43 +1611,41 @@ function handTrack(st: DuelState): void {
   if (!hv) return
   const me = st.view.me.seat
   const shown = st.settled && st.view.showdown ? st.view.showdown.hand : hv.hand
-  const x0 = 254
+  const x0 = 234
   const y = 4
-  nine('hud/plate/paper', x0, y, 132, 16, '#e3d2a8')
+  const w = 172
+  nine('hud/plate/paper', x0, y, w, 16, '#e3d2a8')
   look(x0, y, 58, 16, rule('plate-hand'))
   look(x0 + 58, y, 74, 16, rule('hand-pips'))
-  look(540, 70, 42, 14, rule('hand-pips'))
   text(`Main ${Math.min(3, shown)} / 3`, x0 + 6, y + 3, { font: 'sans', color: INK, bold: true })
-  for (const mine of [true, false]) {
-    const seat = mine ? me : st.view.others[0].seat
-    for (let i = 0; i < 3; i++) {
-      const hand = hv.hands[i]
-      const score = mine ? hand?.mine : hand?.theirs
-      const state = !hand ? 'open' : score === null ? 'thrown' : hand.winner === null ? 'tie' : hand.winner === seat ? 'won' : 'lost'
-      const smoke = state === 'thrown' && !stillCards.matches && Math.floor(now / 320) % 2 ? '/1' : ''
-      const x = (mine ? x0 + 62 : 544) + i * 13
-      const y0 = mine ? y + 2 : 73
-      const age = now - pipAt
-      const flip = hand && i === hv.hands.length - 1 && age < 290 && !stillCards.matches ? Math.max(0.12, Math.abs(Math.cos(Math.PI * age / 290))) : 1
-      const pop = flip === 1 ? 1 : 1+.15*Math.sin(Math.PI*progress(age,290))
-      pin(`hud/hand/pip/${state}${smoke}`, x + 6 * (1 - flip*pop), y0, { sx: flip*pop, sy: pop })
-    }
+  const dealing = !st.settled && st.view.phase === 'deal' && !st.view.me.locked
+  if (dealing && st.view.round === 1 && hv.hand === 1 && !st.selected.size) tip('goal', 'Best of 3 hands. The higher Appraisal takes each one.', { x: x0, y, w, h: 16 }, 'below')
+  for (let i = 0; i < 3; i++) {
+    const hand = hv.hands[i]
+    const state = !hand ? 'open' : hand.mine === null ? 'thrown' : hand.winner === null ? 'tie' : hand.winner === me ? 'won' : 'lost'
+    const smoke = state === 'thrown' && !stillCards.matches && Math.floor(now / 320) % 2 ? '/1' : ''
+    const x = x0 + 62 + i * 13
+    const age = now - pipAt
+    const flip = hand && i === hv.hands.length - 1 && age < 290 && !stillCards.matches ? Math.max(0.12, Math.abs(Math.cos(Math.PI * age / 290))) : 1
+    const pop = flip === 1 ? 1 : 1+.15*Math.sin(Math.PI*progress(age,290))
+    pin(`hud/hand/pip/${state}${smoke}`, x + 6 * (1 - flip*pop), y + 2, { sx: flip*pop, sy: pop })
   }
   text(`${hv.wins[0]}–${hv.wins[1]}`, x0 + 112, y + 3, { font: 'sans', color: BURGUNDY, align: 'center', bold: true })
-  // the knockout line, always up so you know it. the count-up's floats rise through this spot, so it steps aside for them
-  if (live) return
-  pin('hud/ko/badge', 324, 176)
-  text(`K.O. ${hv.knockout}×`, 346, 180, { font: 'tiny', color: BURGUNDY, align: 'center' })
-  const ko = spriteBox('hud/ko/badge', 324, 176)
+  // the knockout line rides on the same plate, after a rule
+  g.fillStyle = '#bfa77e'
+  g.fillRect(x0 + 128, y + 3, 1, 10)
+  text(`K.O. ${hv.knockout}×`, x0 + 150, y + 3, { font: 'sans', color: BURGUNDY, align: 'center', bold: true })
+  const ko = { x: x0 + 130, y, w: 42, h: 16 }
   look(ko.x, ko.y, ko.w, ko.h, rule('ko', st.view.round))
+  if (dealing && hv.hand >= 2) tip('ko', `Win a hand by ${hv.knockout}× and the round ends there.`, ko, 'below')
 }
 
 // le patron's marker, pinned under your plate: the next payment and when it's due
 function marker(st: DuelState): void {
   const due = st.view.me.marker
   if (!due) return
-  const x = 100
-  const y = 186
+  const x = 14
+  const y = 198
   look(x, y, 58, 26, rule('marker', due.due))
   pin('hud/marker/note', x, y, { r: stillCards.matches ? 0 : Math.sin(now / 800) * 0.018 })
   const age = now - markerAt
@@ -1645,33 +1726,15 @@ function sortTabs(st: DuelState): void {
 
 let bandTop = COL.bottom
 
-// the rules paper, a crumpled ball on the rail. a click uncrumples it into the sheet (rules.ts).
-// outlined with a tag on hover, a gold glint now and then
-const BALL = { x: 486, y: 338 }
-function rulesBall(_st: DuelState, t: number): void {
-  if (rulesOpen()) return // it's the sheet right now
-  const { x, y } = BALL
-  const over = hit(x - 12, y - 11, 24, 22, () => { toggleRules({ x, y }) })
-  const r = over ? Math.sin(t * 20) * 0.15 : 0
-  if (over) outline('rules/ball', x, y, r)
-  pin('rules/ball', x, y, { r })
-  if (t % 8 < 0.15) {
-    g.fillStyle = '#fff0b0'
-    g.fillRect(x + 3, y - 6, 1, 1)
-    g.fillRect(x + 2, y - 5, 3, 1)
-    g.fillRect(x + 3, y - 4, 1, 1)
-  }
-  look(x - 12, y - 11, 24, 22, () => entry('hud', 'rules'))
-}
-
-// a seat's plate: name, bankroll, then cards in hand, discards (yours left, theirs used) and inserts up the Sleeve
-function plate(x: number, y: number, mine: boolean, st: DuelState, bankroll: number, cards: number, discards: number, sleeve: number): void {
-  nine('hud/plate/frame', x, y, 150, 58)
-  nine('hud/plate/paper', x + 5, y + 5, 140, 48)
+// a seat's plate: name and bankroll. the rival's adds its difficulty and lane
+function plate(x: number, y: number, mine: boolean, st: DuelState, bankroll: number): void {
+  const pw = mine && readoutUp(st) ? MY_PLATE_W : 150
+  nine('hud/plate/frame', x, y, pw, 58)
+  nine('hud/plate/paper', x + 5, y + 5, pw - 10, 48)
   pin(`mask/${mine ? st.myMask : st.rival.mask}/icon`, x + 20, y + 17)
   const rival = st.view.others[0].rival
   // the plate reads as your bankroll, or as the rival (its stack, lane, case)
-  look(x, y, 150, 58, mine || !rival ? rule('bankroll') : () => entry('rival', rival, tableOf(st.view.round)))
+  look(x, y, mine ? 70 : 150, 58, mine || !rival ? rule('bankroll') : () => entry('rival', rival, tableOf(st.view.round)))
   text(mine ? st.view.me.name === 'You' ? 'Vous' : st.view.me.name : st.rival.name, x + 34, y + 9, { font: 'sans', color: INK })
   const j = juiced(mine ? 'plate0' : 'plate1')
   g.save()
@@ -1681,12 +1744,6 @@ function plate(x: number, y: number, mine: boolean, st: DuelState, bankroll: num
   g.restore()
   // the solo rival's money is the stack it sat down with: bust it and the table is yours
   if (!mine && st.view.others[0].rival) text('stack', x + 12, y + 44, { font: 'tiny', color: '#8c7656' })
-  for (const [i, [icon, n, id]] of ([['hand', cards, 'plate-cards'], ['discard', discards, mine ? 'plate-discards' : 'rival-discards'], ['sleeve', sleeve, 'plate-sleeve']] as const).entries()) {
-    const ix = x + 70 + i * 25
-    pin(`icon/${icon}`, ix, y + 35)
-    text(String(n), ix + 11, y + 33, { font: 'sans', color: INK })
-    look(ix - 2, y + 29, 24, 17, rule(id))
-  }
   if (!mine) {
     text(st.rival.stamp, x + 138, y + 12, { font: 'tiny', color: BURGUNDY, align: 'right' })
     const sw = measure(st.rival.stamp, 'tiny')
@@ -1716,10 +1773,8 @@ function premier(st: DuelState): void {
   const b = view.bet
   if (st.settled || view.phase !== 'bet' || !b) return
   const meFirst = b.first === view.me.seat
-  const mine = view.me.bankroll
-  const theirs = view.others[0].bankroll
   // the corner of the first player's plate, nearest the middle of the table
-  const target = meFirst ? { x: 156, y: 148, r: 0, s: 1 } : { x: 486, y: 66, r: 0, s: 1 }
+  const target = meFirst ? { x: 8 + MY_PLATE_W + 2, y: 148, r: 0, s: 1 } : { x: 486, y: 66, r: 0, s: 1 }
   const at = spring(`premier${view.round}`, target, { x: 346, y: 180, r: -1.5, s: 0.4 })
   const d = PUCK_R * 2 + 2
   g.save()
@@ -1732,19 +1787,6 @@ function premier(st: DuelState): void {
   text('1er', 0, -6, { font: 'chalk', color: INK, align: 'center', bold: true })
   g.restore()
   look(at.x - PUCK_R, at.y - PUCK_R, d, d, rule('first'))
-
-  // the caption explains the order until the first bet lands, then the felt tickets take over
-  // (and the rival's bubble needs that space)
-  if (b.choices.length) return
-  const who = meFirst ? 'You bet first' : `${st.rival.name} bets first`
-  const why = mine === theirs ? 'tied: alternates each round' : meFirst ? "you're richer, they see your bet" : "they're richer, you see their bet"
-  const left = meFirst ? 12 : 632
-  const y = meFirst ? 110 : 74
-  const align = meFirst ? 'left' : 'right'
-  // under their plate the didone runs into the puck, so a long name drops to the sans
-  if (!meFirst && measure(who, 'didone') > 128) text(who, left, y + 4, { font: 'sans', color: CREAM, align, bold: true, outline: OUTLINE })
-  else text(who, left, y, { font: 'didone', color: CREAM, align, outline: OUTLINE })
-  text(why, left, y + 19, { font: 'sans', color: CREAM, align, outline: OUTLINE })
 }
 
 function twistSign(view: SeatView): void {
@@ -1764,9 +1806,8 @@ function twistSign(view: SeatView): void {
 
 // the rival's line, in a bubble to the left of their head (their plate owns the right)
 // ---------- your turn ----------
-// the moment betting comes to you: a soft chime, the lamp flares, "à vous" rises over the felt.
+// the moment betting comes to you: a soft chime and the lamp flares.
 // keyed by round and how many bets are in, so it fires once per turn, online too
-const TURN_MS = 1000
 let myTurn: { key: string; t: number } | null = null
 
 function turnFlare(st: DuelState): number {
@@ -1781,16 +1822,6 @@ function turnFlare(st: DuelState): number {
   if (!myTurn) return 0
   const age = now - myTurn.t
   return age < 400 ? Math.sin((age / 400) * Math.PI) : 0
-}
-
-function turnBanner(): void {
-  if (!myTurn || calling() || bandShowing()) return
-  const age = now - myTurn.t
-  if (age >= TURN_MS) return
-  const alpha = Math.min(1, age / 120, (TURN_MS - age) / 300)
-  const y = 160 - age * 0.012
-  text('À vous', 300, y, { font: 'didone', color: CREAM, align: 'center', scale: 2, outline: OUTLINE, alpha })
-  text('your bet', 300, y + 32, { font: 'sans', color: CREAM, align: 'center', bold: true, outline: OUTLINE, alpha })
 }
 
 // ---------- the knockout callout ----------
@@ -1915,6 +1946,9 @@ function slips(st: DuelState): void {
     const over = s.enabled && hit(at.x, at.y - 4, TW, PITCH, act)
     const id = slipRule(s)
     if (id) look(at.x, at.y - 4, TW, PITCH, rule(id))
+    const box = { x: at.x, y: at.y - 4, w: TW, h: PITCH }
+    if (s.kind === 'forge' && s.enabled && s.price === '★') tip('flamber', 'Flamber merges your Pair into one ★ card.', box, 'left')
+    if (s.kind === 'max' && s.enabled) tip('max', 'Max bets more on yourself. Win and the House pays it.', box, 'left')
     if (over) {
       hovering = i
       if (hoverSlip !== i) pop(key)
@@ -1993,7 +2027,7 @@ function colText(st: DuelState, bottom: number): number {
     text(name, COL.x + 2, big ? y - 30 : y - 24, { font: big ? 'didone' : 'chalk', bold: !big, color: CREAM, outline: OUTLINE })
     return y - 30
   }
-  const hint = st.hint ? wrap(st.hint, COL.w - 4, 'sans') : []
+  const hint = st.hint && !tipShowing() ? wrap(st.hint, COL.w - 4, 'sans') : []
   y -= hint.length * 10
   hint.forEach((line, i) => text(line, COL.x + 2, y + i * 10, { font: 'sans', color: CREAM, outline: OUTLINE }))
   // a log line says its piece for a few seconds, then gets out of the way
@@ -2063,9 +2097,8 @@ function tally(st: DuelState): number {
 // keys: 1–4 press the tickets top to bottom, space or enter presses the primary one
 window.addEventListener('keydown', e => {
   if (!state || !cv?.isConnected || e.repeat) return
-  if (rulesKey(e.key)) return e.preventDefault()
   if (drawerKey(e.key)) return e.preventDefault()
-  if (rulesOpen() || drawerOpen()) return
+  if (drawerOpen()) return
   if (panelKey(e.key)) return e.preventDefault()
   if (panelOpen() || state.bare) return
   if (calling()) {
@@ -2081,35 +2114,6 @@ window.addEventListener('keydown', e => {
     presses[i]?.()
   }
 })
-
-// top-left shortcuts into the drawer: VITRINE with a pip per filled slot, and the CARNET
-function vitrineTab(st: DuelState, t: number): void {
-  const over = hit(8, 0, 64, 18, () => openDrawer('vitrine'))
-  look(8, 0, 64, 18, rule('vitrine'))
-  const drop = over ? 2 : 0
-  if (over) outline('hud/vitrine/tab', 8, drop)
-  const bob = drop + (over ? Math.sin(t * 8) * 0.3 : 0)
-  pin('hud/vitrine/tab', 8, bob)
-  vitrineWord(g, 8, Math.round(bob))
-  st.view.me.display.forEach((_, i) => {
-    g.fillStyle = OUTLINE
-    g.fillRect(75 + i * 5, 6 + drop, 4, 4)
-    g.fillStyle = CREAM
-    g.fillRect(76 + i * 5, 7 + drop, 2, 2)
-  })
-}
-
-function carnetTab(): void {
-  const x = 106
-  const over = hit(x, 0, 46, 16, () => openDrawer('carnet'))
-  const drop = over ? 2 : 0
-  nine('hud/plate/paper', x, -4 + drop, 46, 18, over ? CREAM : '#e3d2a8')
-  text('Carnet ?', x + 23, 2 + drop, { font: 'tiny', color: BURGUNDY, align: 'center' })
-}
-
-function langChip(): void {
-  langTab(g, hit(LANG_TAB.x, LANG_TAB.y, LANG_TAB.w, LANG_TAB.h, toggleLang))
-}
 
 function effects(): void {
   for (let i = stamps.length - 1; i >= 0; i--) {
@@ -2161,7 +2165,10 @@ export async function countUp(sd: ShowdownView): Promise<void> {
       const card = st.cardId !== null ? cards.find(c => c.id === st.cardId) : undefined
       l.step = i === 0 ? '' : st.label === 'card' && card ? '' : st.label
       pop(`tag${n}`)
-      if (st.slot !== null && n === 0) l.step = st.label
+      if (st.slot !== null && n === 0) {
+        l.step = st.label
+        caseFired(st.slot, st)
+      }
       if (card) {
         pop(`card${card.id}`)
         const s = springs.get(`card${card.id}`)

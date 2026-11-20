@@ -27,9 +27,10 @@ export function twistLine(v: SeatView): string {
 // returns the twist line's box, so the scene can hover it for the Fiche
 // the strip grows right to fit a long twist name, up to STRIP_MAX, then the line drops to the tiny font
 const STRIP_MAX = 192
-export function runStrip(g: CanvasRenderingContext2D, v: SeatView, round = v.round): { x: number; y: number; w: number; h: number } | null {
+// signUp: the duel's twist sign is hanging, so the strip leaves the twist to it
+export function runStrip(g: CanvasRenderingContext2D, v: SeatView, round = v.round, signUp = false): { x: number; y: number; w: number; h: number } | null {
   const { x, y } = STRIP
-  const twist = twistLine(v)
+  const twist = signUp ? '' : twistLine(v)
   const font = measure(twist, 'sans') + 12 <= STRIP_MAX ? 'sans' : 'tiny'
   const tw = measure(twist, font)
   const w = Math.max(STRIP.w, Math.min(STRIP_MAX, tw + 12))
@@ -42,8 +43,7 @@ export function runStrip(g: CanvasRenderingContext2D, v: SeatView, round = v.rou
 }
 
 // ---------- the language chip ----------
-// FR · EN on a paper tab at the top of every scene, the current one lit. the scene hit-tests LANG_TAB and calls
-// toggleLang (lang.ts) on a click
+// FR · EN on a paper tab on the title screen, the current one lit. in a run the switch is on the carnet's rules page
 
 export const LANG_TAB = { x: 156, y: 0, w: 40, h: 16 }
 
@@ -55,14 +55,6 @@ export function langTab(g: CanvasRenderingContext2D, over: boolean, x = LANG_TAB
   drawText(g, 'FR', x + 12, 2 + drop, { font: 'tiny', color: fr ? BURGUNDY : '#a08a68', align: 'center' })
   drawText(g, '·', x + 20, 2 + drop, { font: 'tiny', color: '#a08a68', align: 'center' })
   drawText(g, 'EN', x + 28, 2 + drop, { font: 'tiny', color: fr ? '#a08a68' : BURGUNDY, align: 'center' })
-}
-
-// the vitrine tab's word is painted into its sprite. in english a patch of the tab's own ink covers it with DISPLAY
-export function vitrineWord(g: CanvasRenderingContext2D, x: number, y: number): void {
-  if (lang() === 'fr') return
-  g.fillStyle = '#2a2010'
-  g.fillRect(x + 10, y + 5, 30, 6)
-  drawText(g, 'DISPLAY', x + 25, y + 4, { font: 'tiny', color: '#e8c260', align: 'center' })
 }
 
 // ---------- zone F, the announcement band ----------

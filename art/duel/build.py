@@ -46,7 +46,8 @@ def export_parts():
                     parts[key] = part
                     slices.append(item)
     from ephemera import parts as paper_parts
-    for key, im in paper_parts().items():
+    from booklet import parts as booklet_parts
+    for key, im in (paper_parts() | booklet_parts()).items():
         parts[key] = im
         w,h = im.size
         centered = key in ("rules/ball","rules/half")

@@ -16,11 +16,11 @@ import { getRival, type RivalId } from '../engine/rivals.ts'
 import { cardEntry, entry, KEYWORDS, type Entry } from '../engine/glossary.ts'
 import type { SeatView, ShopOfferView } from '../engine/match.ts'
 import * as sfx from './sound.ts'
-import { LANG_TAB, drawBand, langTab, runStrip, vitrineWord } from './frame.ts'
-import { toggleLang } from './lang.ts'
+import { drawBand, runStrip } from './frame.ts'
 import { drawPanel, panelClick, panelHover, panelKey, panelOpen } from './panels.ts'
-import { drawDrawer, drawerKey, drawerOpen, drawerPointer, openDrawer, setDrawerHover, type DrawerThing } from './drawer.ts'
+import { drawDrawer, drawerKey, drawerOpen, drawerPointer, setDrawerHover, type DrawerThing } from './drawer.ts'
 import { drawFiche, fiche, ficheInput, setKeywords } from './fiche.ts'
+import { drawTips, tip as teach } from './tips.ts'
 
 export type ShopState = {
   view: SeatView
@@ -463,6 +463,7 @@ function frame(t: number): void {
   sales()
   drawDrawer(g, state.view, now)
   drawBand(g, now,state.view.me.shop?.open ? 76 : 195)
+  drawTips(g, drawerOpen())
   drawFiche(g)
   cv.style.cursor = jeton ? 'none' : lotto || drawer || (panelOpen() ? panelHover(mouse) : over()) ? 'pointer' : 'default'
 }
@@ -627,15 +628,7 @@ function room(st: ShopState): void {
   glow(126, 42, 86, `rgba(208,54,55,${0.14 + 0.02 * Math.sin(now / 700)})`)
   pin('shop/pendant', 288, 0)
   glow(320, 14, 65, 'rgba(255,203,104,.15)')
-  if (st.view.me.shop?.kind === 'big') patron(st) // under the vitrine tab, so the tab stays clickable
-  // the vitrine tab, same as the duel: a shortcut to the bifold's Vitrine page
-  const tab = sprite('hud/vitrine/tab')
-  const overTab = hit(8, 0, tab.w, tab.h, () => openDrawer('vitrine'))
-  if (overTab) outline(imageOf('hud/vitrine/tab'), 8, 2)
-  pin('hud/vitrine/tab', 8, overTab ? 2 : 0)
-  vitrineWord(g, 8, overTab ? 2 : 0)
-  tip(() => entry('hud', 'vitrine'), 8, 0, tab.w, tab.h)
-  langTab(g, hit(LANG_TAB.x, LANG_TAB.y, LANG_TAB.w, LANG_TAB.h, toggleLang))
+  if (st.view.me.shop?.kind === 'big') patron(st)
   stonks(st.view)
   const clock = st.clock()
   if (clock) {
@@ -902,6 +895,7 @@ function offers(st: ShopState): { offer: ShopOfferView; box: { x: number; y: num
       return f ? opaque(f, ax, ay) : ax >= 0 && ay >= 0 && ax < art.width && ay < art.height
     }
     const body = hit(x - 5, SLOT.top - 8, w + 10, SLOT.h + 16, buy, mask)
+    if (f) teach('collectible', 'Collectibles sit in your case and trigger left to right.', { x: x - 5, y: SLOT.top - 8, w: w + 10, h: SLOT.h + 16 }, 'above')
     const tag = hit(center - 21, 294, 43, 17, buy)
     const over = body || tag
     const dt = Math.min(.025, (now - motion.time) / 1000)
@@ -997,13 +991,20 @@ function bottomBar(st: ShopState): void {
   g.fillRect(458, 314, 182, 46)
 
   const spend = { face: MONEY, plinth: '#1e4a24', ink: CREAM }
-  const tickets: [number, number, Ticket][] = [
-    [158, 104, { key: 'restock', label: 'Restock', price: shop.restockPrice ? `$${shop.restockPrice}` : 'free', ...spend, enabled: st.canRestock, onClick: st.onRestock, fiche: 'restock' }],
-    // a small shop has one service: the grading desk at a table's 1st, the bulk bin at its 2nd. the big shop has both
-    [268, 118, { key: 'bulk', label: 'Bin Bulk', price: !shop.services.bulkBin ? 'not today' : shop.bulkInDeck ? `$${shop.bulkPrice}` : 'none', ...spend, enabled: st.canBinBulk, onClick: st.onBinBulk, fiche: 'bulk-bin' }],
-    [392, 96, { key: 'grade', label: 'Grading', price: shop.services.grading ? '$2+' : 'not today', ...spend, enabled: st.canGrade, onClick: st.onGrading, fiche: 'grading' }],
-    [538, 96, { key: 'leave', label: 'Sortir', face: BRASS, plinth: '#3d2a10', ink: INK, enabled: true, primary: true, onClick: st.onLeave }],
+  // a small shop has one service: the grading desk at a table's 1st, the bulk bin at its 2nd. the big shop has both.
+  // a service closed today isn't shown, and the open ones close up from the left
+  const open: [number, Ticket][] = [
+    [104, { key: 'restock', label: 'Restock', price: shop.restockPrice ? `$${shop.restockPrice}` : 'free', ...spend, enabled: st.canRestock, onClick: st.onRestock, fiche: 'restock' }],
   ]
+  if (shop.services.bulkBin) open.push([118, { key: 'bulk', label: 'Bin Bulk', price: shop.bulkInDeck ? `$${shop.bulkPrice}` : 'none', ...spend, enabled: st.canBinBulk, onClick: st.onBinBulk, fiche: 'bulk-bin' }])
+  if (shop.services.grading) open.push([96, { key: 'grade', label: 'Grading', price: '$2+', ...spend, enabled: st.canGrade, onClick: st.onGrading, fiche: 'grading' }])
+  const tickets: [number, number, Ticket][] = []
+  let tx = 158
+  for (const [w, t] of open) {
+    tickets.push([tx, w, t])
+    tx += w + 6
+  }
+  tickets.push([538, 96, { key: 'leave', label: 'Sortir', face: BRASS, plinth: '#3d2a10', ink: INK, enabled: true, primary: true, onClick: st.onLeave }])
   for (const [x, w, t] of tickets) {
     ticket(t, x, 326, w)
     const id = t.fiche
@@ -1022,20 +1023,15 @@ function plate(v: SeatView): void {
   text(v.me.name === 'You' ? 'Vous' : v.me.name, x + 34, y + 9, { color: INK })
   text(`$${plateMoney(v.me.bankroll)}`, x + 12, y + 24, { font: 'didone', color: CASH.paper })
   tip(() => entry('hud', 'bankroll'), x + 8, y + 22, 56, 22)
-  // the shop has no hand or discards, so only the Sleeve's icon, in the duel's first icon slot
-  const ix = x + 70
-  pin('icon/sleeve', ix, y + 35)
-  text(String(v.me.sleeve.length), ix + 11, y + 33, { color: INK })
-  tip(() => entry('hud', 'plate-sleeve'), ix, y + 30, 22, 16)
   marker(v)
 }
 
-// le patron's marker, where the duel pins it: the next payment and the round he collects it at the door
+// le patron's marker, where the duel pins it (under the plate's left end): the next payment and the round he collects it
 function marker(v: SeatView): void {
   const due = v.me.marker
   if (!due) return
-  const x = 100
-  const y = 186
+  const x = 14
+  const y = 198
   pin('hud/marker/note', x, y, reducedMotion.matches ? 0 : Math.sin(now / 800) * 0.018)
   text('Le Patron', x + 4, y + 3, { font: 'tiny', color: '#5c4a36' })
   text(`$${due.due}`, x + 4, y + 12, { color: '#7a1a2c', bold: true })
@@ -1043,6 +1039,7 @@ function marker(v: SeatView): void {
   const round = due.table >= 4 ? (v.lastRound ?? 12) : due.table * ROUNDS_PER_TABLE + 1
   text(`M${round}`, x + 54, y + 14, { font: 'tiny', color: '#5c4a36', align: 'right' })
   tip(() => entry('hud', 'marker', due.due), x, y, 58, 26)
+  teach('patron', `You owe Le Patron $${due.due}. Pay at the next big shop.`, { x, y, w: 58, h: 26 }, 'right')
 }
 
 const breath = () => 0.5 - 0.5 * Math.cos((now / 1200) * Math.PI * 2)
@@ -1057,7 +1054,7 @@ function ticket(t: Ticket, x: number, y: number, w: number): void {
   if (!t.enabled) {
     nine('hud/ticket/face', 0, 3, w, 24, GREY)
     text(t.label, 11, 8, { font: 'chalk', color: TAN, bold: true })
-    // "not today" next to a long label drops to the tiny so the two don't run into each other
+    // a long price next to a long label drops to the tiny so the two don't run into each other
     const room = w - 22 - measure(t.label, 'chalk', true)
     if (t.price) text(t.price, w - 8, 9, { font: measure(t.price, 'sans') <= room ? 'sans' : 'tiny', color: TAN, align: 'right' })
     g.fillStyle = TAN

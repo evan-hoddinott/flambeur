@@ -9,7 +9,7 @@ Coordinates are art px on the 640×360 stage (×2.5 = screen px).
 ## 0. Done when
 
 - [ ] Every screen (duel, small and big shop, draft, pack rip, binder, grading, forge pick, results) shows zones A–F in the same spots. No DOM `.packbox` overlay or `title=` tooltip is left.
-- [ ] The bifold is on the left edge in every scene. D / B / S / V / ? open the right tab from anywhere, and Esc closes it. The counts are correct, and `pile/total` means the same thing everywhere.
+- [ ] The carnet is in the bottom-left corner in every scene. D / B / S / V / ? open the right tab from anywhere, and Esc closes it. The counts are correct, and `pile/total` means the same thing everywhere.
 - [ ] During a match, the Sleeve's inserts sit beside the hand and can be used from there.
 - [ ] The crumpled paper at the table opens the rules sheet: hand rankings with examples and levels, plus the how-a-hand-works lines.
 - [ ] Every rules thing (cards and all modifiers, collectibles, inserts, pochettes, twists, rivals, shopkeeper traits, every HUD icon and badge) shows a Fiche on hover. The Fiche text comes from the engine map, and no rule string is hard-coded in the UI.
@@ -40,30 +40,47 @@ Every screen uses the same zones, including the rebuilt draft, packs, binder, gr
 
 | Zone | Where | What |
 |---|---|---|
-| **A. Run strip** | top-left | Table · Manche · Main in one format ("Table II · Manche 4/12 · Main 1/3"), the next twist, and Le Patron's next payment. The VITRINE tab and the carnet sit here too. The duel chalkboard stays as set dressing. |
-| **B. Bankroll plate** | left, directly above the drawer | The same spot in both scenes: the duel already has it, and the shop shelf shifts right ~40 px to make room. Le Patron's marker note always hangs off it. |
-| **C. Action stack** | bottom-right (508–634 × 230–352) | The **safe or primary action sits in the corner slot**: Play at the bottom, Min below Max, Continue, Sortir, Keep, Done. Secondary actions stack above it, the hint line above those, the toast above the hint. Toasts expire after one beat. |
+| **A. Run strip** | top-left | Table · Manche, and the next twist (on a boss night the hanging twist sign says it instead). In the duel the **hand track** sits top-center: Main 1/3, your pips, the score and the K.O. line on one plate. The duel chalkboard stays as set dressing. |
+| **B. Your plate** | left, directly above the drawer | The same spot in both scenes. Name and money. In the duel's deal and bet it widens to carry your **hand readout**: what your picked cards make, then LOCKED through the bet (base Value × Hype). Le Patron's marker note hangs under its left end. |
+| **C. Action stack** | bottom-right (508–634 × 230–352) | The **safe or primary action sits in the corner slot**: Play at the bottom, Min below Max, Continue, Sortir, Keep, Done. Secondary actions stack above it, the hint line above those, the toast above the hint. Toasts expire after one beat. Nothing else lives in the column. |
 | **D. Rival** | top-right | The duel plate. In the shop, a small "next: <rival>" tag on the same spot, and the big shop's dossier. |
-| **E. Drawer** | left edge, x 0–40, y ~204–320 | The bifold (§3). |
+| **E. Drawer** | bottom-left corner, x 0–40, y ~290–360 at rest | The carnet (§3). Hover pulls it out to x 8–115, y 252–350. |
 | **F. Announcement band** | center, y ~150–240 | One style for every rule callout: K.O., rival sits down, marker due or paid, twist on the first deal, spoils. It's the band the K.O. callout already uses, French big and English under (READABILITY §10). |
 
 The **round-end tally** is the only place money gets itemized: marker, spoils skip, and so on.
 
+### One home per thing (Nov 19 cleanup)
+
+Every piece of information has one home on the HUD. A world prop can repeat a number (the chalkboard's Ante/Max, the pile's count), but it's never the only place it shows. Cut on Nov 19, and don't bring them back:
+
+- **Top bar:** the VITRINE/DISPLAY and CARNET tabs. The carnet in the corner and D/B/S/V/? are the way in. FR · EN and Tips moved to the foot of the carnet's rules page (the title screen keeps its FR · EN chip).
+- **The rules ball and the separate rules sheet.** The carnet's Rules tab is the one rules view.
+- **Plate counters** (cards in hand, discards, Sleeve) on both plates. They show where you use them: your fan, the Discard ticket, the Sleeve cards, the rival's backs.
+- **Bankroll chip stacks.** The pot keeps its chips.
+- **The felt K.O. badge and the rival's pips.** Both live on the hand track.
+- **The score tab over the buttons.** It's your plate's readout now.
+- **"You bet first" headline and "À vous" banner.** The 1er puck, the chime and the lamp flare stay. The bet hint says the order once.
+- **One voice:** while a first-encounter tag is up, the hint line waits. Nothing picked means no hint, since the readout says "pick 1–5 cards".
+- **Shop:** services closed today are hidden, not greyed "not today" tickets.
+
 **Color:** violet only ever means Discard, so the Grading ticket gets recolored. Green only ever means Min.
 
-## 3. The drawer: a leather bifold on the left edge
+## 3. The drawer: a worn leather carnet in the corner
 
-One prop, a leather **porte-cartes** (bifold wallet), sits half off-screen on the left edge in every scene. It's in the foreground, at the same coordinates in the duel, the tabac and every rebuilt screen.
+One prop, a brown leather **carnet** (a gambler's notebook), pokes out of the bottom-left corner in every scene, tilted, mostly off-stage. It's in the foreground, at the same coordinates in the duel, the tabac and every rebuilt screen. Art: `art/duel/booklet.py` (`drawer/book/*`, `drawer/leaf/*`, `drawer/dock`), packed by `art/duel/build.py`.
 
-- **Closed (peek):** the spine and the edge of the fold show, with tabs sticking out for what's inside. Each tab has a live count:
-  - **Étui** (your starter's tuck box): `pile/total`
-  - **Classeur** (binder): count, and a STONKS glint when a hot card is inside
-  - **Sleeve:** inserts held, out of 2
-  - **Vitrine:** filled slots
-  - **Carnet** (rules): a red ribbon when there's an unread entry
-- **Hover:** the bifold springs ~10 px further in, gets a cream 1 px outline and a caption tag (`Deck · 14/18 · D`). Hit box ~44×40 per tab.
-- **Open: an unfolding animation.** The bifold slides to center and swings open about its spine (scaleX flip, spring overshoot as in `duel.ts` `spring`). The two leaves become the viewer: the left leaf holds the tab's contents and the right leaf holds the details (a Fiche, counts). The tab you clicked is the page it opens on. Sound: leather creak, then a soft snap.
-- **One viewer with tabs:** Étui · Classeur · Sleeve · Vitrine · Carnet. Hotkeys **D / B / S / V / ?** open it on the matching tab, the same key again or Esc closes it, and the tabs switch pages. Number keys and Space stay reserved for cards.
+**It's been carried for years.** Nothing on it is new: the bottom brass cap fell off (nail holes and an unfaded patch where it sat), the top one is dented and tarnished, a cigarette burned it once, a glass left a ring, the gilt is rubbed off where the thumb opens it, stitches are missing and one end hangs loose, the hinge is cracked, the elastic is stretched crooked, the fore-edge is grubby. The papers stuck in it are crumpled, dog-eared, taped and coffee-stained, the pencil is chewed down, the pages are foxed and water-stained with tally marks in the margin. Keep that when touching the art.
+
+- **At rest:** the carnet sits in the corner at about −9°, with its index tabs and the papers in its top edge (a tabac receipt, a folded note, a card) peeking out. The tabs never sit flush.
+  - **Étui** (red, card stock, dog-eared): `pile/total`
+  - **Classeur** (blue divider, torn and taped): count, and a STONKS glint when a hot card is inside
+  - **Sleeve** (glassine): inserts held, out of 2
+  - **Vitrine** (green ticket stub): filled slots
+  - **Carnet** (torn notebook paper): rules
+- **Hover:** it springs up and out of the corner and straightens. The papers rise a little, the tabs slide out to show their counts, and the tab under the mouse pulls out further with a cream outline and a caption tag (`Deck · 14/18 · D`).
+- **Click: it flies to the middle and opens.** A tab opens on that page; the cover opens where you last were. The elastic snaps off (thunk), the carnet grows to full size on its way to the center (the small sprite hands over to the big art at 95%), lands as the shut book with its tabs out of the right leaf, then the cover creaks and swings over the spine to become the left leaf. The left leaf holds the tab's contents, the right leaf the details (a Fiche, counts). Closing runs it backwards: the cover shuts, then it flies home.
+- **Open tabs** stick out of the right leaf's fore-edge, the open one pulled out furthest. Click one to turn to it.
+- **One viewer with tabs:** Étui · Classeur · Sleeve · Vitrine · Carnet. Hotkeys **D / B / S / V / ?** fly it open on the matching tab, the same key again or Esc closes it, and the tabs switch pages. Number keys and Space stay reserved for cards.
 - **Étui tab:**
   - Filters: All / Pile / In hand / Played this Table / At grading (the card shown greyed, with its parcel).
   - Bulk and Jokers get their own row.
@@ -71,11 +88,11 @@ One prop, a leather **porte-cartes** (bifold wallet), sits half off-screen on th
   - Suit and rank counts, as the current viewer has (main.ts ~360–452).
 - **Vitrine tab:** collectibles in scoring order. The top-left VITRINE tab stays as a shortcut (it gets one pip per filled slot), and the shop uses the duel's canvas case instead of the DOM modal.
 - **"Show labels" toggle:** pins every caption. On by default for the demo.
-- The current pile prop on the duel table can stay as a passive count. The bifold is the button. The shop's bottom-bar deck stack and binder book go away.
+- The current pile prop on the duel table can stay as a passive count. The carnet is the button. The shop's bottom-bar deck stack and binder book go away.
 
 ## 4. The Sleeve: a drawer tab everywhere, cards in hand at the table
 
-- **Everywhere:** the Sleeve is a tab in the bifold (S), like the other containers. It shows both inserts with their Fiches.
+- **Everywhere:** the Sleeve is a tab in the carnet (S), like the other containers. It shows both inserts with their Fiches.
 - **During a match:** the 2 inserts also **show as two separate cards off to the side of your hand**. Hover gives a Fiche, and clicking one uses it.
 - The tiny "SLEEVE" label on the zinc and the empty cuff slots go away.
 - A third insert from a pack sits crooked until you toss one.
@@ -84,7 +101,7 @@ One prop, a leather **porte-cartes** (bifold wallet), sits half off-screen on th
 
 ## 5. Compare mode: choosing next to your deck
 
-Whenever you're choosing cards (draft rows, pack sort, spoils, shop cards), the bifold **opens automatically, docked at reduced size** beside the offer.
+Whenever you're choosing cards (draft rows, pack sort, spoils, shop cards), the carnet **opens automatically, docked at reduced size** beside the offer.
 
 - **Hovering an offer:**
   - ghosts it into its suit row (a pulsing outline at its sort position)
@@ -157,7 +174,7 @@ Every rules thing in the game is explained by the same box.
   - **Poker hands:** every hand type from High Card to the top, each with a tiny example row of cards, its base Value/Hype and its current level. Players who don't know poker learn it here.
   - **How a hand works:** best of 3, Play / Flamber / Discard, Min / Max, Appraisal = Value × Hype × 2^Grade, K.O. One line each, from the Fiche map.
   - **Art rework:** a new crumpled-ball sprite that reads as "notes" (visible scribbles, a corner of a hand-ranking chart), an uncrumple animation (3–4 frames: ball, half-open, creased sheet), and the sheet itself as creased paper with a pencil-written chart. Replaces the current cheat-sheet ball and panel (duel.ts ~1889).
-- **Carnet:** the rules notebook in the bifold, also reachable from the top-left. Three tabs: Hands (the same sheet as the rules paper), Glossary (generated from the Fiche map), This run (the Patron schedule, rival dossier, log).
+- **Carnet:** the rules notebook in the drawer, also reachable from the top-left. Three tabs: Hands (the same sheet as the rules paper), Glossary (generated from the Fiche map), This run (the Patron schedule, rival dossier, log).
 - **Buraliste one-liners** in the shop's speech bubble, French big and English under: *"Le Roussi ? Des petites cartes."* / "Mostly low cards." Le Patron stays silent and teaches only through his ledger line.
 - **Keyword hovers** in the hint, tally and tags: rule words get a dotted underline and open their Fiche.
 
@@ -166,7 +183,7 @@ Every rules thing in the game is explained by the same box.
 Each rebuilt screen keeps the scene as its backdrop and the frame zones live. Order:
 1. **Pack rip on the zinc.** Cards physically fly to the Étui or the Classeur.
 2. **Draft rows on the felt**, with "Keep these 3/3" in the corner slot.
-3. **Binder and grading** as bifold pages, with Sell and Ship in the action stack.
+3. **Binder and grading** as carnet pages, with Sell and Ship in the action stack.
 4. **Forge pick:** trait chips on the new card.
 5. **Results** on the duel table, with Le Patron's note in band F.
 
@@ -203,7 +220,7 @@ These are rule and name changes, so update DESIGN.md in the same change.
 4. The bifold with placeholder art, the tabbed viewer and hotkeys (Sleeve tab included). The Sleeve as two cards beside the hand during a match. The rules paper (placeholder sheet first, art after).
 5. Compare mode: pack sort, then spoils, then draft.
 6. Canvas rebuilds (§8).
-7. Final bifold art, the unfolding animation and sounds. Rules paper art: the crumpled ball, the uncrumple frames and the sheet.
+7. Final carnet art (done Nov 18), the flight and cover swing, and sounds. Rules paper art: the crumpled ball, the uncrumple frames and the sheet.
 
 Demo day (Fri Nov 20) is fixes only, so anything from steps 4–7 that isn't in by Thursday night waits.
 
@@ -234,13 +251,13 @@ export function ficheHtml(e: Entry): string                         // .fiche DO
 **Bifold and viewer**, new `src/ui/drawer.ts`. Canvas, drawn by both scenes.
 ```ts
 export type Tab = 'etui' | 'classeur' | 'sleeve' | 'vitrine' | 'carnet'
-export function drawDrawer(g: CanvasRenderingContext2D, v: MatchView, t: number): void  // peek on the left edge, or the open bifold
+export function drawDrawer(g: CanvasRenderingContext2D, v: MatchView, t: number): void  // the carnet in its corner, or the open book
 export function drawerHit(x: number, y: number): Tab | null
 export function openDrawer(tab: Tab, compare?: Compare): void; export function closeDrawer(): void
 export function drawerKey(key: string): boolean                     // D/B/S/V/?/Esc, true if handled
-export type Compare = { offers: Card[]; dest?: 'deck' | 'binder' }   // compare mode docks the bifold small beside the offer
+export type Compare = { offers: Card[]; dest?: 'deck' | 'binder' }   // compare mode docks the drawer small beside the offer
 ```
-**Rules paper**, `src/ui/rules.ts`: `drawRules(g, v)`, the same sheet the carnet's Hands tab renders.
+**Rules columns**, `src/ui/rules.ts`: `handsColumn` and `howColumn`, drawn by the carnet's Rules tab (the one rules view since Nov 19).
 
 **Compare helpers**, `src/engine/compare.ts`. Pure.
 ```ts

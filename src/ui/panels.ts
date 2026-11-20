@@ -53,6 +53,8 @@ const OUTLINE = '#0e0b0a'
 const SHEET: Box = { x: 166, y: 20, w: 334, h: 332 }
 const DOCKED_SHEET: Box = { x: 212, y: 20, w: 288, h: 332 }
 const COL = { x: 508, w: 126, bottom: 352 }
+// a card's fiche docks at the top of the action column, so it never covers the row of cards you're sorting
+const DOCK = { x: COL.x - 4, y: 60, w: 0, h: 0 }
 const PITCH = 30
 export const CARD_H = (w: number) => Math.round(w * 88 / 64)
 
@@ -135,7 +137,7 @@ export function drawPanel(g: CanvasRenderingContext2D, now: number, mouse: { x: 
   const list = p.buttons
   list.forEach((b, i) => ticket(g, hit, b, COL.x, COL.bottom - (list.length - i) * PITCH + 3, COL.w))
   const hc = hoverCard as { card: Card; at: Box } | null // set inside drawCard, which ts can't see
-  if (hc) fiche(cardEntry(hc.card), hc.at)
+  if (hc) fiche(cardEntry(hc.card), DOCK)
   p.onCardHover?.(hc?.card ?? null, hc?.at ?? { x: 0, y: 0, w: 0, h: 0 })
 }
 

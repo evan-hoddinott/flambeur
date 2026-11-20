@@ -56,7 +56,7 @@ export type HandResult = {
 
 const better = (a: HandType, b: HandType) => HAND_TYPES.indexOf(a) > HAND_TYPES.indexOf(b)
 
-type RankHand = { type: HandType; ranks: number[] }
+type RankHand = { type: HandType; ranks: number[]; most: number } // most = cards in the biggest group
 
 function rankHand(cards: Card[], useTraits: boolean): RankHand {
   const totals = new Map<number, number>()
@@ -73,12 +73,13 @@ function rankHand(cards: Card[], useTraits: boolean): RankHand {
     groups[0][1] += crayons
   }
   const [top, second] = groups
-  if (top[1] >= 4) return { type: 'quads', ranks: [top[0]] }
-  if (top[1] >= 3 && second && second[1] >= 2) return { type: 'fullhouse', ranks: [top[0], second[0]] }
-  if (top[1] >= 3) return { type: 'trips', ranks: [top[0]] }
-  if (top[1] >= 2 && second && second[1] >= 2) return { type: 'twopair', ranks: [top[0], second[0]] }
-  if (top[1] >= 2) return { type: 'pair', ranks: [top[0]] }
-  return { type: 'high', ranks: [] }
+  const most = top[1]
+  if (most >= 4) return { type: 'quads', ranks: [top[0]], most }
+  if (most >= 3 && second && second[1] >= 2) return { type: 'fullhouse', ranks: [top[0], second[0]], most }
+  if (most >= 3) return { type: 'trips', ranks: [top[0]], most }
+  if (most >= 2 && second && second[1] >= 2) return { type: 'twopair', ranks: [top[0], second[0]], most }
+  if (most >= 2) return { type: 'pair', ranks: [top[0]], most }
+  return { type: 'high', ranks: [], most }
 }
 
 function isFlush(cards: Card[], useTraits: boolean): boolean {
@@ -149,4 +150,13 @@ export function evaluateHand(played: Card[]): HandResult {
   const mainRanks = FAMILIES[type].includes('rank') ? rankWith.ranks : [highest]
   const rankScored = FAMILIES[type].includes('rank') || bonus.includes(rankWith.type)
   return { type, bonus, scoring, mainRanks, rankRanks: rankScored ? rankWith.ranks : [] }
+}
+
+// the rules a player can't see from the hand name alone, said where the hand is named. '' = nothing to add
+export function handNote(played: Card[], type: HandType): string {
+  const cards = played.filter(c => !c.bulk)
+  if (!cards.length) return ''
+  if (type === 'quads' && rankHand(cards, true).most >= 5) return '5 of a kind counts as 4'
+  if (type === 'straight' && straightTop(cards, true) === 14) return 'Royal needs one suit'
+  return ''
 }

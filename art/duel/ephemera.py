@@ -16,49 +16,6 @@ def parts():
         out[name] = im
         return ImageDraw.Draw(im)
 
-    for name, w, h in [
-        ("peek", 34, 122),
-        ("leaf", 268, 266),
-        ("back", 268, 266),
-        ("dock", 196, 296),
-    ]:
-        d = surface("drawer/" + name, w, h)
-        d.rounded_rectangle((0, 0, w - 1, h - 1), 5, "#4e1020", INK)
-        d.rounded_rectangle((2, 2, w - 3, h - 3), 4, outline="#7a1a2c")
-        rng = Random(18)
-        for _ in range(w * h // 30):
-            x, y = rng.randrange(4, w - 5), rng.randrange(4, h - 5)
-            d.line((x, y, x + 2, y - 1), "#2a0910")
-        for x in range(6, w - 7, 5):
-            for y in (4, h - 5):
-                d.line((x, y, x + 2, y), BRASS)
-        for y in range(7, h - 7, 5):
-            for x in (4, w - 5):
-                d.line((x, y, x, y + 2), BRASS)
-        if name in ("leaf", "dock"):
-            d.rounded_rectangle((7, 7, w - 8, h - 8), 3, FOLD, DARK)
-            d.rounded_rectangle((10, 9, w - 10, h - 11), 2, PAPER, "#8c7656")
-        elif name == "back":
-            x, y = w // 2, h // 2
-            d.polygon(
-                [(x, y - 18), (x + 14, y), (x, y + 18), (x - 14, y)], outline=BRASS
-            )
-            d.line([(x - 4, y + 7), (x - 4, y - 7), (x + 5, y - 7)], GOLD, 2)
-            d.line((x - 4, y, x + 2, y), BRASS, 2)
-        else:
-            d.line((w - 8, 4, w - 8, h - 4), INK, 2)
-    for tab, ink in [
-        ("etui", "#a82a38"),
-        ("classeur", "#28497a"),
-        ("sleeve", "#c99a3a"),
-        ("vitrine", "#5c8f2a"),
-        ("carnet", "#d04a4e"),
-    ]:
-        d = surface("drawer/tab/" + tab, 46, 21)
-        d.polygon([(0, 0), (41, 0), (45, 4), (45, 17), (42, 20), (0, 20)], PAPER, DARK)
-        d.line((3, 1, 39, 1), CREAM)
-        d.line((41, 5, 41, 15), ink, 4)
-        d.line((3, 18, 38, 18), FOLD)
     d = surface("drawer/parcel", 14, 11)
     d.polygon([(0, 3), (4, 0), (13, 2), (13, 9), (9, 10), (0, 9)], FOLD, DARK)
     d.line([(3, 1), (9, 4), (9, 10)], CREAM)

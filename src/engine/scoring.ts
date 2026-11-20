@@ -43,6 +43,12 @@ export type ScoreCtx = {
 export const LEVEL_VALUE = 15
 export const LEVEL_HYPE = 1
 
+// a hand type's starting value × hype: its base, its level, the starter box's tweak. the hand preview shows this
+export function handBase(type: HandType, level: number, hypeMod?: Partial<Record<HandType, number>>): { value: number; hype: number } {
+  const base = HAND_BASE[type]
+  return { value: base.value + LEVEL_VALUE * level, hype: base.hype + LEVEL_HYPE * level + (hypeMod?.[type] ?? 0) }
+}
+
 // what card modifiers add when the card scores. the glossary reads these too
 export const FOIL_VALUE = 30
 export const HOLO_HYPE = 4
@@ -67,14 +73,14 @@ export function appraise(played: Card[], ctx: ScoreCtx): Appraisal {
   // primary hand first, then any bonus hands forged traits unlocked. each one's base stacks
   for (const [i, type] of [hand.type, ...hand.bonus].entries()) {
     const level = ctx.levels[type]
-    const base = HAND_BASE[type]
+    const base = handBase(type, level, ctx.hypeMod)
     const name = level > 0 ? `${HAND_NAMES[type]} lv${level + 1}` : HAND_NAMES[type]
     steps.push({
       label: i === 0 ? name : `+ ${name}`,
       cardId: null,
       slot: null,
-      value: base.value + LEVEL_VALUE * level,
-      hype: base.hype + LEVEL_HYPE * level + (ctx.hypeMod?.[type] ?? 0),
+      value: base.value,
+      hype: base.hype,
       xhype: 1,
       grade: 0,
     })

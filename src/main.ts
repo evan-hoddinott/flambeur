@@ -3,8 +3,8 @@
 // it renders only from a SeatView: offline it runs step() itself, online the server does and sends the view over net.ts
 import { JOKERS, SUITS, SUIT_GLYPH, sellPrice as cardSellPrice, cardName, rankLabel, stuckMate, type Card, type Trait } from './engine/cards.ts'
 import { describe, getDef } from './engine/collectibles.ts'
-import { COLLECTIBLE_PRICE, PLAY_SIZE, SHIPPERS, SLEEVE_SLOTS, tableOf, type Shipper } from './engine/economy.ts'
-import { DRAFT_PICKS, getStarter, type StarterId } from './engine/starters.ts'
+import { COLLECTIBLE_PRICE, SHIPPERS, SLEEVE_SLOTS, tableOf, type Shipper } from './engine/economy.ts'
+import { DRAFT_PICKS, autoDraft, getStarter, type StarterId } from './engine/starters.ts'
 import { HAND_NAMES } from './engine/hands.ts'
 import { randomSeed } from './engine/rng.ts'
 import { autoKeep, forgePlan, type ForgePlan } from './engine/forge.ts'
@@ -32,6 +32,7 @@ import { showShop, shelfCenter, gradingReturn, clearGradingReturn, dropCigarette
 import { setPanel, grid, fit, CARD_H, type Panel, type Ui } from './ui/panels.ts'
 import { closeCompare, closeDrawer, openDrawer, setCompareHover, setDrawerActions, setGlossary, type Compare } from './ui/drawer.ts'
 import { setKeywords } from './ui/fiche.ts'
+import { tip } from './ui/tips.ts'
 import { announce, bandShowing, type Tone } from './ui/frame.ts'
 import { twistName } from './engine/twists.ts'
 
@@ -349,6 +350,7 @@ function saveScore(): void {
     lb.push({ score: m.result!.scores[ME], bankroll: m.players[ME].bankroll, won: m.result!.winner === ME, best: best.total })
     lb.sort((a, b) => b.score - a.score)
     localStorage.setItem(`flambeur:lb:${m.config.seed}:${difficulty}`, JSON.stringify(lb.slice(0, 10)))
+    localStorage.setItem(FIRST_DONE, '1')
   } catch {
     // private window etc, the leaderboard just doesn't persist
   }
@@ -374,7 +376,7 @@ function renderTitle(): void {
     })),
     dailyLabel: `Daily run · ${daily}`,
     daily: () => startRun(daily),
-    random: () => startRun(randomSeed()),
+    random: () => (firstRunDone() ? startRun(randomSeed()) : firstRun()),
     playSeed: s => startRun(s.toUpperCase()),
     board: {
       title: `Today's leaderboard · ${name} (this browser)`,
@@ -489,6 +491,30 @@ function startRun(seed: string, autoplay = false): void {
   // dev only: ?quick&wild makes the rival bet at random, so folds and flambés come up fast for testing
   const wild = QUICK && new URLSearchParams(location.search).has('wild') ? { style: 'random' } : {}
   match = newMatch({ mode: 'solo', seed, seats: [{ kind: 'human', name: 'You', ...(autoplay ? { style: 'house' } : {}) }, { kind: 'bot', name: 'Rival', difficulty, ...wild }] })
+  render()
+}
+
+// the first run on this browser (docs/ONBOARDING.md #2): a seed found by sim/firstseed.ts, Classic with its rows
+// drafted for you, an easy rival. it has a Pair in the first hand, a round 1 you can knock out and a Top Loader
+// you can afford in the first shop. every system is live, it just starts kind. ?first plays it again
+const FIRST_SEED = 'PREMIERE-17'
+const FIRST_DONE = 'flambeur.firstRun'
+
+function firstRunDone(): boolean {
+  try {
+    return localStorage.getItem(FIRST_DONE) === '1'
+  } catch {
+    return true
+  }
+}
+
+function firstRun(): void {
+  difficulty = 'easy'
+  startRun(FIRST_SEED)
+  let m = match!
+  m = step(m, ME, { type: 'pickBox', box: 'classic' }).match
+  m = step(m, ME, { type: 'draft', rows: autoDraft(m.players[ME].draft!.rows!) }).match
+  match = m
   render()
 }
 
@@ -941,6 +967,7 @@ function packPanel(): Panel {
           g.restore()
         }
         if (p.settled && p.doneAt === null) {
+          if (i === 0) tip('deckbinder', 'Click to switch. Deck cards get played, Binder cards get sold.', { x: x - w / 2, y: y - CARD_H(w) / 2, w, h: CARD_H(w) + 12 }, 'below')
           ui.card(c, x - w / 2, y - CARD_H(w) / 2, w, {
             picked: deck,
             tag: (p.discoveries.has(c.id) ? 'New · ' : '') + (deck ? 'Deck' : 'Binder'),
@@ -1397,8 +1424,9 @@ function dealSlips(me: SeatView['me']): { slips: Slip[]; hint: string } {
 
   const merges = n > 0 && !!forgePlan(picked)
   const grindable = picked.filter(c => !c.bulk)
+  // nothing picked: the hand track and your plate's readout already say which hand and what to do
   const hint = !n
-    ? `Hand ${v().hands?.hand ?? 1} of 3. Pick 1–${PLAY_SIZE} cards to play, flambé or discard.`
+    ? ''
     : merges ? 'Flamber merges them into a ★ card for your next hand. This hand scores 0.'
     : `Play scores them. Flamber: ${rule('hud', 'flamber')}.`
   const lock = (type: 'play' | 'flamber', grind: number | null) => {
@@ -1456,7 +1484,9 @@ function renderTable(): void {
       void dispatch({ type: 'bet', choice: c })
     } }))
     const off = (['min', 'max'] as const).filter(c => b.why[c]).map(c => `${BET_LABEL[c]}: ${b.why[c]}.`).join(' ')
-    hint = [push ? `Last push: ${rule('hud', 'push')}.` : `Max: ${rule('hud', 'max')}.`, off].filter(Boolean).join(' ')
+    // the bet order, said once before the first bet (the 1er puck carries it after)
+    const order = !b.choices.length ? (me.bankroll === view_.others[0].bankroll ? 'You bet first (tied: it alternates).' : 'You bet first: more money goes first.') : ''
+    hint = [order, push ? `Last push: ${rule('hud', 'push')}.` : `Max: ${rule('hud', 'max')}.`, off].filter(Boolean).join(' ')
   } else if (view_.phase === 'spoils' && view_.spoils?.toPick === me.seat) {
     hint = `Spoils: pick one for your deck. ${rule('hud', 'spoils', 1)}. ${rule('hud', 'spoils', 2)}.`
     docked = { offers: [], dest: 'deck' }
@@ -1794,6 +1824,7 @@ setGlossary(carnetEntries())
 artReady = true
 if (joinCode) panTo(2) // came in on a room link: start down in the sewers, where joining happens
 if (QUICK) quickStart()
+else if (new URLSearchParams(location.search).has('first')) firstRun() // also the golden-path demo run
 else renderTitle()
 
 // dev only: ?quick&auto plays your seat with the bot through the real ui, a full run with every screen drawn

@@ -24,7 +24,8 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 | `docs/DUEL.md` | Duel scene spec: layout, characters and the 10 masks, table, room, HUD, sprite list. |
 | `docs/SHOP.md` | Shop scene spec: first-person tabac counter, the offer shelf, binder, grading window, pack rip, sprite list. |
 | `docs/CARDS.md` | Card art spec for the art agent: every segmented sprite, sizes, layout, layer order, export. §0.5 = special cards are Balatro-loud, one visual channel per modifier slot. |
-| `docs/UX.md` | **The UI frame (Nov 18)**: fixed zones on every screen, the left-edge bifold drawer (deck/binder/sleeve/vitrine/carnet), the Sleeve also as 2 cards beside the hand in a match, the rules paper, compare mode, the Fiche description box, teaching. Wins over ART/DUEL/SHOP on where UI lives. |
+| `docs/UX.md` | **The UI frame (Nov 18)**: fixed zones on every screen, the corner carnet drawer (deck/binder/sleeve/vitrine/carnet), the Sleeve also as 2 cards beside the hand in a match, the rules paper, compare mode, the Fiche description box, teaching. Wins over ART/DUEL/SHOP on where UI lives. |
+| `docs/ONBOARDING.md` | **Onboarding build list (Nov 19)** from the playtest and `reports/Roguelike first run onboarding.md`: hand preview, first run seed, first-encounter tags, Fiche placement, vocabulary. Wins over UX.md §7 on teaching. |
 | `docs/READABILITY.md` | How interactables read: color-coded ticket buttons, outlined text, prop hover cues. Amends ART.md §13. |
 | `pitch.html` | Visual pitch page for Evan's friend. It's published on It as `pull-rate-pitch` (its old name) and is older than DESIGN.md. |
 | `collectibles-draft.md` | An old 58-idea collectible brainstorm with a Codex review. It's superseded by DESIGN.md and `src/engine/collectibles.ts`. |
@@ -35,9 +36,11 @@ It's a Balatro-inspired **booster-pack poker roguelike** in the browser:
 pnpm dev                     # vite dev server (or the "flambeur" config in .claude/launch.json, port 5174)
                              # dev only: open /?quick to auto-draft straight to the first deal, /?quick&shop for the round 2 shop,
                              # /?quick&wild for a rival that bets at random (folds and flambés come up fast)
+                             # /?first plays the seeded first run (also the golden-path demo, works in prod too)
 pnpm test                    # node:test, src/engine/*.test.ts
 pnpm exec tsc --noEmit -p .  # typecheck
 pnpm build                   # typecheck + vite build
+node sim/firstseed.ts --tries 400  # seeds for the first run: classic, a pair in hand 1, a round 1 KO, an affordable collectible
 node sim/econ.ts --runs 1000 --policy greedy|cautious|random --difficulty easy|medium|hard --starter classic|forge|suited|highroller|bargain|collector|standard --seed sim
 ```
 
@@ -87,9 +90,10 @@ src/ui/duel.ts   the duel scene on one canvas: layout from art/duel/review.py, s
 src/ui/shop.ts   the tabac on one canvas: the buraliste, the offer shelf, sign, STONKS board, tickets, le patron + the scouting dossier
                  (big shop), the Sleeve on the zinc. art from art/shop/*.py (`python art/shop/counter.py` rebuilds shop.png/json)
 src/ui/frame.ts  the run strip and the announcement band, shared by both scenes
-src/ui/drawer.ts the left-edge bifold drawer (deck/binder/sleeve/vitrine/carnet) and compare mode (UX.md)
+src/ui/drawer.ts the corner carnet drawer (deck/binder/sleeve/vitrine/carnet) and compare mode (UX.md)
 src/ui/fiche.ts  the description box on every hover, text from src/engine/glossary.ts
-src/ui/rules.ts  the rules paper in the duel
+src/ui/tips.ts   first-encounter tags (docs/ONBOARDING.md): one pinned line the first time a thing is usable, the TIPS chip
+src/ui/rules.ts  the rules columns (hand chart, how a hand works) the carnet's Rules tab draws
 src/ui/placeholders.ts  flat stand-ins for v2 sprites not drawn yet (docs/V2-ART.md), registered under their real ids. delete each when its art lands
 src/ui/collectibles.ts  collectible art on the vitrine
 src/ui/font.ts   bitmap text from art/fonts (sans, tiny, didone, chalk). glyphs are text grids in art/fonts/*.txt, `python art/fonts/build.py` rebuilds (also the woff2s style.css uses for DOM text)
@@ -184,7 +188,7 @@ sim/econ.ts      headless duel sim (your policy vs rival difficulty), the balanc
 
 **Verified:** tests, typecheck and build pass. A full `/?quick&auto` run in headless Chromium (draft → round 12 → results) throws nothing; Play/Flamber/Discard, bets, reveal, tally, spoils and both shops checked by hand. Only console noise: `/api/me` 502 with no game server running.
 
-**UX frame (docs/UX.md) is built:** run strip, bifold drawer in both scenes, Fiche on every hover with glossary text, compare mode on pack sort/spoils/draft, Sleeve inserts beside the hand, rules paper, one announcement band, every screen on canvas. A full `/?quick&auto` and `/?quick&wild&auto` run clean.
+**UX frame (docs/UX.md) is built:** run strip, carnet drawer in both scenes, Fiche on every hover with glossary text, compare mode on pack sort/spoils/draft, Sleeve inserts beside the hand, rules paper, one announcement band, every screen on canvas. A full `/?quick&auto` and `/?quick&wild&auto` run clean.
 
 **Open problems:**
 - **Shop share** of the greedy bot's actions is ~47%.

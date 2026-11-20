@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { newCard, type Card, type Suit, type Trait } from './cards.ts'
-import { evaluateHand } from './hands.ts'
+import { evaluateHand, handNote } from './hands.ts'
 import { appraise, emptyLevels } from './scoring.ts'
 import { autoKeep, buildForged, forgePlan, grindCard } from './forge.ts'
 import { starterOffer } from './starters.ts'
@@ -261,4 +261,18 @@ test('starter box offer is 3 different decks and the same for the same seed', ()
   const a = starterOffer('2026-11-16')
   assert.equal(new Set(a).size, 3)
   assert.deepEqual(starterOffer('2026-11-16'), a)
+})
+
+test('four 9s + a crayon is 5 of a kind, scored and labeled as four of a kind', () => {
+  const cards = [c(9, 'S'), c(9, 'H'), c(9, 'D'), c(9, 'C'), c(2, 'S', { knockoff: { kind: 'crayon' } })]
+  assert.equal(evaluateHand(cards).type, 'quads')
+  assert.equal(handNote(cards, 'quads'), '5 of a kind counts as 4')
+  assert.equal(handNote(cards.slice(0, 4), 'quads'), '')
+})
+
+test('10 J Q K A in mixed suits is a straight that notes royal needs one suit, A 2 3 4 5 does not', () => {
+  const royal = [c(10, 'S'), c(11, 'H'), c(12, 'D'), c(13, 'C'), c(14, 'S')]
+  assert.equal(evaluateHand(royal).type, 'straight')
+  assert.equal(handNote(royal, 'straight'), 'Royal needs one suit')
+  assert.equal(handNote([c(14, 'S'), c(2, 'H'), c(3, 'D'), c(4, 'C'), c(5, 'S')], 'straight'), '')
 })
