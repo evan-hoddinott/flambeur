@@ -6,6 +6,8 @@ Everything here is in *played* pitch and tempo: F minor, ~106 bpm. Song.tape ren
 and slows the tape back down (Balatro's trick), so pitch, tempo, reverb tails and transients all drop together.
 Beats are quarter notes, 7 to a bar, grouped 4 + 3: a bar of four, then a waltz.
 """
+import os
+
 import numpy as np
 from pedalboard import Chorus, Compressor, Distortion, Gain, HighpassFilter, LowpassFilter, Phaser
 
@@ -36,7 +38,8 @@ def hz(rate):
     return rate / TAPE
 
 
-IRS = "/home/evanh/Music/game-composition/sample-packs/bricasti-m7/Samplicity - Bricasti IRs version 2023-10, quad channel files, 48 Khz"
+# the samplicity bricasti m7 impulse responses (quad, 48k), not in the repo
+IRS = os.environ.get("BRICASTI_IRS") or os.path.expanduser("~/Music/game-composition/sample-packs/bricasti-m7/Samplicity - Bricasti IRs version 2023-10, quad channel files, 48 Khz")
 PLATE = f"{IRS}/2 Plates 02 Dark Plate, 48K.wav"
 HALL = f"{IRS}/1 Halls 01 Large Hall, 48K.wav"
 ROOM = f"{IRS}/3 Rooms 16 Djangos Room, 48K.wav"  # le tabac, of course
