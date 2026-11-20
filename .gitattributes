@@ -1,0 +1,10 @@
+# atlases and data written by the art and music build scripts
+art/**/*.json        linguist-generated
+public/music/*.json  linguist-generated
+
+# preview and proof pages for the art, and the archived pitch
+art/**/*.html        linguist-documentation
+docs/archive/**      linguist-documentation
+
+# third-party cc0 samples, untouched (art/sfx/CREDITS.md)
+art/sfx/raw/**       linguist-vendored

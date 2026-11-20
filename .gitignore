@@ -6,3 +6,13 @@ __pycache__/
 
 # music renders, wavs and stems (art/music/build.py)
 art/music/out/
+
+# local research and tool caches, not part of the repo
+reports/
+research_notes/
+.ruff_cache/
+.venv/
+
+# per-machine agent config
+.mcp.json
+.claude/settings.local.json
