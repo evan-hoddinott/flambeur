@@ -17,7 +17,7 @@ Sizes: **S** is under an hour, **M** is a few hours, **L** is a day or more.
 
 ## Status (Nov 20)
 
-Done: 1.1 box, 1.2 toss a row, 1.3 the table hints and panel help (tips untouched), 1.4 parts 1 and 3 (fill by default, crisp only when it keeps 90% of the screen, fullscreen on the first run of a visit), 1.7 rival think time, 1.12 camera. Next: 1.5, 1.6, 1.10, 1.13, 1.14, 1.11, 1.8, and 1.4 part 2 (bleed into the bars).
+Done: 1.1 box, 1.2 toss a row, 1.3 the table hints and panel help (tips untouched), 1.4 parts 1 and 3 (fill by default, crisp only when it keeps 90% of the screen, fullscreen on the first run of a visit), 1.5 pack sort, 1.7 rival think time, 1.10 top bar, 1.12 camera, 1.13 Flamber (it played during the rival's count-up, so you never saw it, and a grind's card never showed), 1.14 sort chip. Next: 1.6 the booklet (needs §3 answers), 1.11 tickets and the sleeve icon (art, check the `hud/stub` work first), 1.8 boss music (music-lab), 1.4 part 2 (bleed into the bars).
 
 ## 1. The notes, traced
 
